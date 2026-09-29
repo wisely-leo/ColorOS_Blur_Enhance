@@ -5,7 +5,6 @@ import java.lang.reflect.Executable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 public final class Reflect {
 
@@ -13,23 +12,34 @@ public final class Reflect {
 
     private static final int MAX_CACHE = 512;
 
-    private static final Map<String, Method> METHOD_CACHE = new ConcurrentHashMap<>();
-    private static final Map<String, Field> FIELD_CACHE = new ConcurrentHashMap<>();
-    private static final Map<String, Constructor<?>> CTOR_CACHE = new ConcurrentHashMap<>();
-    private static final Map<String, Class<?>> CLASS_CACHE = new ConcurrentHashMap<>();
+    private static final Map<String, Method> METHOD_CACHE = newCache();
+    private static final Map<String, Field> FIELD_CACHE = newCache();
+    private static final Map<String, Constructor<?>> CTOR_CACHE = newCache();
+    private static final Map<String, Class<?>> CLASS_CACHE = newCache();
 
     private Reflect() {}
 
-    private static void capCache(Map<?, ?> cache) {
-        if (cache.size() > MAX_CACHE) {
-            try { cache.clear(); } catch (Throwable ignored) {}
-        }
+    private static <V> Map<String, V> newCache() {
+        return java.util.Collections.synchronizedMap(
+                new java.util.LinkedHashMap<String, V>(64, 0.75f, true) {
+                    @Override protected boolean removeEldestEntry(Map.Entry<String, V> eldest) {
+                        return size() > MAX_CACHE;
+                    }
+                });
+    }
+
+    private static <V> V cacheGet(Map<String, V> cache, String key) {
+        return cache.get(key);
+    }
+
+    private static <V> void cachePut(Map<String, V> cache, String key, V value) {
+        cache.put(key, value);
     }
 
     public static Method method(Class<?> c, String name, int paramCount) {
         if (c == null || name == null) return null;
         String key = c.getName() + "#n:" + name + "/" + paramCount;
-        Method hit = METHOD_CACHE.get(key);
+        Method hit = cacheGet(METHOD_CACHE, key);
         if (hit != null) return hit;
         Class<?> k = c;
         int depth = 0;
@@ -38,8 +48,7 @@ public final class Reflect {
                 for (Method m : k.getDeclaredMethods()) {
                     if (m.getName().equals(name) && m.getParameterTypes().length == paramCount) {
                         m.setAccessible(true);
-                        METHOD_CACHE.put(key, m);
-                        capCache(METHOD_CACHE);
+                        cachePut(METHOD_CACHE, key, m);
                         return m;
                     }
                 }
@@ -56,13 +65,12 @@ public final class Reflect {
             for (Class<?> p : paramTypes) sb.append(p == null ? "?" : p.getName()).append(',');
         }
         String key = sb.append(')').toString();
-        Method hit = METHOD_CACHE.get(key);
+        Method hit = cacheGet(METHOD_CACHE, key);
         if (hit != null) return hit;
         try {
             Method m = c.getMethod(name, paramTypes);
             m.setAccessible(true);
-            METHOD_CACHE.put(key, m);
-            capCache(METHOD_CACHE);
+            cachePut(METHOD_CACHE, key, m);
             return m;
         } catch (Throwable t) {
             return null;
@@ -72,15 +80,14 @@ public final class Reflect {
     public static Field field(Class<?> c, String name) {
         if (c == null || name == null) return null;
         String key = c.getName() + "#" + name;
-        Field hit = FIELD_CACHE.get(key);
+        Field hit = cacheGet(FIELD_CACHE, key);
         if (hit != null) return hit;
         Class<?> k = c;
         while (k != null && k != Object.class) {
             try {
                 Field f = k.getDeclaredField(name);
                 f.setAccessible(true);
-                FIELD_CACHE.put(key, f);
-                capCache(FIELD_CACHE);
+                cachePut(FIELD_CACHE, key, f);
                 return f;
             } catch (NoSuchFieldException nsf) {
                 k = k.getSuperclass();
@@ -94,13 +101,12 @@ public final class Reflect {
     public static Object newInstance(Class<?> c) {
         if (c == null) return null;
         String key = c.getName();
-        Constructor<?> ctor = CTOR_CACHE.get(key);
+        Constructor<?> ctor = cacheGet(CTOR_CACHE, key);
         try {
             if (ctor == null) {
                 ctor = c.getDeclaredConstructor();
                 ctor.setAccessible(true);
-                CTOR_CACHE.put(key, ctor);
-                capCache(CTOR_CACHE);
+                cachePut(CTOR_CACHE, key, ctor);
             }
             return ctor.newInstance();
         } catch (Throwable t) {
@@ -150,12 +156,11 @@ public final class Reflect {
     public static Class<?> loadClass(String name, ClassLoader loader) {
         if (loader == null) return null;
         String key = name + "@" + System.identityHashCode(loader);
-        Class<?> cached = CLASS_CACHE.get(key);
+        Class<?> cached = cacheGet(CLASS_CACHE, key);
         if (cached != null) return cached;
         try {
             Class<?> c = Class.forName(name, false, loader);
-            capCache(CLASS_CACHE);
-            CLASS_CACHE.put(key, c);
+            cachePut(CLASS_CACHE, key, c);
             return c;
         } catch (Throwable t) {
             return null;

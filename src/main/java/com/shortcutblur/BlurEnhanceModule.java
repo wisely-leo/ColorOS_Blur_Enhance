@@ -123,6 +123,12 @@ public class BlurEnhanceModule extends XposedModule {
     private static volatile long sPopupSeq = 0L;
     private static volatile long sIconAnimStartedSeq = -1L;
 
+    private static volatile boolean sOplusEffectResolved = false;
+    private static volatile Class<?> sOplusEffectCls = null;
+    private static volatile Method sSetBgRenderEffect = null;
+    private static volatile Method sSetRenderEffectViewMethod = null;
+    private static volatile boolean sOplusApiDumped = false;
+
     private static volatile boolean sFadingOut = false;
 
     private static final long SWALLOW_RESET_DELAY = 450L;
@@ -797,7 +803,7 @@ public class BlurEnhanceModule extends XposedModule {
                                                         }
                                                     }
                                                     if (a.length > 0) a[0] = Float.valueOf(clamped);
-                                                    ModuleLog.d("RECDIAG", tag + " val=" + f + " -> CLAMP " + clamped
+                                                    if (ModuleLog.ENABLED) ModuleLog.d("RECDIAG", tag + " val=" + f + " -> CLAMP " + clamped
                                                             + " scaleX=" + v.getScaleX() + " scaleY=" + v.getScaleY() + " phase=" + sRecentsPhase);
                                                     Object ret = chain.proceed(a);
 
@@ -808,7 +814,7 @@ public class BlurEnhanceModule extends XposedModule {
                                                     }
                                                     return ret;
                                                 }
-                                                ModuleLog.d("RECDIAG", tag + " val=" + f
+                                                if (ModuleLog.ENABLED) ModuleLog.d("RECDIAG", tag + " val=" + f
                                                         + " scaleX=" + v.getScaleX() + " scaleY=" + v.getScaleY()
                                                         + " tx=" + v.getTranslationX() + " ty=" + v.getTranslationY());
                                             }
@@ -1038,24 +1044,19 @@ public class BlurEnhanceModule extends XposedModule {
 
     private int resolveBlurFlags(View view) {
         if (view == null) return 0;
-        synchronized (flagsCache) {
-            Integer c = flagsCache.get(view);
-            if (c != null) return c;
-        }
+
+        Integer c = flagsCache.get(view);
+        if (c != null) return c;
         int flags = isInsideOpenFolder(view)
                 ? (F_STATIC | F_ICON | F_ICON_ANIM)
                 : (F_STATIC | F_ICON | F_WALL);
-        synchronized (flagsCache) {
-            flagsCache.put(view, flags);
-        }
+        flagsCache.put(view, flags);
         return flags;
     }
 
     private void clearBlurFlagsCache(View view) {
         if (view == null) return;
-        synchronized (flagsCache) {
-            flagsCache.remove(view);
-        }
+        flagsCache.remove(view);
     }
 
     private void armBlurForView(View view, String mid) {
@@ -1140,9 +1141,10 @@ public class BlurEnhanceModule extends XposedModule {
     }
 
     private void dumpOplusApiOnce(Class<?> cls) {
+        if (sOplusApiDumped) return;
         String key = cls.getName();
         synchronized (dumpedCls) {
-            if (!dumpedCls.add(key)) return;
+            if (!dumpedCls.add(key)) { sOplusApiDumped = true; return; }
         }
         try {
             StringBuilder sb = new StringBuilder();
@@ -1179,6 +1181,7 @@ public class BlurEnhanceModule extends XposedModule {
         } catch (Throwable t) {
             ModuleLog.e("OPLUSDUMP", "dump failed", t);
         }
+        sOplusApiDumped = true;
     }
 
     private void applyIconBlurRadius(View view, float radius, boolean useOplus) {
@@ -1193,10 +1196,10 @@ public class BlurEnhanceModule extends XposedModule {
 
             boolean oplusOk = false;
             try {
-                Class<?> cls = Reflect.loadClass(CLS_OPLUS_EFFECT, currentClassLoader());
+                Class<?> cls = resolveOplusEffectCls();
                 if (cls != null) {
                     dumpOplusApiOnce(cls);
-                    Method m = Reflect.method(cls, "setBackgroundRenderEffect", RenderEffect.class, View.class);
+                    Method m = sSetBgRenderEffect;
                     if (m != null) {
                         m.invoke(null, effect, view);
                         oplusOk = true;
@@ -1208,11 +1211,28 @@ public class BlurEnhanceModule extends XposedModule {
 
             if (!oplusOk) {
                 String err = trySetViewRenderEffect(view, effect);
-                ModuleLog.d("ICONBLUR", "fallback setRenderEffect err=" + err);
+                if (ModuleLog.ENABLED) ModuleLog.d("ICONBLUR", "fallback setRenderEffect err=" + err);
             }
         } catch (Throwable t) {
             ModuleLog.e("ICONBLUR", "applyIconBlurRadius failed", t);
         }
+    }
+
+    private Class<?> resolveOplusEffectCls() {
+        if (sOplusEffectResolved) return sOplusEffectCls;
+        synchronized (BlurEnhanceModule.class) {
+            if (sOplusEffectResolved) return sOplusEffectCls;
+            try {
+                Class<?> cls = Reflect.loadClass(CLS_OPLUS_EFFECT, currentClassLoader());
+                if (cls != null) {
+                    sSetBgRenderEffect = Reflect.method(cls, "setBackgroundRenderEffect", RenderEffect.class, View.class);
+                }
+                sOplusEffectCls = cls;
+            } finally {
+                sOplusEffectResolved = true;
+            }
+        }
+        return sOplusEffectCls;
     }
 
     private void setIconBlurArmed(View view, boolean value) {
@@ -1275,7 +1295,11 @@ public class BlurEnhanceModule extends XposedModule {
 
     private String trySetViewRenderEffect(View view, RenderEffect effect) {
         try {
-            Method m = Reflect.method(View.class, "setRenderEffect", RenderEffect.class);
+            Method m = sSetRenderEffectViewMethod;
+            if (m == null) {
+                m = Reflect.method(View.class, "setRenderEffect", RenderEffect.class);
+                sSetRenderEffectViewMethod = m;
+            }
             if (m == null) return "setRenderEffect not found";
             m.invoke(view, effect);
             return null;

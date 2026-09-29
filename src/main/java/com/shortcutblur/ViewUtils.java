@@ -11,8 +11,6 @@ public final class ViewUtils {
 
     public static final int MAX_DEPTH = 50;
 
-    private static final Rect VISIBLE_RECT = new Rect();
-
     private ViewUtils() {}
 
     public static View ancestorOfType(View v, String namePart) {
@@ -122,8 +120,8 @@ public final class ViewUtils {
             if (!v.isAttachedToWindow()) return false;
             if (!v.isShown()) return false;
             if (v.getWidth() <= 0 || v.getHeight() <= 0) return false;
-            Rect r = VISIBLE_RECT;
-            r.setEmpty();
+
+            Rect r = new Rect();
             if (!v.getGlobalVisibleRect(r)) return false;
             if (r.width() < 4 || r.height() < 4) return false;
         } catch (Throwable t) {

@@ -402,16 +402,34 @@ public class GlyphBlurRenderer {
         }
     }
 
+    private static final ThreadLocal<android.graphics.Matrix> TL_MATRIX =
+            new ThreadLocal<android.graphics.Matrix>() {
+                @Override protected android.graphics.Matrix initialValue() {
+                    return new android.graphics.Matrix();
+                }
+            };
+    private static final ThreadLocal<Path> TL_SCRATCH =
+            new ThreadLocal<Path>() {
+                @Override protected Path initialValue() { return new Path(); }
+            };
+
     static Path snapshotsToPath(GlyphSnapshot[] snaps) {
         Path out = new Path();
         if (snaps == null) return out;
+
+        Path scratch = TL_SCRATCH.get();
+        android.graphics.Matrix mtx = TL_MATRIX.get();
         for (GlyphSnapshot s : snaps) {
             if (s.localPath == null) continue;
-            Path gp = new Path(s.localPath);
-            android.graphics.Matrix mtx = new android.graphics.Matrix();
+            if (s.offX == 0f && s.offY == 0f) {
+
+                out.addPath(s.localPath);
+                continue;
+            }
+            scratch.set(s.localPath);
             mtx.setTranslate(s.offX, s.offY);
-            gp.transform(mtx);
-            out.addPath(gp);
+            scratch.transform(mtx);
+            out.addPath(scratch);
         }
         return out;
     }
@@ -442,6 +460,11 @@ public class GlyphBlurRenderer {
         private String lastLogState = null;
         private boolean ranOnce = false;
         private boolean changedLogged = false;
+
+        private final java.util.HashMap<Integer, Integer> lastOffX = new java.util.HashMap<Integer, Integer>();
+        private final java.util.HashMap<Integer, Integer> lastOffY = new java.util.HashMap<Integer, Integer>();
+        private final java.util.HashMap<Integer, String> lastText = new java.util.HashMap<Integer, String>();
+        private final StringBuilder sb = new StringBuilder(128);
 
         PollRunner(View container, Object blurDrawable) {
             this.container = container;
@@ -556,7 +579,8 @@ public class GlyphBlurRenderer {
         }
 
         private boolean pollOnce() {
-            StringBuilder sb = new StringBuilder();
+            StringBuilder sb = this.sb;
+            sb.setLength(0);
             int[] ids = ClockIds.TEXT_IDS;
             for (int id : ids) {
                 View v = container.findViewById(id);
@@ -566,8 +590,24 @@ public class GlyphBlurRenderer {
                 }
                 if (!(v instanceof TextView)) { sb.append("-"); sb.append("|"); continue; }
                 CharSequence cs = ((TextView) v).getText();
-                sb.append(cs == null ? "" : cs.toString());
-                sb.append("@").append((int) localOffsetX(v, container)).append(",").append((int) localOffsetY(v, container));
+                String text = cs == null ? "" : cs.toString();
+                sb.append(text);
+
+                Integer lo = lastOffX.get(id);
+                int ox;
+                int oy;
+                if (lo == null || !text.equals(lastText.get(id))) {
+                    ox = (int) localOffsetX(v, container);
+                    oy = (int) localOffsetY(v, container);
+                    lastOffX.put(id, Integer.valueOf(ox));
+                    lastOffY.put(id, Integer.valueOf(oy));
+                    lastText.put(id, text);
+                } else {
+                    ox = lo.intValue();
+                    Integer loft = lastOffY.get(id);
+                    oy = loft == null ? (int) localOffsetY(v, container) : loft.intValue();
+                }
+                sb.append("@").append(ox).append(",").append(oy);
                 sb.append("|");
             }
             String cur = sb.toString();
