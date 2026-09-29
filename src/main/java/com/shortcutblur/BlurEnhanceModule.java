@@ -33,6 +33,50 @@ public class BlurEnhanceModule extends XposedModule {
     private static final String CLS_OPLUS_POPUP = "com.android.launcher3.popup.OplusPopupContainerWithArrow";
     private static final String CLS_ARROW_POPUP = "com.android.launcher3.popup.ArrowPopup";
     private static final String CLS_LAUNCHER = "com.android.launcher.Launcher";
+    /** 【recents 探针】桌面内容模糊支持判定：强制 true 让系统从 alpha 渐隐切到“整体模糊”分支。 */
+    private static final String CLS_WORKSPACE_SCRIM = "com.android.launcher3.views.WorkSpaceScrimView";
+    /** recents desktop content container (FrameLayout, plain View, RenderEffect-able). */
+    private static final String CLS_OPLUS_DRAGLAYER = "com.android.launcher3.OplusDragLayer";
+    /** max blur radius mapping alpha 1->0 to 0->MAX. */
+    private static final float RECENTS_BLUR_MAX = 64.0f;
+    /** last applied recents blur radius (idempotent; avoid redundant setRenderEffect). */
+    private static volatile float sRecentsLastRadius = -1.0f;
+    /** smooth-anim state for recents blur radius (avoid alpha-driven jumps). */
+    private static volatile ValueAnimator sRecentsBlurAnim = null;
+    private static volatile float sRecentsAnimRadius = 0.0f;
+    /** [v10] current depth-zoom scale of the DragLayer (1.0 = normal). Used to compensate blur. */
+    private static volatile float sDragScale = 1.0f;
+    /** [v10] the view currently carrying the recents self-blur (DragLayer). */
+    private static volatile View sRecentsBlurView = null;
+    /** [v10] last target radius (before scale compensation); -1 = inactive. */
+    private static volatile float sRecentsTargetRadius = -1.0f;
+    /** [v15] explicit recents state machine: 0=IDLE, 1=ENTERING, 2=IN_RECENTS, 3=EXITING.
+     *  Prevents the progressive blur anim from being replayed on re-entry and prevents
+     *  clearing while still inside recents. */
+    private static volatile int sRecentsPhase = 0;
+    /** [v15] true once the progressive (0->MAX) blur has been applied for the CURRENT entry. */
+    private static volatile boolean sRecentsBlurDoneForEntry = false;
+    /** [v18] fade-in (enter) / fade-out (exit) durations. */
+    private static final long ENTER_FADE_MS = 180L;
+    private static final long EXIT_FADE_MS = 120L;
+    /** [v18] running enter fade-in anim (0 -> MAX), started ONCE per entry. */
+    private static volatile ValueAnimator sRecentsEnterAnim = null;
+    /** [v18] running exit fade-out anim (current -> 0), started ONCE per exit. */
+    private static volatile ValueAnimator sRecentsExitAnim = null;
+    /** [v22] exit-armed: true only after the scale actually reached the recents resting value
+     *  (<= 0.925). This decouples the two thresholds: enter is detected early (f < 0.99),
+     *  while exit (f >= 0.93) can only fire AFTER a real entry completed -> no false exit
+     *  on the intermediate frames of the enter transition. */
+    private static volatile boolean sRecentsArmed = false;
+    /** [v23] pending delayed-arm: exit is only armed after the scale has STAYED at the recents
+     *  resting value (<=0.925) for ARM_DELAY_MS. This prevents the enter transition's brief
+     *  0.9 -> 0.99 -> 0.92 jitter from arming prematurely (which caused false exits + residual). */
+    private static final long ARM_DELAY_MS = 180L;
+    private static Runnable sPendingArm = null;
+    /** delayed-clear state: we only hard-clear after alpha stays >=1 without a new descent. */
+    private static final android.os.Handler sRecentsHandler =
+            new android.os.Handler(android.os.Looper.getMainLooper());
+    private static Runnable sPendingClear = null;
 
     private static final String CLS_OPLUS_EFFECT = "com.oplus.view.OplusViewBackgroundRenderEffect";
     private static final String CLS_DRAWABLE = "android.graphics.drawable.Drawable";
@@ -79,7 +123,6 @@ public class BlurEnhanceModule extends XposedModule {
 
     private volatile RenderEffect blurEffect;
 
-    private static final Map<String, Class<?>> CLASS_CACHE = new ConcurrentHashMap<>();
     /** shortcut 弹窗打开窗口期：期间吞掉 pauseWindowBlur，保持 posteffect 模糊服务持续采样（=保住动态）。 */
     static volatile boolean sShortcutBlurActive = false;
     /** 【图标模糊新挂点】独立空 View（照 Stack.mBlurEffectView 做法）：在图标之上、菜单之下，避免挂容器吃掉图标。 */
@@ -228,24 +271,25 @@ public class BlurEnhanceModule extends XposedModule {
 
         Set<Method> hooked = new HashSet<>();
         try {
-            Class<?> cls = loadClass(CLS_POPUP_BLUR_VIEW, loader);
+            Class<?> cls = Reflect.loadClass(CLS_POPUP_BLUR_VIEW, loader);
             if (cls != null) {
                 r.total += hookViewReturningMethod(cls, M_GET_POP_BLUR_VIEW, "pbv");
                 r.total += hookPopupFinish(cls);
             }
-            Class<?> comp = loadClass(CLS_POPUP_BLUR_VIEW + "$Companion", loader);
+            Class<?> comp = Reflect.loadClass(CLS_POPUP_BLUR_VIEW + "$Companion", loader);
             if (comp != null) {
                 r.total += hookViewReturningMethod(comp, M_GET_POP_BLUR_VIEW, "pbv_companion");
             }
 
             for (String cn : new String[]{CLS_OPLUS_POPUP, CLS_ARROW_POPUP, CLS_POPUP_BLUR_VIEW}) {
-                Class<?> ac = loadClass(cn, loader);
+                Class<?> ac = Reflect.loadClass(cn, loader);
                 if (ac == null) continue;
                 r.critical += hookPopupOpenCloseAnimation(ac, "onCreateOpenAnimation", true, hooked);
                 r.critical += hookPopupOpenCloseAnimation(ac, "onCreateCloseAnimation", false, hooked);
             }
             r.total += r.critical;
             r.total += installSwallowPauseHook(loader);
+            r.total += installRecentsIconBlurProbe(loader);
             ModuleLog.d("INSTALL", "critical=" + r.critical + " total=" + r.total);
         } catch (Throwable t) {
             ModuleLog.e("INSTALL", "installHooks failed", t);
@@ -262,7 +306,7 @@ public class BlurEnhanceModule extends XposedModule {
                 if (pt.length != 2) continue;
                 if (!"android.view.ViewGroup".equals(pt[0].getName())) continue;
                 if (pt[1] != boolean.class) continue;
-                setAccessibleQuietly(m);
+                Reflect.setAccessible(m);
                 hook((Executable) m)
                         .setId("iconblur.finish")
                         .setExceptionMode(XposedInterface.ExceptionMode.DEFAULT)
@@ -313,7 +357,7 @@ public class BlurEnhanceModule extends XposedModule {
                         ModuleLog.d("INSTALL", "skip dup hook " + c.getName() + "." + methodName);
                         continue;
                     }
-                    setAccessibleQuietly(m);
+                    Reflect.setAccessible(m);
                     hook((Executable) m)
                             .setId("iconblur.opa." + methodName)
                             .setExceptionMode(XposedInterface.ExceptionMode.DEFAULT)
@@ -326,7 +370,7 @@ public class BlurEnhanceModule extends XposedModule {
                                     try {
                                         View anchor = null;
                                         if (self != null) {
-                                            Object pbv = getFieldQuietlyAny(self, "mPopBlurView");
+                                            Object pbv = Reflect.readField(self, "mPopBlurView");
                                             if (pbv instanceof View) anchor = (View) pbv;
                                             if (anchor == null && self instanceof View) anchor = (View) self;
                                         }
@@ -526,10 +570,493 @@ public class BlurEnhanceModule extends XposedModule {
         }
     }
 
+    /**
+     * 【recents 探针】hook WorkSpaceScrimView.supportIconBlur() -> 强制 true。
+     * 系统在 LauncherContentAnimManager.startLauncherViewAnim 里用 ignoreAlphaAnim = isSupportIconBlur()
+     * 决定：true = 忽略 alpha 渐隐、走整体模糊；false = alpha 渐隐（桌面整体渐变消失）。
+     * 本探针只改返回值，并打印原判定，便于定位。
+     */
+    /**
+     * Smoothly animate the recents desktop-blur radius on a View. Never jumps: it always
+     * eases from the current radius to the target (~140ms). target<=0 fades out then clears.
+     */
+
+    private void cancelPendingRecentsClear() {
+        Runnable r = sPendingClear;
+        if (r != null) {
+            try { sRecentsHandler.removeCallbacks(r); } catch (Throwable ignore) {}
+            sPendingClear = null;
+        }
+    }
+
+    /**
+     * Ensure a fullscreen cover View exists as a sibling of the DragLayer (added into its parent),
+     * so it is NOT affected by the depth-zoom (scale/translate) applied to the DragLayer itself.
+     */
+    /**
+     * [v9] Apply recents desktop blur DIRECTLY on the DragLayer (View.setRenderEffect on itself).
+     * v8's approach (fullscreen cover + setBackgroundRenderEffect = capture behind entire screen)
+     * was proven to crush the renderer (no Java crash, but load 22+ and launcher killed).
+     * We go back to the cheap & stable self-blur; the "blur shrinks with depth-zoom" issue will be
+     * handled by compensating against the scale we now log.
+     */
+
+    /** [v18] Start the one-shot enter fade-in (0 -> MAX, ENTER_FADE_MS). */
+    private void startEnterFadeIn(final View v) {
+        ValueAnimator old = sRecentsEnterAnim;
+        if (old != null) { try { old.cancel(); } catch (Throwable ignore) {} sRecentsEnterAnim = null; }
+        final ValueAnimator va = ValueAnimator.ofFloat(0.0f, RECENTS_BLUR_MAX);
+        va.setDuration(ENTER_FADE_MS);
+        va.setInterpolator(new DecelerateInterpolator());
+        va.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+            @Override public void onAnimationUpdate(ValueAnimator a) {
+                float r = ((Number) a.getAnimatedValue()).floatValue();
+                sRecentsAnimRadius = r;
+                sRecentsLastRadius = r;
+                applySelfBlur(v, r);
+            }
+        });
+        va.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(android.animation.Animator a) {
+                sRecentsAnimRadius = RECENTS_BLUR_MAX;
+                sRecentsLastRadius = RECENTS_BLUR_MAX;
+                applySelfBlur(v, RECENTS_BLUR_MAX);
+                if (sRecentsPhase == 1) {
+                    sRecentsPhase = 2;
+                    ModuleLog.d("DRAGALPHA", "phase ENTERING -> IN_RECENTS (fade-in done)");
+                }
+            }
+        });
+        sRecentsEnterAnim = va;
+        try { va.start(); } catch (Throwable t) { ModuleLog.e("DRAGALPHA", "enter anim start failed", t); }
+        ModuleLog.d("DRAGALPHA", "enter fade-in started (0 -> " + RECENTS_BLUR_MAX + ")");
+    }
+
+    /** [v18] Start the one-shot exit fade-out (current -> 0, EXIT_FADE_MS), then hard drop. */
+    /** [v23] Cancel any pending delayed-arm task. */
+    private void clearPendingArm() {
+        if (sPendingArm != null) {
+            try { sRecentsHandler.removeCallbacks(sPendingArm); } catch (Throwable ignore) {}
+            sPendingArm = null;
+        }
+    }
+
+    /** [v20] Immediately finish the exit: cancel the fade-out anim, drop the render effect,
+     *  and go back to IDLE. Called the moment the DragLayer actually reaches scale 1.0
+     *  (desktop fully restored), so no lingering "fog" remains after returning to the desktop. */
+    private void finishExitNow(final View v, final String why) {
+        ValueAnimator oldX = sRecentsExitAnim;
+        if (oldX != null) { try { oldX.cancel(); } catch (Throwable ignore) {} sRecentsExitAnim = null; }
+        ValueAnimator oldE = sRecentsEnterAnim;
+        if (oldE != null) { try { oldE.cancel(); } catch (Throwable ignore) {} sRecentsEnterAnim = null; }
+        sRecentsAnimRadius = 0.0f;
+        sRecentsLastRadius = -1.0f;
+        sRecentsBlurView = null;
+        sRecentsTargetRadius = -1.0f;
+        sRecentsPhase = 0;
+        sRecentsBlurDoneForEntry = false;
+        sRecentsArmed = false;
+        clearPendingArm();
+        if (v != null) { try { v.setRenderEffect(null); } catch (Throwable ignore) {} }
+        ModuleLog.d("DRAGALPHA", why + " -> exit finished NOW (phase=IDLE)");
+    }
+
+    private void startExitFadeOut(final View v, final String why) {
+        final float from = Math.max(0.0f, sRecentsLastRadius);
+        // cancel any running enter fade-in first
+        ValueAnimator oldE = sRecentsEnterAnim;
+        if (oldE != null) { try { oldE.cancel(); } catch (Throwable ignore) {} sRecentsEnterAnim = null; }
+        ValueAnimator oldX = sRecentsExitAnim;
+        if (oldX != null) { try { oldX.cancel(); } catch (Throwable ignore) {} sRecentsExitAnim = null; }
+        sRecentsPhase = 3; // EXITING gate: no enter may start during the fade-out
+        final ValueAnimator va = ValueAnimator.ofFloat(from, 0.0f);
+        va.setDuration(EXIT_FADE_MS);
+        va.setInterpolator(new DecelerateInterpolator());
+        va.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+            @Override public void onAnimationUpdate(ValueAnimator a) {
+                float r = ((Number) a.getAnimatedValue()).floatValue();
+                sRecentsAnimRadius = r;
+                sRecentsLastRadius = r;
+                applySelfBlur(v, r);
+            }
+        });
+        va.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(android.animation.Animator a) {
+                sRecentsExitAnim = null;
+                // fully drop the render effect and reset to IDLE
+                sRecentsAnimRadius = 0.0f;
+                sRecentsLastRadius = -1.0f;
+                sRecentsBlurView = null;
+                sRecentsTargetRadius = -1.0f;
+                sRecentsPhase = 0;
+                sRecentsBlurDoneForEntry = false;
+                sRecentsArmed = false;
+                clearPendingArm();
+                if (v != null) { try { v.setRenderEffect(null); } catch (Throwable ignore) {} }
+                ModuleLog.d("DRAGALPHA", why + " -> exit fade-out done (phase=IDLE)");
+            }
+        });
+        sRecentsExitAnim = va;
+        try { va.start(); } catch (Throwable t) { ModuleLog.e("DRAGALPHA", "exit anim start failed", t); }
+        ModuleLog.d("DRAGALPHA", "exit fade-out started (" + from + " -> 0, why=" + why + ")");
+    }
+
+    /**
+     * [v10] Cheap self-blur on the given view, with depth-zoom compensation.
+     * The DragLayer is scaled by sDragScale during the recents "depth" anim; a blur drawn on it
+     * would visually shrink with that scale. To keep the *visual* radius constant we DIVIDE the
+     * radius we set by the current scale (r_visual = r / scale).
+     */
+    private void applySelfBlur(View v, float r) {
+        if (v == null) return;
+        sRecentsBlurView = v;
+        sRecentsTargetRadius = r;
+        // [v11] scale is pinned to 1.0 by the setScaleX/Y hook, so no compensation needed.
+        float rApplied = r;
+        try {
+            v.setRenderEffect(rApplied > 0.5f
+                    ? RenderEffect.createBlurEffect(rApplied, rApplied, Shader.TileMode.MIRROR)
+                    : null);
+        } catch (Throwable ignore) {}
+    }
+
+
+
+    /** Hard-clear recents blur (cancel any running anim, drop RenderEffect). */
+    private void forceClearRecentsBlur(View v, String why) {
+        ValueAnimator old = sRecentsBlurAnim;
+        if (old != null) {
+            try { old.cancel(); } catch (Throwable ignore) {}
+            sRecentsBlurAnim = null;
+        }
+        sRecentsAnimRadius = 0.0f;
+        sRecentsLastRadius = -1.0f;
+        sRecentsBlurView = null;
+        sRecentsTargetRadius = -1.0f;
+        // [v15] reset the state machine to IDLE so a later enter starts fresh (with one ramp).
+        sRecentsPhase = 0;
+        sRecentsBlurDoneForEntry = false;
+        if (v != null) {
+            try { v.setRenderEffect(null); } catch (Throwable ignore) {}
+        }
+        ModuleLog.d("DRAGALPHA", why + " -> hard clear (phase=IDLE)");
+    }
+
+    private int installRecentsIconBlurProbe(ClassLoader loader) {
+        int n = 0;
+        try {
+            Class<?> cls = Reflect.loadClass(CLS_WORKSPACE_SCRIM, loader);
+            if (cls == null) {
+                ModuleLog.d("RECENTS", "[miss] " + CLS_WORKSPACE_SCRIM);
+                return 0;
+            }
+            for (Method m : cls.getDeclaredMethods()) {
+                if (!m.getName().equals("supportIconBlur")) continue;
+                if (m.getParameterTypes().length != 0) continue;
+                if (m.getReturnType() != boolean.class) continue;
+                Reflect.setAccessible(m);
+                hook((Executable) m)
+                        .setId("recents.supportIconBlur")
+                        .setExceptionMode(XposedInterface.ExceptionMode.DEFAULT)
+                        .intercept(new XposedInterface.Hooker() {
+                            @Override
+                            public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                                Object raw = chain.proceed();
+                                boolean orig = (raw instanceof Boolean) && ((Boolean) raw).booleanValue();
+                                ModuleLog.d("RECENTS", "supportIconBlur() orig=" + orig + " -> force true");
+                                return Boolean.TRUE;
+                            }
+                        });
+                n++;
+                ModuleLog.d("RECENTS", "[hook] supportIconBlur -> force true");
+            }
+            if (n == 0) ModuleLog.d("RECENTS", "[miss] supportIconBlur() not found");
+
+        // ===== intercept desktop fade-out: hook OplusDragLayer.setAlpha(F) =====
+        try {
+            Class<?> dl = Reflect.loadClass(CLS_OPLUS_DRAGLAYER, loader);
+            if (dl == null) {
+                ModuleLog.d("RECENTS", "[miss] " + CLS_OPLUS_DRAGLAYER);
+            } else {
+                for (Method mm : dl.getDeclaredMethods()) {
+                    if (!mm.getName().equals("setAlpha")) continue;
+                    Class<?>[] pt = mm.getParameterTypes();
+                    if (pt.length != 1 || pt[0] != float.class) continue;
+                    Reflect.setAccessible(mm);
+                    hook((Executable) mm)
+                            .setId("recents.dragAlpha")
+                            .setExceptionMode(XposedInterface.ExceptionMode.DEFAULT)
+                            .intercept(new XposedInterface.Hooker() {
+                                @Override
+                                public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                                    Object self = chain.getThisObject();
+                                    Object[] args = chain.getArgs().toArray();
+                                    float a = (args.length > 0 && args[0] instanceof Number)
+                                            ? ((Number) args[0]).floatValue() : 1.0f;
+                                    try {
+                                        if (self instanceof View) {
+                                            View v = (View) self;
+                                            float cur = v.getAlpha();
+                                            ModuleLog.d("DRAGALPHA", "setAlpha a=" + a + " cur=" + cur);
+                                            if (a < 0.999f) {
+                                                // [v19] the enter decision is now driven by the scale TARGET value
+                                                // (see setScaleX/Y hook). setAlpha only logs; it must NOT start the
+                                                // fade-in anymore (that caused double triggers).
+                                                ModuleLog.d("DRAGALPHA", "setAlpha descent (log only, enter by scale)");
+                                                args[0] = 1.0f;
+                                                return chain.proceed(args);
+                                            } else {
+                                                ModuleLog.d("DRAGALPHA", "alpha>=1 (log only)");
+                                            }
+                                        }
+                                    } catch (Throwable t) {
+                                        ModuleLog.e("DRAGALPHA", "intercept failed", t);
+                                    }
+                                    return chain.proceed();
+                                }
+                            });
+                    n++;
+                    ModuleLog.d("RECENTS", "[hook] OplusDragLayer.setAlpha -> intercept");
+                }
+            }
+        } catch (Throwable t) {
+            ModuleLog.e("RECENTS", "hook dragLayer alpha failed", t);
+        }
+
+        // ===== [v9 diagnostic] log scale/translation/visibility on DragLayer (READ-ONLY, no behavior change) =====
+        try {
+            Class<?> dls = Reflect.loadClass(CLS_OPLUS_DRAGLAYER, loader);
+            if (dls != null) {
+                for (String sn : new String[]{"setScaleX", "setScaleY", "setTranslationX", "setTranslationY", "setScaleXByTaskView", "setScaleYByTaskView", "setTranslationXByTaskView", "setTranslationYByTaskView"}) {
+                    for (Method sm : dls.getDeclaredMethods()) {
+                        if (!sm.getName().equals(sn)) continue;
+                        Class<?>[] pt = sm.getParameterTypes();
+                        if (pt.length != 1 || pt[0] != float.class) continue;
+                        Reflect.setAccessible(sm);
+                        final String tag = sn;
+                        hook((Executable) sm)
+                                .setId("recents.diag." + sn)
+                                .setExceptionMode(XposedInterface.ExceptionMode.DEFAULT)
+                                .intercept(new XposedInterface.Hooker() {
+                                    @Override
+                                    public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                                        Object self = chain.getThisObject();
+                                        Object[] a = chain.getArgs().toArray();
+                                        float f = (a.length > 0 && a[0] instanceof Number)
+                                                ? ((Number) a[0]).floatValue() : 0f;
+                                        try {
+                                            if (self instanceof View) {
+                                                View v = (View) self;
+                                                if (tag.equals("setScaleX") || tag.equals("setScaleY")) {
+                                                    // clamp: never allow a scale below 0.92 (max back-off = 0.92).
+                                                    float clamped = Math.max(f, 0.92f);
+                                                    // [v24] DIRECTION-BASED detection (matches the real scale trajectory).
+                                                    // Evidence: entering recents = scale falls 1.0 -> 0.92; leaving = rises 0.92 -> 1.0.
+                                                    // Both go through the SAME intermediate values, so value alone can't tell them
+                                                    // apart -- the DIRECTION of travel can. We track the previous scale and look at
+                                                    // which side of the 0.96 midpoint the transition CROSSES.
+                                                    float prev = sDragScale;
+                                                    sDragScale = clamped;
+                                                    // ENTER: crossing 0.96 downward (from above to below) = heading to recents.
+                                                    if (prev >= 0.96f && clamped < 0.96f) {
+                                                        if (sRecentsPhase == 0) {
+                                                            sRecentsPhase = 1;
+                                                            ModuleLog.d("EXITPROBE", "down-cross 0.96 (" + tag + " " + prev + "->" + clamped + ") = ENTER recents -> fade-in");
+                                                            cancelPendingRecentsClear();
+                                                            startEnterFadeIn(v);
+                                                        }
+                                                    }
+                                                    // EXIT: crossing 0.96 upward (from below to above) = heading back to desktop.
+                                                    else if (prev <= 0.96f && clamped > 0.96f) {
+                                                        if (sRecentsPhase == 1 || sRecentsPhase == 2) {
+                                                            ModuleLog.d("EXITPROBE", "up-cross 0.96 (" + tag + " " + prev + "->" + clamped + ") = EXIT recents -> fade-out, radius=" + sRecentsLastRadius);
+                                                            cancelPendingRecentsClear();
+                                                            startExitFadeOut(v, "scaleRestore");
+                                                        }
+                                                    }
+                                                    if (a.length > 0) a[0] = Float.valueOf(clamped);
+                                                    ModuleLog.d("RECDIAG", tag + " val=" + f + " -> CLAMP " + clamped
+                                                            + " scaleX=" + v.getScaleX() + " scaleY=" + v.getScaleY() + " phase=" + sRecentsPhase);
+                                                    Object ret = chain.proceed(a);
+                                                    // [v20] desktop fully restored: once the ACTUAL scaleX & scaleY
+                                                    // are both 1.0 while we are EXITING, finish the fade-out instantly
+                                                    // (no lingering fog after returning to the desktop).
+                                                    if (sRecentsPhase == 3
+                                                            && v.getScaleX() >= 0.999f && v.getScaleY() >= 0.999f) {
+                                                        ModuleLog.d("EXITPROBE", "actual scale reached 1.0 -> finish exit NOW");
+                                                        finishExitNow(v, "scaleActual1.0");
+                                                    }
+                                                    return ret;
+                                                }
+                                                ModuleLog.d("RECDIAG", tag + " val=" + f
+                                                        + " scaleX=" + v.getScaleX() + " scaleY=" + v.getScaleY()
+                                                        + " tx=" + v.getTranslationX() + " ty=" + v.getTranslationY());
+                                            }
+                                        } catch (Throwable ignore) {}
+                                        return chain.proceed();
+                                    }
+                                });
+                        n++;
+                        ModuleLog.d("RECDIAG", "[hook] " + sn);
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            ModuleLog.e("RECDIAG", "hook scale diag failed", t);
+        }
+
+        // ===== force-clear on reset / exit-recents =====
+        for (String rn : new String[]{"resetGaussianAnimState", "resetViewsProperty"}) {
+            try {
+                Class<?> dl2 = Reflect.loadClass(CLS_OPLUS_DRAGLAYER, loader);
+                if (dl2 == null) break;
+                for (Method rm : dl2.getDeclaredMethods()) {
+                    if (!rm.getName().equals(rn)) continue;
+                    Reflect.setAccessible(rm);
+                    final String rid = rn;
+                    hook((Executable) rm)
+                            .setId("recents.reset." + rn)
+                            .setExceptionMode(XposedInterface.ExceptionMode.DEFAULT)
+                            .intercept(new XposedInterface.Hooker() {
+                                @Override
+                                public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                                    Object self = chain.getThisObject();
+                                    ModuleLog.d("EXITPROBE", "reset(" + rid + ") radius=" + sRecentsLastRadius);
+                                    if (self instanceof View) {
+                                        forceClearRecentsBlur((View) self, "reset(" + rid + ")");
+                                    }
+                                    return chain.proceed();
+                                }
+                            });
+                    n++;
+                    ModuleLog.d("RECENTS", "[hook] OplusDragLayer." + rn + " -> clear");
+                }
+            } catch (Throwable t) {
+                ModuleLog.e("RECENTS", "hook " + rn + " failed", t);
+            }
+        }
+
+        // ===== fallback: desktop window becomes visible again -> hard clear =====
+        try {
+            Class<?> dl3 = Reflect.loadClass(CLS_OPLUS_DRAGLAYER, loader);
+            if (dl3 != null) {
+                for (Method vm : dl3.getDeclaredMethods()) {
+                    String mn = vm.getName();
+                    boolean isVis = mn.equals("onWindowVisibilityChanged");
+                    boolean isAbtv = mn.equals("setAlphaByTaskView");
+                    if (!isVis && !isAbtv) continue;
+                    Class<?>[] pt = vm.getParameterTypes();
+                    if (isVis && (pt.length != 1 || pt[0] != int.class)) continue;
+                    if (isAbtv && (pt.length != 1 || pt[0] != float.class)) continue;
+                    Reflect.setAccessible(vm);
+                    final boolean visCall = isVis;
+                    hook((Executable) vm)
+                            .setId("recents.fallback." + mn)
+                            .setExceptionMode(XposedInterface.ExceptionMode.DEFAULT)
+                            .intercept(new XposedInterface.Hooker() {
+                                @Override
+                                public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                                    Object self = chain.getThisObject();
+                                    Object[] args = chain.getArgs().toArray();
+                                    try {
+                                        if (visCall) {
+                                            int vis = (args.length > 0 && args[0] instanceof Number)
+                                                    ? ((Number) args[0]).intValue() : -1;
+                                            ModuleLog.d("EXITPROBE", "onWindowVisibilityChanged vis=" + vis + " radius=" + sRecentsLastRadius);
+                                            if (vis == View.VISIBLE && self instanceof View && sRecentsLastRadius >= 0.0f) {
+                                                cancelPendingRecentsClear();
+                                                forceClearRecentsBlur((View) self, "windowVisible");
+                                            }
+                                        } else {
+                                            float a = (args.length > 0 && args[0] instanceof Number)
+                                                    ? ((Number) args[0]).floatValue() : 1.0f;
+                                            ModuleLog.d("EXITPROBE", "setAlphaByTaskView a=" + a + " radius=" + sRecentsLastRadius);
+                                            if (a >= 0.999f && self instanceof View && sRecentsLastRadius >= 0.0f) {
+                                                forceClearRecentsBlur((View) self, "alphaByTaskView>=1");
+                                            }
+                                        }
+                                    } catch (Throwable t) {
+                                        ModuleLog.e("RECENTS", "fallback body failed", t);
+                                    }
+                                    return chain.proceed();
+                                }
+                            });
+                    n++;
+                    ModuleLog.d("RECENTS", "[hook] fallback " + mn);
+                }
+            }
+        } catch (Throwable t) {
+            ModuleLog.e("RECENTS", "hook fallback failed", t);
+        }
+        } catch (Throwable t) {
+            ModuleLog.e("RECENTS", "installRecentsIconBlurProbe failed", t);
+        }
+        // ===== [v14] REAL exit signals: startFadeInAnim() + Launcher.onResume() =====
+        // startFadeInAnim() = ValueAnimator(0.0 -> 1.0), the desktop fading back IN after leaving recents.
+        try {
+            Class<?> dlf = Reflect.loadClass(CLS_OPLUS_DRAGLAYER, loader);
+            if (dlf != null) {
+                for (Method fm : dlf.getDeclaredMethods()) {
+                    if (!fm.getName().equals("startFadeInAnim")) continue;
+                    if (fm.getParameterTypes().length != 0) continue;
+                    Reflect.setAccessible(fm);
+                    hook((Executable) fm)
+                            .setId("recents.exit.fadeIn")
+                            .setExceptionMode(XposedInterface.ExceptionMode.DEFAULT)
+                            .intercept(new XposedInterface.Hooker() {
+                                @Override
+                                public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                                    Object self = chain.getThisObject();
+                                    // [v17] log only: measured to fire once at cold start, never on exit.
+                                    ModuleLog.d("EXITPROBE", "startFadeInAnim (log only) radius=" + sRecentsLastRadius + " phase=" + sRecentsPhase);
+                                    return chain.proceed();
+                                }
+                            });
+                    n++;
+                    ModuleLog.d("RECENTS", "[hook] startFadeInAnim -> exit clear");
+                }
+            }
+        } catch (Throwable t) {
+            ModuleLog.e("EXITPROBE", "hook startFadeInAnim failed", t);
+        }
+
+        // Launcher.onResume() = desktop activity resumed = definitely back on the desktop.
+        try {
+            Class<?> lc = Reflect.loadClass(CLS_LAUNCHER, loader);
+            if (lc != null) {
+                for (Method rm : lc.getDeclaredMethods()) {
+                    if (!rm.getName().equals("onResume")) continue;
+                    if (rm.getParameterTypes().length != 0) continue;
+                    Reflect.setAccessible(rm);
+                    hook((Executable) rm)
+                            .setId("recents.exit.launcherResume")
+                            .setExceptionMode(XposedInterface.ExceptionMode.DEFAULT)
+                            .intercept(new XposedInterface.Hooker() {
+                                @Override
+                                public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                                    Object self = chain.getThisObject();
+                                    // [v17] onResume fires DURING the enter transition too (log evidence t=8708:
+                                    // onResume while already phase=2 in recents) -> it is NOT an exit signal.
+                                    // Keep it as pure logging; exit is driven by the scale-restore signal.
+                                    ModuleLog.d("EXITPROBE", "Launcher.onResume (log only) radius=" + sRecentsLastRadius + " phase=" + sRecentsPhase);
+                                    return chain.proceed();
+                                }
+                            });
+                    n++;
+                    ModuleLog.d("RECENTS", "[hook] Launcher.onResume -> exit clear");
+                }
+            }
+        } catch (Throwable t) {
+            ModuleLog.e("EXITPROBE", "hook Launcher.onResume failed", t);
+        }
+
+        return n;
+    }
+
     private int installSwallowPauseHook(ClassLoader loader) {
         int n = 0;
         try {
-            Class<?> cls = loadClass(CLS_BLUR_MGR, loader);
+            Class<?> cls = Reflect.loadClass(CLS_BLUR_MGR, loader);
             if (cls == null) {
                 ModuleLog.d("PAUSE", "[miss] " + CLS_BLUR_MGR);
                 return 0;
@@ -537,7 +1064,7 @@ public class BlurEnhanceModule extends XposedModule {
             for (String name : new String[]{"pauseWindowBlur", "resumeWindowBlur"}) {
                 for (Method m : cls.getDeclaredMethods()) {
                     if (!m.getName().equals(name)) continue;
-                    setAccessibleQuietly(m);
+                    Reflect.setAccessible(m);
                     final boolean isPause = "pauseWindowBlur".equals(name);
                     hook((Executable) m)
                             .setId("swallow.pause." + name + "." + m.getParameterTypes().length)
@@ -568,7 +1095,7 @@ public class BlurEnhanceModule extends XposedModule {
         try {
             for (Method m : cls.getDeclaredMethods()) {
                 if (!m.getName().equals(methodName)) continue;
-                setAccessibleQuietly(m);
+                Reflect.setAccessible(m);
                 final String mid = id + "#" + m.getParameterTypes().length;
                 hook((Executable) m)
                         .setId("hook." + mid)
@@ -679,12 +1206,12 @@ public class BlurEnhanceModule extends XposedModule {
                             ModuleLog.d("DEPTH", "launcher null, skip retry");
                             return;
                         }
-                        Object dc = invokeNoArgQuietly(launcher, "getDepthController");
+                        Object dc = Reflect.call(launcher, "getDepthController");
                         if (dc == null) {
                             ModuleLog.d("DEPTH", "depthController null");
                             return;
                         }
-                        Object g = invokeNoArgQuietly(dc, "getCurrentBlur");
+                        Object g = Reflect.call(dc, "getCurrentBlur");
                         float v = (g instanceof Float) ? (Float) g : -1f;
                         ModuleLog.d("DEPTH", "currentBlur=" + v);
                         if (v <= 0.05f) {
@@ -759,10 +1286,10 @@ public class BlurEnhanceModule extends XposedModule {
 
             boolean oplusOk = false;
             try {
-                Class<?> cls = loadClass(CLS_OPLUS_EFFECT, currentClassLoader());
+                Class<?> cls = Reflect.loadClass(CLS_OPLUS_EFFECT, currentClassLoader());
                 if (cls != null) {
                     dumpOplusApiOnce(cls);
-                    Method m = findMethodCached(cls, "setBackgroundRenderEffect", RenderEffect.class, View.class);
+                    Method m = Reflect.method(cls, "setBackgroundRenderEffect", RenderEffect.class, View.class);
                     if (m != null) {
                         m.invoke(null, effect, view);
                         oplusOk = true;
@@ -798,14 +1325,6 @@ public class BlurEnhanceModule extends XposedModule {
             return armed.containsKey(view);
         }
     }
-    private RenderEffect getBlurEffect() {
-        RenderEffect e = blurEffect;
-        if (e == null) {
-            e = RenderEffect.createBlurEffect(BLUR_RADIUS, BLUR_RADIUS, Shader.TileMode.MIRROR);
-            blurEffect = e;
-        }
-        return e;
-    }
 
     /**
      * @param animate true = 走 0→BLUR_RADIUS 渐进动画（有模糊半径过渡）；false = 一次性设置（旧行为，会“清晰→糊”硬切）。
@@ -822,62 +1341,30 @@ public class BlurEnhanceModule extends XposedModule {
         }
     }
 
-    private static void setAccessibleQuietly(Executable e) {
-        try {
-            e.setAccessible(true);
-        } catch (Throwable ignore) {
-        }
-    }
 
-    private void clearIconBlur(View view) {
-
-        setIconBlurArmed(view, false);
-        try {
-            Class<?> cls = loadClass(CLS_OPLUS_EFFECT, currentClassLoader());
-            if (cls != null) {
-                Method m = findMethodCached(cls, "setBackgroundRenderEffect", RenderEffect.class, View.class);
-                if (m != null) {
-                    m.invoke(null, null, view);
-                    ModuleLog.d("CLEAR", "icon blur cleared via oplus");
-                    return;
-                }
-            }
-        } catch (Throwable t) {
-            ModuleLog.e("CLEAR", "oplus clear failed", t);
-        }
-        try {
-            Method m = findMethodCached(View.class, "setRenderEffect", RenderEffect.class);
-            if (m != null) {
-                m.invoke(view, (Object) null);
-                ModuleLog.d("CLEAR", "icon blur cleared via View");
-            }
-        } catch (Throwable t) {
-            ModuleLog.d("CLEAR", "icon blur clear failed: " + t);
-        }
-    }
 
     private void clearStaticLayers(View view) {
         try {
-            Class<?> drawableCls = loadClass(CLS_DRAWABLE, currentClassLoader());
+            Class<?> drawableCls = Reflect.loadClass(CLS_DRAWABLE, currentClassLoader());
             boolean wall = false;
             boolean drag = false;
 
             if (drawableCls != null) {
-                Method mw = findMethodCached(view.getClass(), "setWallpaperDrawable", drawableCls);
+                Method mw = Reflect.method(view.getClass(), "setWallpaperDrawable", drawableCls);
                 if (mw != null) {
                     try { mw.invoke(view, (Object) null); wall = true; } catch (Throwable ignore) {}
                 }
-                Method md = findMethodCached(view.getClass(), "setDragLayerDrawable", drawableCls);
+                Method md = Reflect.method(view.getClass(), "setDragLayerDrawable", drawableCls);
                 if (md != null) {
                     try { md.invoke(view, (Object) null); drag = true; } catch (Throwable ignore) {}
                 }
             }
 
-            Field f = findField(view.getClass(), "mIsBlurUnavailable");
+            Field f = Reflect.field(view.getClass(), "mIsBlurUnavailable");
             if (f != null) {
                 try { f.setBoolean(view, true); } catch (Throwable ignore) {}
             }
-            invokeNoArgQuietly(view, "invalidate");
+            Reflect.call(view, "invalidate");
             ModuleLog.d("CLEAR", "staticLayers wall=" + wall + " drag=" + drag);
         } catch (Throwable t) {
             ModuleLog.e("CLEAR", "clearStaticLayers failed", t);
@@ -886,7 +1373,7 @@ public class BlurEnhanceModule extends XposedModule {
 
     private String trySetViewRenderEffect(View view, RenderEffect effect) {
         try {
-            Method m = findMethodCached(View.class, "setRenderEffect", RenderEffect.class);
+            Method m = Reflect.method(View.class, "setRenderEffect", RenderEffect.class);
             if (m == null) return "setRenderEffect not found";
             m.invoke(view, effect);
             return null;
@@ -899,40 +1386,40 @@ public class BlurEnhanceModule extends XposedModule {
         try {
             Object launcher = getLauncherQuietly(view);
             if (launcher == null) return null;
-            Object dc = invokeNoArgQuietly(launcher, "getDepthController");
+            Object dc = Reflect.call(launcher, "getDepthController");
             if (dc == null) return null;
             Object prop = getStaticFloatProperty(dc, "BLUR");
             if (prop == null) return null;
 
             float cur = from;
             try {
-                Object g = invokeNoArgQuietly(dc, "getCurrentBlur");
+                Object g = Reflect.call(dc, "getCurrentBlur");
                 if (g instanceof Float) {
                     float v = (Float) g;
                     if (v >= 0.0f) cur = v;
                 }
             } catch (Throwable ignore) {}
 
-            Class<?> oaCls = loadClass(CLS_OBJECT_ANIMATOR, currentClassLoader());
-            Class<?> propCls = loadClass(CLS_PROPERTY, currentClassLoader());
+            Class<?> oaCls = Reflect.loadClass(CLS_OBJECT_ANIMATOR, currentClassLoader());
+            Class<?> propCls = Reflect.loadClass(CLS_PROPERTY, currentClassLoader());
             if (oaCls == null || propCls == null) return null;
 
-            Method ofFloat = findMethodCached(oaCls, "ofFloat", Object.class, propCls, float[].class);
+            Method ofFloat = Reflect.method(oaCls, "ofFloat", Object.class, propCls, float[].class);
             if (ofFloat == null) return null;
             Object anim = ofFloat.invoke(null, dc, prop, new float[]{cur, to});
             if (anim == null) return null;
 
-            Class<?> animCls = loadClass(CLS_ANIMATOR, currentClassLoader());
+            Class<?> animCls = Reflect.loadClass(CLS_ANIMATOR, currentClassLoader());
             if (animCls == null) return null;
 
-            Method setDur = findMethodCached(animCls, "setDuration", long.class);
+            Method setDur = Reflect.method(animCls, "setDuration", long.class);
             if (setDur != null) setDur.invoke(anim, duration);
 
-            Class<?> ipCls = loadClass(CLS_TIME_INTERPOLATOR, currentClassLoader());
-            Class<?> decCls = loadClass(CLS_DECELERATE, currentClassLoader());
+            Class<?> ipCls = Reflect.loadClass(CLS_TIME_INTERPOLATOR, currentClassLoader());
+            Class<?> decCls = Reflect.loadClass(CLS_DECELERATE, currentClassLoader());
             if (ipCls != null && decCls != null) {
-                Object decObj = newInstanceCached(decCls);
-                Method setI = findMethodCached(animCls, "setInterpolator", ipCls);
+                Object decObj = Reflect.newInstance(decCls);
+                Method setI = Reflect.method(animCls, "setInterpolator", ipCls);
                 if (setI != null && decObj != null) setI.invoke(anim, decObj);
             }
             return anim;
@@ -946,9 +1433,9 @@ public class BlurEnhanceModule extends XposedModule {
         try {
             Object anim = createDepthBlurAnimation(view, from, to, duration);
             if (anim != null) {
-                Class<?> animCls = loadClass(CLS_ANIMATOR, currentClassLoader());
+                Class<?> animCls = Reflect.loadClass(CLS_ANIMATOR, currentClassLoader());
                 if (animCls != null) {
-                    Method start = findMethodCached(animCls, "start");
+                    Method start = Reflect.method(animCls, "start");
                     if (start != null) {
                         start.invoke(anim);
                         return true;
@@ -1003,10 +1490,10 @@ public class BlurEnhanceModule extends XposedModule {
 
     private void playIntoAnimatorSet(Object set, Object anim) {
         try {
-            Class<?> setCls = loadClass(CLS_ANIMATOR_SET, currentClassLoader());
-            Class<?> animCls = loadClass(CLS_ANIMATOR, currentClassLoader());
+            Class<?> setCls = Reflect.loadClass(CLS_ANIMATOR_SET, currentClassLoader());
+            Class<?> animCls = Reflect.loadClass(CLS_ANIMATOR, currentClassLoader());
             if (setCls == null || animCls == null) return;
-            Method play = findMethodCached(setCls, "play", animCls);
+            Method play = Reflect.method(setCls, "play", animCls);
             if (play != null) play.invoke(set, anim);
         } catch (Throwable t) {
         }
@@ -1016,9 +1503,9 @@ public class BlurEnhanceModule extends XposedModule {
         try {
             Object launcher = getLauncherQuietly(view);
             if (launcher == null) return false;
-            Object dc = invokeNoArgQuietly(launcher, "getDepthController");
+            Object dc = Reflect.call(launcher, "getDepthController");
             if (dc == null) return false;
-            Method m = findMethodCached(dc.getClass(), "setBlurWithoutAnim", float.class);
+            Method m = Reflect.method(dc.getClass(), "setBlurWithoutAnim", float.class);
             if (m == null) return false;
             m.invoke(dc, value);
             return true;
@@ -1027,34 +1514,12 @@ public class BlurEnhanceModule extends XposedModule {
         }
     }
 
-    private Class<?> loadClass(String name, ClassLoader loader) {
-        if (loader == null) return null;
-        String key = name + "@" + System.identityHashCode(loader);
-        Class<?> cached = CLASS_CACHE.get(key);
-        if (cached != null) return cached;
-        try {
-            Class<?> c = Class.forName(name, false, loader);
-            CLASS_CACHE.put(key, c);
-            return c;
-        } catch (Throwable t) {
-            return null;
-        }
-    }
 
-    private static Method findMethodCached(Class<?> cls, String name, Class<?>... paramTypes) {
-        return Reflect.method(cls, name, paramTypes);
-    }
 
-    private static Field findField(Class<?> cls, String name) {
-        return Reflect.field(cls, name);
-    }
 
-    private static Object newInstanceCached(Class<?> cls) {
-        return Reflect.newInstance(cls);
-    }
 
     private Object getStaticFloatProperty(Object dc, String name) {
-        Field f = findField(dc.getClass(), name);
+        Field f = Reflect.field(dc.getClass(), name);
         if (f == null) return null;
         try {
             return f.get(null);
@@ -1072,17 +1537,17 @@ public class BlurEnhanceModule extends XposedModule {
         try {
             Context ctx = view.getContext();
             if (ctx == null) return null;
-            Class<?> lc = loadClass(CLS_LAUNCHER, currentClassLoader());
+            Class<?> lc = Reflect.loadClass(CLS_LAUNCHER, currentClassLoader());
             if (lc == null) return null;
 
-            Method g = findMethodCached(lc, "getLauncher", Context.class);
+            Method g = Reflect.method(lc, "getLauncher", Context.class);
             if (g != null) {
                 try {
                     Object r = g.invoke(null, ctx);
                     if (r != null) return r;
                 } catch (Throwable ignore) {}
             }
-            Method g2 = findMethodCached(lc, "getLauncherOrNull", Context.class);
+            Method g2 = Reflect.method(lc, "getLauncherOrNull", Context.class);
             if (g2 != null) {
                 try {
                     Object r2 = g2.invoke(null, ctx);
@@ -1095,13 +1560,7 @@ public class BlurEnhanceModule extends XposedModule {
         }
     }
 
-    private Object invokeNoArgQuietly(Object target, String name) {
-        return Reflect.call(target, name);
-    }
 
-    private Object getFieldQuietlyAny(Object obj, String name) {
-        return Reflect.readField(obj, name);
-    }
 
     private boolean installPostEffectHooks(ClassLoader loader) {
         Class<?> cls;
@@ -1201,7 +1660,7 @@ public class BlurEnhanceModule extends XposedModule {
         try {
             ViewGroup dragLayer = ViewUtils.ancestorGroupOfType(view, "DragLayer");
             if (dragLayer == null) {
-                ModuleLog.d("FOLDER", "no dragLayer found, chain=" + dumpViewChainNames(view));
+                ModuleLog.d("FOLDER", "no dragLayer found, chain=" + ViewUtils.dumpViewChainNames(view));
                 return false;
             }
             for (int i = 0; i < dragLayer.getChildCount(); i++) {
@@ -1215,7 +1674,7 @@ public class BlurEnhanceModule extends XposedModule {
                     return inFolder;
                 }
             }
-            ModuleLog.d("FOLDER", "no workspace child, dragLayer children=" + dumpChildViewNames(dragLayer));
+            ModuleLog.d("FOLDER", "no workspace child, dragLayer children=" + ViewUtils.dumpChildViewNames(dragLayer));
             return false;
         } catch (Throwable t) {
             ModuleLog.e("FOLDER", "isInsideOpenFolder failed", t);
@@ -1223,29 +1682,7 @@ public class BlurEnhanceModule extends XposedModule {
         }
     }
 
-    private String dumpViewChainNames(View view) {
-        StringBuilder sb = new StringBuilder();
-        try {
-            ViewParent p = view.getParent();
-            int g = 0;
-            while (p != null && g < 20) {
-                sb.append(p.getClass().getSimpleName()).append(" > ");
-                p = (p instanceof View) ? ((View) p).getParent() : null;
-                g++;
-            }
-        } catch (Throwable ignored) {}
-        return sb.toString();
-    }
 
-    private String dumpChildViewNames(ViewGroup vg) {
-        StringBuilder sb = new StringBuilder();
-        try {
-            for (int i = 0; i < vg.getChildCount(); i++) {
-                sb.append(vg.getChildAt(i).getClass().getSimpleName()).append(" ");
-            }
-        } catch (Throwable ignored) {}
-        return sb.toString();
-    }
 
     private ClassLoader currentClassLoader() {
         return cl;

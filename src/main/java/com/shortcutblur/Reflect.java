@@ -1,6 +1,7 @@
 package com.shortcutblur;
 
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Executable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Map;
@@ -15,6 +16,7 @@ public final class Reflect {
     private static final Map<String, Method> METHOD_CACHE = new ConcurrentHashMap<>();
     private static final Map<String, Field> FIELD_CACHE = new ConcurrentHashMap<>();
     private static final Map<String, Constructor<?>> CTOR_CACHE = new ConcurrentHashMap<>();
+    private static final Map<String, Class<?>> CLASS_CACHE = new ConcurrentHashMap<>();
 
     private Reflect() {}
 
@@ -133,6 +135,28 @@ public final class Reflect {
         if (m == null) return null;
         try {
             return m.invoke(null, args);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    public static void setAccessible(Executable e) {
+        try {
+            e.setAccessible(true);
+        } catch (Throwable ignore) {
+        }
+    }
+
+    public static Class<?> loadClass(String name, ClassLoader loader) {
+        if (loader == null) return null;
+        String key = name + "@" + System.identityHashCode(loader);
+        Class<?> cached = CLASS_CACHE.get(key);
+        if (cached != null) return cached;
+        try {
+            Class<?> c = Class.forName(name, false, loader);
+            capCache(CLASS_CACHE);
+            CLASS_CACHE.put(key, c);
+            return c;
         } catch (Throwable t) {
             return null;
         }

@@ -92,6 +92,30 @@ public final class ViewUtils {
         return null;
     }
 
+    public static String dumpViewChainNames(View view) {
+        StringBuilder sb = new StringBuilder();
+        try {
+            ViewParent p = view == null ? null : view.getParent();
+            int g = 0;
+            while (p != null && g < 20) {
+                sb.append(p.getClass().getSimpleName()).append(" > ");
+                p = (p instanceof View) ? ((View) p).getParent() : null;
+                g++;
+            }
+        } catch (Throwable ignored) { }
+        return sb.toString();
+    }
+
+    public static String dumpChildViewNames(ViewGroup vg) {
+        StringBuilder sb = new StringBuilder();
+        try {
+            for (int i = 0; i < vg.getChildCount(); i++) {
+                sb.append(vg.getChildAt(i).getClass().getSimpleName()).append(" ");
+            }
+        } catch (Throwable ignored) { }
+        return sb.toString();
+    }
+
     public static boolean isReallyVisible(View v) {
         if (v == null) return false;
         try {
