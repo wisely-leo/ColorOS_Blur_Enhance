@@ -48,6 +48,8 @@ public class BlurEnhanceModule extends XposedModule {
 
     private static final String PKG_CLOCK = "com.coloros.alarmclock";
     private static final String CLS_EA = "e.a";
+    /** launcher 进程内的 posteffect 管理器：吞掉 shortcut 期间的 pauseWindowBlur，保住活模糊不被冻结。 */
+    private static final String CLS_BLUR_MGR = "com.oplus.posteffect.manager.BlurDrawableManager";
     private static final float SAMPLE_SCALE = 0.5f;
 
     private static final float BLUR_RADIUS = 64.0f;
@@ -72,13 +74,25 @@ public class BlurEnhanceModule extends XposedModule {
 
     private final Map<View, Boolean> armed = new WeakHashMap<>();
     private final Map<String, ValueAnimator> iconAnims = new ConcurrentHashMap<>();
-    private final Map<String, String> animTargets = new ConcurrentHashMap<>();
     private final Set<String> dumpedCls = new HashSet<>();
     private final Map<View, Integer> flagsCache = new WeakHashMap<>();
 
     private volatile RenderEffect blurEffect;
 
     private static final Map<String, Class<?>> CLASS_CACHE = new ConcurrentHashMap<>();
+    /** shortcut 弹窗打开窗口期：期间吞掉 pauseWindowBlur，保持 posteffect 模糊服务持续采样（=保住动态）。 */
+    static volatile boolean sShortcutBlurActive = false;
+    /** 【图标模糊新挂点】独立空 View（照 Stack.mBlurEffectView 做法）：在图标之上、菜单之下，避免挂容器吃掉图标。 */
+    private static volatile View sIconBlurLayer = null;
+    /** 每次 shortcut 弹窗递增的序列号（用于让 F_ICON 动画只在本轮首次 arm 启动，避免被同一轮的第二次 arm 取消）。 */
+    private static volatile long sPopupSeq = 0L;
+    private static volatile long sIconAnimStartedSeq = -1L;
+    /** 当前是否正在做退出淡出（幂等保护：同一次退出的双路径只应触发一次淡出）。 */
+    private static volatile boolean sFadingOut = false;
+    /** 退出复位延迟（> 退场动画 330ms），避免退场瞬间静态先恢复再被切走。 */
+    private static final long SWALLOW_RESET_DELAY = 450L;
+    /** shortcut 期间被吞掉的 pause 次数（诊断用）。 */
+    private static volatile int sSwallowCount = 0;
     @Override
     public void onModuleLoaded(XposedModuleInterface.ModuleLoadedParam param) {
     }
@@ -231,6 +245,7 @@ public class BlurEnhanceModule extends XposedModule {
                 r.critical += hookPopupOpenCloseAnimation(ac, "onCreateCloseAnimation", false, hooked);
             }
             r.total += r.critical;
+            r.total += installSwallowPauseHook(loader);
             ModuleLog.d("INSTALL", "critical=" + r.critical + " total=" + r.total);
         } catch (Throwable t) {
             ModuleLog.e("INSTALL", "installHooks failed", t);
@@ -264,7 +279,10 @@ public class BlurEnhanceModule extends XposedModule {
                                         if ((flags & F_WALL) != 0) {
                                             animateDepthBlur(v, 1.0f, 0.0f, BLUR_DURATION);
                                         }
-                                        clearIconBlurByFlags(v, flags, "single-shot clear");
+                                        // 【渐降】不再调 clearIconBlurByFlags（它会把模糊瞬间清成 0，导致 fade-out 变成 0->0）。
+                                        // 转交由 fadeOutAndRemoveIconBlur 做 64->0 淡出，动画结束 removeIconBlurLayer 内部再 clearIconBlur 兜底。
+                                        fadeOutAndRemoveIconBlur();
+                                        scheduleSwallowReset(v);
                                     }
                                 } catch (Throwable t) {
                                     ModuleLog.e("FINISH", "hook body failed", t);
@@ -323,9 +341,24 @@ public class BlurEnhanceModule extends XposedModule {
                                                     playIntoAnimatorSet(set, anim);
                                                 }
                                             }
+                                            // 【渐进时机】此刻（onCreateOpenAnimation 执行时）系统菜单展开动画刚开始，
+                                            // 直接 start 图标模糊 0->64，与之同帧同步；不再 postDelayed（会晚 100ms+），
+                                            // 也不 playIntoAnimatorSet（系统的 set 需自行 start，加入后并不能立即生效）。
+                                            if (opening && (flags & (F_ICON | F_ICON_ANIM)) != 0) {
+                                                final View lt = sIconBlurLayer;
+                                                if (lt != null) {
+                                                    Object iconAnim = createIconBlurAnimator(lt, 0.0f, BLUR_RADIUS, BLUR_DURATION);
+                                                    if (iconAnim instanceof ValueAnimator) {
+                                                        ((ValueAnimator) iconAnim).start();
+                                                        ModuleLog.d("ICONANIM", "open anim -> started icon blur fade-in (sync)");
+                                                    }
+                                                }
+                                            }
                                             if (!opening) {
                                                 clearBlurFlagsCache(anchor);
-                                                clearIconBlurByFlags(anchor, flags, "single-shot clear(anim)");
+                                                // 【渐降】同上：不做瞬清，交给 fadeOutAndRemoveIconBlur 的 64->0 淡出。
+                                                fadeOutAndRemoveIconBlur();
+                                                scheduleSwallowReset(anchor);
                                             }
                                         }
                                     } catch (Throwable t) {
@@ -339,6 +372,193 @@ public class BlurEnhanceModule extends XposedModule {
             }
         } catch (Throwable t) {
             ModuleLog.e("INSTALL", "hookPopupOpenCloseAnimation(" + methodName + ") failed", t);
+        }
+        return n;
+    }
+
+    /**
+     * 【吞暂停】hook launcher 进程内 {@code BlurDrawableManager} 的 pauseWindowBlur / resumeWindowBlur：
+     * shortcut 弹窗窗口期（sShortcutBlurActive=true）只吞 pauseWindowBlur、永远放行 resumeWindowBlur，
+     * 避免 PopupBlurView.createBlurAnim 触发的全局暂停把 posteffect 模糊服务冻结（=保持动态）。
+     */
+    /**
+     * 【退出延迟复位】退场动画（~330ms alpha）刚触发时不能立即复位 sShortcutBlurActive，
+     * 否则退场期间 pauseWindowBlur 放行 -> 静态先恢复 -> 退出闪现。延迟 SWALLOW_RESET_DELAY(450ms) 再复位。
+     */
+    /**
+     * 【图标模糊新挂点】在 pbv 的父容器（含图标的 BaseDragLayer）里，pbv 之下插入一个全屏空 View，
+     * 把模糊挂到这个空 View 上（setBackgroundRenderEffect 糊的是其背后内容 = 含图标），
+     * 避免直接挂 anchor 容器导致图标被吃掉 / 扁平化。返回该空 View（失败返回 null）。
+     */
+    private static View ensureIconBlurLayer(View pbv) {
+        try {
+            if (pbv == null) return null;
+            Object parent = pbv.getParent();
+            if (!(parent instanceof ViewGroup)) {
+                ModuleLog.d("ICONBLUR", "pbv parent not ViewGroup: " + (parent == null ? "null" : parent.getClass().getName()));
+                return null;
+            }
+            ViewGroup vg = (ViewGroup) parent;
+            // 【复用】已存在且仍挂在同一 parent 上的挂点直接复用，避免重复创建造成泄漏。
+            View existing = sIconBlurLayer;
+            if (existing != null && existing.getParent() == vg) {
+                ModuleLog.d("ICONBLUR", "icon blur layer reused (already attached)");
+                return existing;
+            }
+            View layer = new View(pbv.getContext());
+            layer.setClickable(false);
+            layer.setFocusable(false);
+            layer.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            ViewGroup.LayoutParams lp = new ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            int pvIndex = vg.indexOfChild(pbv);
+            vg.addView(layer, pvIndex >= 0 ? pvIndex : vg.getChildCount(), lp);
+            sIconBlurLayer = layer;
+            ModuleLog.d("ICONBLUR", "icon blur layer added to " + vg.getClass().getSimpleName()
+                    + " idx=" + (pvIndex >= 0 ? pvIndex : vg.getChildCount()) + " children=" + vg.getChildCount());
+            return layer;
+        } catch (Throwable t) {
+            ModuleLog.e("ICONBLUR", "ensureIconBlurLayer failed", t);
+            return null;
+        }
+    }
+
+    /**
+     * 【退出渐降】退出时先 64->0 淡出，动画结束再移除挂点并递增序列号。
+     * 不走 animateIconBlur 的 skip dup，避免被上一轮残留状态误跳过。
+     * 同时：退出即递增 sPopupSeq（显式标记“新一轮”），不依赖带延迟的 sShortcutBlurActive。
+     */
+    private void fadeOutAndRemoveIconBlur() {
+        final View layer = sIconBlurLayer;
+        // 【幂等】退出的双路径（finish + onCreateCloseAnimation）会各调一次，
+        // 若已在淡出中则直接忽略，否则会出现“两条 346ms 回调”互相取消 + 第一条先删挂点导致图标闪烁。
+        if (sFadingOut) {
+            ModuleLog.d("ICONANIM", "already fading out, skip duplicate fade-out");
+            return;
+        }
+        sFadingOut = true;
+        // 先递增序列号：无论下面是否有挂点，退出都意味着“下一轮是新轮”。
+        sPopupSeq++;
+        sIconAnimStartedSeq = -1L;
+        if (layer == null) { sFadingOut = false; return; }
+        try {
+            final String key = System.identityHashCode(layer) + "";
+            synchronized (iconAnims) {
+                ValueAnimator old = iconAnims.remove(key);
+                if (old != null) { try { old.cancel(); } catch (Throwable ignore) {} }
+            }
+            final ValueAnimator va = ValueAnimator.ofFloat(BLUR_RADIUS, 0.0f);
+            va.setDuration(BLUR_DURATION);
+            va.setInterpolator(new DecelerateInterpolator());
+            va.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+                @Override
+                public void onAnimationUpdate(ValueAnimator a) {
+                    try {
+                        float r = (Float) a.getAnimatedValue();
+                        applyIconBlurRadius(layer, r, true);
+                    } catch (Throwable ignore) {}
+                }
+            });
+            synchronized (iconAnims) {
+                iconAnims.put(key, va);
+            }
+            va.start();
+            ModuleLog.d("ICONANIM", "fade-out 64.0->0.0 dur=" + BLUR_DURATION);
+            layer.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        removeAnimation(key);
+                        // 【护栏】若这期间新一轮已复用/替换了挂点，则本次淡出回调不能误删新轮的挂点。
+                        if (sIconBlurLayer != layer) {
+                            ModuleLog.d("ICONANIM", "fade-out done, layer already replaced, skip remove");
+                            sFadingOut = false;
+                            return;
+                        }
+                        removeIconBlurLayer();
+                        sFadingOut = false;
+                    } catch (Throwable ignore) {}
+                }
+            }, BLUR_DURATION + 16L);
+        } catch (Throwable t) {
+            ModuleLog.e("ICONANIM", "fadeOutAndRemoveIconBlur failed", t);
+            removeIconBlurLayer();
+            sFadingOut = false;
+        }
+    }
+
+    /** 移除图标模糊空 View，并清理该挂点的动画去重状态（否则下次弹窗会被 animateIconBlur 的 skip dup 误跳过）。 */
+    private void removeIconBlurLayer() {
+        try {
+            View layer = sIconBlurLayer;
+            if (layer == null) return;
+            final String key = System.identityHashCode(layer) + "";
+            synchronized (iconAnims) {
+                ValueAnimator old = iconAnims.remove(key);
+                if (old != null) { try { old.cancel(); } catch (Throwable ignore) {} }
+            }
+            // 【消闪】移除前先把半径硬归零，确保挂点不带残留模糊地离开层级，避免删除瞬间跳变闪烁。
+            try { applyIconBlurRadius(layer, 0.0f, false); } catch (Throwable ignore) {}
+            sIconAnimStartedSeq = -1L;
+            ViewGroup vg = (ViewGroup) layer.getParent();
+            if (vg != null) vg.removeView(layer);
+            sIconBlurLayer = null;
+            ModuleLog.d("ICONBLUR", "icon blur layer removed (+anim state cleared)");
+        } catch (Throwable t) {
+            sIconBlurLayer = null;
+        }
+    }
+
+    private void scheduleSwallowReset(final View anchor) {
+        try {
+            View post = anchor;
+            if (post == null) return;
+            post.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    sShortcutBlurActive = false;
+                    ModuleLog.d("PAUSE", "window CLOSE (delayed reset, exit anim done)");
+                }
+            }, SWALLOW_RESET_DELAY);
+        } catch (Throwable t) {
+            sShortcutBlurActive = false;
+            ModuleLog.e("PAUSE", "scheduleSwallowReset failed", t);
+        }
+    }
+
+    private int installSwallowPauseHook(ClassLoader loader) {
+        int n = 0;
+        try {
+            Class<?> cls = loadClass(CLS_BLUR_MGR, loader);
+            if (cls == null) {
+                ModuleLog.d("PAUSE", "[miss] " + CLS_BLUR_MGR);
+                return 0;
+            }
+            for (String name : new String[]{"pauseWindowBlur", "resumeWindowBlur"}) {
+                for (Method m : cls.getDeclaredMethods()) {
+                    if (!m.getName().equals(name)) continue;
+                    setAccessibleQuietly(m);
+                    final boolean isPause = "pauseWindowBlur".equals(name);
+                    hook((Executable) m)
+                            .setId("swallow.pause." + name + "." + m.getParameterTypes().length)
+                            .setExceptionMode(XposedInterface.ExceptionMode.DEFAULT)
+                            .intercept(new XposedInterface.Hooker() {
+                                @Override
+                                public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                                    if (isPause && sShortcutBlurActive) {
+                                        sSwallowCount++;
+                                        ModuleLog.d("PAUSE", "swallow pauseWindowBlur during shortcut (#" + sSwallowCount + ")");
+                                        return null; // 吞掉暂停，不放行
+                                    }
+                                    return chain.proceed();
+                                }
+                            });
+                    n++;
+                    ModuleLog.d("PAUSE", "[hook] " + name + "/" + m.getParameterTypes().length);
+                }
+            }
+        } catch (Throwable t) {
+            ModuleLog.e("PAUSE", "installSwallowPauseHook failed", t);
         }
         return n;
     }
@@ -401,6 +621,17 @@ public class BlurEnhanceModule extends XposedModule {
         if (view == null) return;
         try {
             ModuleLog.d("LIVE", "armBlurForView id=" + mid);
+            // 【打断退出淡出】若上一轮的退出淡出还没跑完就再次进入，先取消淡出状态。
+            // （已递增的 sPopupSeq 保留，正好让本轮成为“新一轮”，动画能正常启动。）
+            if (sFadingOut) {
+                sFadingOut = false;
+                ModuleLog.d("ICONANIM", "enter during fade-out, aborted fade-out state");
+            }
+            // 【吞暂停】置位窗口开：早于 PopupBlurView.createBlurAnim 内的 pauseWindowBlur 调用，才能吞掉它。
+            sShortcutBlurActive = true;
+            // 【序列号】“新一轮”的判定完全交给退出端（fadeOutAndRemoveIconBlur 负责 sPopupSeq++ 且 sIconAnimStartedSeq=-1）。
+            // 这里不再依赖带延迟的 wasActive，避免连续快速进出时误判成同一轮 -> 跳过动画。
+            ModuleLog.d("PAUSE", "window OPEN (armBlurForView id=" + mid + ")");
             final int flags = resolveBlurFlags(view);
             ModuleLog.d("LIVE", "flags=" + flags + " (static=" + ((flags & F_STATIC) != 0)
                     + " icon=" + ((flags & F_ICON) != 0) + " wall=" + ((flags & F_WALL) != 0) + ")");
@@ -411,10 +642,31 @@ public class BlurEnhanceModule extends XposedModule {
 
             final View fv = view;
 
-            if ((flags & F_ICON_ANIM) != 0) {
-                applyIconBlurDelayed(fv, "single-shot apply");
-            } else if ((flags & F_ICON) != 0) {
-                applyIconBlurDelayed(fv, null);
+            // 【图标模糊新挂点】在 pbv 之下插入全屏空 View，把模糊挂到它上，
+            // 避免挂 anchor 容器导致图标被吃掉。挂点失败则回退到 fv（保持旧行为）。
+            // 【关键】armed 标志必须打到「实际挂模糊的 target」上，否则 isIconBlurArmed(target) 为 false -> skipped: disarmed。
+            View iconTarget = fv;
+            if ((flags & (F_ICON | F_ICON_ANIM)) != 0) {
+                View layer = ensureIconBlurLayer(fv);
+                if (layer != null) {
+                    iconTarget = layer;
+                    setIconBlurArmed(fv, false);          // 原 anchor 不再需要标志
+                    setIconBlurArmed(iconTarget, true);   // 标志改打到实际挂点
+                }
+            }
+            final View itv = iconTarget;
+            if ((flags & (F_ICON | F_ICON_ANIM)) != 0) {
+                // 【渐进】文件夹内(F_ICON_ANIM)与桌面(F_ICON)统一：都不在 armBlurForView 启动动画。
+                // 这里只把起点压到 0（清晰）并置 armed；真正动画改由 onCreateOpenAnimation 在展开开始时启动。
+                // 【幂等】同一轮弹窗内 arm 会被调两次（companion + 本体），只对首次 arm 做起点压 0 + 记录轮次。
+                final long seq = sPopupSeq;
+                if (sIconAnimStartedSeq != seq) {
+                    sIconAnimStartedSeq = seq;
+                    try { applyIconBlurRadius(itv, 0.01f, false); } catch (Throwable ignore) {}
+                    ModuleLog.d("ICONANIM", "arm icon (defer anim to open, seq=" + seq + ")");
+                } else {
+                    ModuleLog.d("ICONANIM", "same popup round, skip re-arm (seq=" + seq + ")");
+                }
             }
 
             if ((flags & F_WALL) == 0) return;
@@ -447,14 +699,6 @@ public class BlurEnhanceModule extends XposedModule {
         } catch (Throwable t) {
             ModuleLog.e("LIVE", "armBlurForView failed", t);
         }
-    }
-
-    private void applyIconBlur(View view) {
-        if (!isIconBlurArmed(view)) {
-            ModuleLog.d("ICONBLUR", "skipped: disarmed");
-            return;
-        }
-        applyIconBlurRadius(view, BLUR_RADIUS);
     }
 
     private void applyIconBlurRadius(View view, float radius) {
@@ -537,85 +781,6 @@ public class BlurEnhanceModule extends XposedModule {
         }
     }
 
-    private void animateIconBlur(final View view, final float fromRadius, final float toRadius, long duration) {
-        if (view == null) return;
-        try {
-            final String key = System.identityHashCode(view) + "";
-            synchronized (iconAnims) {
-                ValueAnimator old = iconAnims.remove(key);
-                if (old != null) {
-                    try { old.cancel(); } catch (Throwable ignore) {}
-                }
-            }
-            final String targetKey = "t_" + System.identityHashCode(view);
-            String nowTarget = toRadius <= 0.01f ? "0" : "64";
-            String prevTarget = animTargets.get(targetKey);
-            if (prevTarget != null && prevTarget.equals(nowTarget)) {
-                ModuleLog.d("ICONANIM", "skip dup " + prevTarget);
-                return;
-            }
-            animTargets.put(targetKey, nowTarget);
-            final ValueAnimator va = ValueAnimator.ofFloat(fromRadius, toRadius);
-            va.setDuration(duration);
-            va.setInterpolator(new DecelerateInterpolator());
-            va.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
-                private float last = Float.NaN;
-
-                @Override
-                public void onAnimationUpdate(ValueAnimator a) {
-                    try {
-                        if (!isCurrentAnimation(key, va)) return;
-                        float r = (Float) a.getAnimatedValue();
-                        if (!Float.isNaN(last) && Math.abs(r - last) < 0.5f) return;
-                        last = r;
-                        if (!isIconBlurArmed(view)) {
-                            try { va.cancel(); } catch (Throwable ignore) {}
-                            return;
-                        }
-                        applyIconBlurRadius(view, r, true);
-                    } catch (Throwable t) {
-                        ModuleLog.e("ICONANIM", "update failed", t);
-                    }
-                }
-            });
-            synchronized (iconAnims) {
-                iconAnims.put(key, va);
-            }
-            va.start();
-            ModuleLog.d("ICONANIM", "anim " + fromRadius + "->" + toRadius + " dur=" + duration);
-            final boolean[] finished = new boolean[]{false};
-            view.postDelayed(new Runnable() {
-                @Override
-                public void run() {
-                    if (finished[0]) return;
-                    finished[0] = true;
-                    try {
-                        if (!isCurrentAnimation(key, va)) return;
-                        removeAnimation(key);
-                        if (!isIconBlurArmed(view)) {
-                            clearIconBlur(view);
-                            return;
-                        }
-                        if (toRadius <= 0.01f) {
-                            applyIconBlurRadius(view, 0.0f, false);
-                            clearIconBlur(view);
-                        } else {
-                            applyIconBlurRadius(view, toRadius, true);
-                        }
-                    } catch (Throwable t) {
-                        ModuleLog.e("ICONANIM", "finalize failed", t);
-                    }
-                }
-            }, duration + 16L);
-        } catch (Throwable t) {
-            ModuleLog.e("ICONANIM", "animateIconBlur failed", t);
-            try {
-                if (toRadius <= 0.01f) clearIconBlur(view);
-                else applyIconBlurRadius(view, toRadius, true);
-            } catch (Throwable ignore) {}
-        }
-    }
-
     private void setIconBlurArmed(View view, boolean value) {
         if (view == null) return;
         synchronized (armed) {
@@ -633,7 +798,7 @@ public class BlurEnhanceModule extends XposedModule {
             return armed.containsKey(view);
         }
     }
-private RenderEffect getBlurEffect() {
+    private RenderEffect getBlurEffect() {
         RenderEffect e = blurEffect;
         if (e == null) {
             e = RenderEffect.createBlurEffect(BLUR_RADIUS, BLUR_RADIUS, Shader.TileMode.MIRROR);
@@ -642,29 +807,9 @@ private RenderEffect getBlurEffect() {
         return e;
     }
 
-    private void clearIconBlurByFlags(View v, int flags, String tag) {
-        if ((flags & F_ICON_ANIM) != 0) {
-            ModuleLog.d("ICONANIM", "TEST " + tag);
-            clearIconBlur(v);
-        } else if ((flags & F_ICON) != 0) {
-            clearIconBlur(v);
-        }
-    }
-
-    private void applyIconBlurDelayed(final View v, final String tag) {
-        v.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    if (tag != null) ModuleLog.d("ICONANIM", "TEST " + tag);
-                    applyIconBlur(v);
-                } catch (Throwable t) {
-                    ModuleLog.e(tag != null ? "ICONANIM" : "ICONBLUR", "delayed apply failed", t);
-                }
-            }
-        }, ICON_BLUR_DELAY);
-    }
-
+    /**
+     * @param animate true = 走 0→BLUR_RADIUS 渐进动画（有模糊半径过渡）；false = 一次性设置（旧行为，会“清晰→糊”硬切）。
+     */
     private boolean isCurrentAnimation(String key, ValueAnimator va) {
         synchronized (iconAnims) {
             return iconAnims.get(key) == va;
@@ -813,6 +958,46 @@ private RenderEffect getBlurEffect() {
             return setDepthBlur(view, to);
         } catch (Throwable t) {
             return false;
+        }
+    }
+
+    /**
+     * 【图标模糊渐进】造一个控制挂点模糊半径 from->to 的 ValueAnimator。
+     * 与系统菜单展开 AnimatorSet 一起 play，时间轴完全对齐（不再自己 postDelayed 启动）。
+     */
+    private Object createIconBlurAnimator(final View view, final float from, final float to, long duration) {
+        if (view == null) return null;
+        try {
+            final String key = System.identityHashCode(view) + "";
+            synchronized (iconAnims) {
+                ValueAnimator old = iconAnims.remove(key);
+                if (old != null) { try { old.cancel(); } catch (Throwable ignore) {} }
+            }
+            final ValueAnimator va = ValueAnimator.ofFloat(from, to);
+            va.setDuration(duration);
+            va.setInterpolator(new DecelerateInterpolator());
+            va.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+                private float last = Float.NaN;
+                @Override
+                public void onAnimationUpdate(ValueAnimator a) {
+                    try {
+                        if (!isCurrentAnimation(key, va)) return;
+                        float r = (Float) a.getAnimatedValue();
+                        if (!Float.isNaN(last) && Math.abs(r - last) < 0.5f) return;
+                        last = r;
+                        if (!isIconBlurArmed(view)) return;
+                        applyIconBlurRadius(view, r, true);
+                    } catch (Throwable ignore) {}
+                }
+            });
+            synchronized (iconAnims) {
+                iconAnims.put(key, va);
+            }
+            ModuleLog.d("ICONANIM", "create icon animator " + from + "->" + to + " dur=" + duration);
+            return va;
+        } catch (Throwable t) {
+            ModuleLog.e("ICONANIM", "createIconBlurAnimator failed", t);
+            return null;
         }
     }
 
