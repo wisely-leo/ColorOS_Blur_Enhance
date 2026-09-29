@@ -33,47 +33,40 @@ public class BlurEnhanceModule extends XposedModule {
     private static final String CLS_OPLUS_POPUP = "com.android.launcher3.popup.OplusPopupContainerWithArrow";
     private static final String CLS_ARROW_POPUP = "com.android.launcher3.popup.ArrowPopup";
     private static final String CLS_LAUNCHER = "com.android.launcher.Launcher";
-    /** 【recents 探针】桌面内容模糊支持判定：强制 true 让系统从 alpha 渐隐切到“整体模糊”分支。 */
+
     private static final String CLS_WORKSPACE_SCRIM = "com.android.launcher3.views.WorkSpaceScrimView";
-    /** recents desktop content container (FrameLayout, plain View, RenderEffect-able). */
+
     private static final String CLS_OPLUS_DRAGLAYER = "com.android.launcher3.OplusDragLayer";
-    /** max blur radius mapping alpha 1->0 to 0->MAX. */
+
     private static final float RECENTS_BLUR_MAX = 64.0f;
-    /** last applied recents blur radius (idempotent; avoid redundant setRenderEffect). */
+
     private static volatile float sRecentsLastRadius = -1.0f;
-    /** smooth-anim state for recents blur radius (avoid alpha-driven jumps). */
+
     private static volatile ValueAnimator sRecentsBlurAnim = null;
     private static volatile float sRecentsAnimRadius = 0.0f;
-    /** [v10] current depth-zoom scale of the DragLayer (1.0 = normal). Used to compensate blur. */
+
     private static volatile float sDragScale = 1.0f;
-    /** [v10] the view currently carrying the recents self-blur (DragLayer). */
+
     private static volatile View sRecentsBlurView = null;
-    /** [v10] last target radius (before scale compensation); -1 = inactive. */
+
     private static volatile float sRecentsTargetRadius = -1.0f;
-    /** [v15] explicit recents state machine: 0=IDLE, 1=ENTERING, 2=IN_RECENTS, 3=EXITING.
-     *  Prevents the progressive blur anim from being replayed on re-entry and prevents
-     *  clearing while still inside recents. */
+
     private static volatile int sRecentsPhase = 0;
-    /** [v15] true once the progressive (0->MAX) blur has been applied for the CURRENT entry. */
+
     private static volatile boolean sRecentsBlurDoneForEntry = false;
-    /** [v18] fade-in (enter) / fade-out (exit) durations. */
+
     private static final long ENTER_FADE_MS = 180L;
     private static final long EXIT_FADE_MS = 120L;
-    /** [v18] running enter fade-in anim (0 -> MAX), started ONCE per entry. */
+
     private static volatile ValueAnimator sRecentsEnterAnim = null;
-    /** [v18] running exit fade-out anim (current -> 0), started ONCE per exit. */
+
     private static volatile ValueAnimator sRecentsExitAnim = null;
-    /** [v22] exit-armed: true only after the scale actually reached the recents resting value
-     *  (<= 0.925). This decouples the two thresholds: enter is detected early (f < 0.99),
-     *  while exit (f >= 0.93) can only fire AFTER a real entry completed -> no false exit
-     *  on the intermediate frames of the enter transition. */
+
     private static volatile boolean sRecentsArmed = false;
-    /** [v23] pending delayed-arm: exit is only armed after the scale has STAYED at the recents
-     *  resting value (<=0.925) for ARM_DELAY_MS. This prevents the enter transition's brief
-     *  0.9 -> 0.99 -> 0.92 jitter from arming prematurely (which caused false exits + residual). */
+
     private static final long ARM_DELAY_MS = 180L;
     private static Runnable sPendingArm = null;
-    /** delayed-clear state: we only hard-clear after alpha stays >=1 without a new descent. */
+
     private static final android.os.Handler sRecentsHandler =
             new android.os.Handler(android.os.Looper.getMainLooper());
     private static Runnable sPendingClear = null;
@@ -92,7 +85,7 @@ public class BlurEnhanceModule extends XposedModule {
 
     private static final String PKG_CLOCK = "com.coloros.alarmclock";
     private static final String CLS_EA = "e.a";
-    /** launcher 进程内的 posteffect 管理器：吞掉 shortcut 期间的 pauseWindowBlur，保住活模糊不被冻结。 */
+
     private static final String CLS_BLUR_MGR = "com.oplus.posteffect.manager.BlurDrawableManager";
     private static final float SAMPLE_SCALE = 0.5f;
 
@@ -123,18 +116,17 @@ public class BlurEnhanceModule extends XposedModule {
 
     private volatile RenderEffect blurEffect;
 
-    /** shortcut 弹窗打开窗口期：期间吞掉 pauseWindowBlur，保持 posteffect 模糊服务持续采样（=保住动态）。 */
     static volatile boolean sShortcutBlurActive = false;
-    /** 【图标模糊新挂点】独立空 View（照 Stack.mBlurEffectView 做法）：在图标之上、菜单之下，避免挂容器吃掉图标。 */
+
     private static volatile View sIconBlurLayer = null;
-    /** 每次 shortcut 弹窗递增的序列号（用于让 F_ICON 动画只在本轮首次 arm 启动，避免被同一轮的第二次 arm 取消）。 */
+
     private static volatile long sPopupSeq = 0L;
     private static volatile long sIconAnimStartedSeq = -1L;
-    /** 当前是否正在做退出淡出（幂等保护：同一次退出的双路径只应触发一次淡出）。 */
+
     private static volatile boolean sFadingOut = false;
-    /** 退出复位延迟（> 退场动画 330ms），避免退场瞬间静态先恢复再被切走。 */
+
     private static final long SWALLOW_RESET_DELAY = 450L;
-    /** shortcut 期间被吞掉的 pause 次数（诊断用）。 */
+
     private static volatile int sSwallowCount = 0;
     @Override
     public void onModuleLoaded(XposedModuleInterface.ModuleLoadedParam param) {
@@ -323,8 +315,7 @@ public class BlurEnhanceModule extends XposedModule {
                                         if ((flags & F_WALL) != 0) {
                                             animateDepthBlur(v, 1.0f, 0.0f, BLUR_DURATION);
                                         }
-                                        // 【渐降】不再调 clearIconBlurByFlags（它会把模糊瞬间清成 0，导致 fade-out 变成 0->0）。
-                                        // 转交由 fadeOutAndRemoveIconBlur 做 64->0 淡出，动画结束 removeIconBlurLayer 内部再 clearIconBlur 兜底。
+
                                         fadeOutAndRemoveIconBlur();
                                         scheduleSwallowReset(v);
                                     }
@@ -385,9 +376,7 @@ public class BlurEnhanceModule extends XposedModule {
                                                     playIntoAnimatorSet(set, anim);
                                                 }
                                             }
-                                            // 【渐进时机】此刻（onCreateOpenAnimation 执行时）系统菜单展开动画刚开始，
-                                            // 直接 start 图标模糊 0->64，与之同帧同步；不再 postDelayed（会晚 100ms+），
-                                            // 也不 playIntoAnimatorSet（系统的 set 需自行 start，加入后并不能立即生效）。
+
                                             if (opening && (flags & (F_ICON | F_ICON_ANIM)) != 0) {
                                                 final View lt = sIconBlurLayer;
                                                 if (lt != null) {
@@ -400,7 +389,7 @@ public class BlurEnhanceModule extends XposedModule {
                                             }
                                             if (!opening) {
                                                 clearBlurFlagsCache(anchor);
-                                                // 【渐降】同上：不做瞬清，交给 fadeOutAndRemoveIconBlur 的 64->0 淡出。
+
                                                 fadeOutAndRemoveIconBlur();
                                                 scheduleSwallowReset(anchor);
                                             }
@@ -420,20 +409,6 @@ public class BlurEnhanceModule extends XposedModule {
         return n;
     }
 
-    /**
-     * 【吞暂停】hook launcher 进程内 {@code BlurDrawableManager} 的 pauseWindowBlur / resumeWindowBlur：
-     * shortcut 弹窗窗口期（sShortcutBlurActive=true）只吞 pauseWindowBlur、永远放行 resumeWindowBlur，
-     * 避免 PopupBlurView.createBlurAnim 触发的全局暂停把 posteffect 模糊服务冻结（=保持动态）。
-     */
-    /**
-     * 【退出延迟复位】退场动画（~330ms alpha）刚触发时不能立即复位 sShortcutBlurActive，
-     * 否则退场期间 pauseWindowBlur 放行 -> 静态先恢复 -> 退出闪现。延迟 SWALLOW_RESET_DELAY(450ms) 再复位。
-     */
-    /**
-     * 【图标模糊新挂点】在 pbv 的父容器（含图标的 BaseDragLayer）里，pbv 之下插入一个全屏空 View，
-     * 把模糊挂到这个空 View 上（setBackgroundRenderEffect 糊的是其背后内容 = 含图标），
-     * 避免直接挂 anchor 容器导致图标被吃掉 / 扁平化。返回该空 View（失败返回 null）。
-     */
     private static View ensureIconBlurLayer(View pbv) {
         try {
             if (pbv == null) return null;
@@ -443,7 +418,7 @@ public class BlurEnhanceModule extends XposedModule {
                 return null;
             }
             ViewGroup vg = (ViewGroup) parent;
-            // 【复用】已存在且仍挂在同一 parent 上的挂点直接复用，避免重复创建造成泄漏。
+
             View existing = sIconBlurLayer;
             if (existing != null && existing.getParent() == vg) {
                 ModuleLog.d("ICONBLUR", "icon blur layer reused (already attached)");
@@ -467,21 +442,15 @@ public class BlurEnhanceModule extends XposedModule {
         }
     }
 
-    /**
-     * 【退出渐降】退出时先 64->0 淡出，动画结束再移除挂点并递增序列号。
-     * 不走 animateIconBlur 的 skip dup，避免被上一轮残留状态误跳过。
-     * 同时：退出即递增 sPopupSeq（显式标记“新一轮”），不依赖带延迟的 sShortcutBlurActive。
-     */
     private void fadeOutAndRemoveIconBlur() {
         final View layer = sIconBlurLayer;
-        // 【幂等】退出的双路径（finish + onCreateCloseAnimation）会各调一次，
-        // 若已在淡出中则直接忽略，否则会出现“两条 346ms 回调”互相取消 + 第一条先删挂点导致图标闪烁。
+
         if (sFadingOut) {
             ModuleLog.d("ICONANIM", "already fading out, skip duplicate fade-out");
             return;
         }
         sFadingOut = true;
-        // 先递增序列号：无论下面是否有挂点，退出都意味着“下一轮是新轮”。
+
         sPopupSeq++;
         sIconAnimStartedSeq = -1L;
         if (layer == null) { sFadingOut = false; return; }
@@ -513,7 +482,7 @@ public class BlurEnhanceModule extends XposedModule {
                 public void run() {
                     try {
                         removeAnimation(key);
-                        // 【护栏】若这期间新一轮已复用/替换了挂点，则本次淡出回调不能误删新轮的挂点。
+
                         if (sIconBlurLayer != layer) {
                             ModuleLog.d("ICONANIM", "fade-out done, layer already replaced, skip remove");
                             sFadingOut = false;
@@ -531,7 +500,6 @@ public class BlurEnhanceModule extends XposedModule {
         }
     }
 
-    /** 移除图标模糊空 View，并清理该挂点的动画去重状态（否则下次弹窗会被 animateIconBlur 的 skip dup 误跳过）。 */
     private void removeIconBlurLayer() {
         try {
             View layer = sIconBlurLayer;
@@ -541,7 +509,7 @@ public class BlurEnhanceModule extends XposedModule {
                 ValueAnimator old = iconAnims.remove(key);
                 if (old != null) { try { old.cancel(); } catch (Throwable ignore) {} }
             }
-            // 【消闪】移除前先把半径硬归零，确保挂点不带残留模糊地离开层级，避免删除瞬间跳变闪烁。
+
             try { applyIconBlurRadius(layer, 0.0f, false); } catch (Throwable ignore) {}
             sIconAnimStartedSeq = -1L;
             ViewGroup vg = (ViewGroup) layer.getParent();
@@ -570,17 +538,6 @@ public class BlurEnhanceModule extends XposedModule {
         }
     }
 
-    /**
-     * 【recents 探针】hook WorkSpaceScrimView.supportIconBlur() -> 强制 true。
-     * 系统在 LauncherContentAnimManager.startLauncherViewAnim 里用 ignoreAlphaAnim = isSupportIconBlur()
-     * 决定：true = 忽略 alpha 渐隐、走整体模糊；false = alpha 渐隐（桌面整体渐变消失）。
-     * 本探针只改返回值，并打印原判定，便于定位。
-     */
-    /**
-     * Smoothly animate the recents desktop-blur radius on a View. Never jumps: it always
-     * eases from the current radius to the target (~140ms). target<=0 fades out then clears.
-     */
-
     private void cancelPendingRecentsClear() {
         Runnable r = sPendingClear;
         if (r != null) {
@@ -589,19 +546,6 @@ public class BlurEnhanceModule extends XposedModule {
         }
     }
 
-    /**
-     * Ensure a fullscreen cover View exists as a sibling of the DragLayer (added into its parent),
-     * so it is NOT affected by the depth-zoom (scale/translate) applied to the DragLayer itself.
-     */
-    /**
-     * [v9] Apply recents desktop blur DIRECTLY on the DragLayer (View.setRenderEffect on itself).
-     * v8's approach (fullscreen cover + setBackgroundRenderEffect = capture behind entire screen)
-     * was proven to crush the renderer (no Java crash, but load 22+ and launcher killed).
-     * We go back to the cheap & stable self-blur; the "blur shrinks with depth-zoom" issue will be
-     * handled by compensating against the scale we now log.
-     */
-
-    /** [v18] Start the one-shot enter fade-in (0 -> MAX, ENTER_FADE_MS). */
     private void startEnterFadeIn(final View v) {
         ValueAnimator old = sRecentsEnterAnim;
         if (old != null) { try { old.cancel(); } catch (Throwable ignore) {} sRecentsEnterAnim = null; }
@@ -632,8 +576,6 @@ public class BlurEnhanceModule extends XposedModule {
         ModuleLog.d("DRAGALPHA", "enter fade-in started (0 -> " + RECENTS_BLUR_MAX + ")");
     }
 
-    /** [v18] Start the one-shot exit fade-out (current -> 0, EXIT_FADE_MS), then hard drop. */
-    /** [v23] Cancel any pending delayed-arm task. */
     private void clearPendingArm() {
         if (sPendingArm != null) {
             try { sRecentsHandler.removeCallbacks(sPendingArm); } catch (Throwable ignore) {}
@@ -641,9 +583,6 @@ public class BlurEnhanceModule extends XposedModule {
         }
     }
 
-    /** [v20] Immediately finish the exit: cancel the fade-out anim, drop the render effect,
-     *  and go back to IDLE. Called the moment the DragLayer actually reaches scale 1.0
-     *  (desktop fully restored), so no lingering "fog" remains after returning to the desktop. */
     private void finishExitNow(final View v, final String why) {
         ValueAnimator oldX = sRecentsExitAnim;
         if (oldX != null) { try { oldX.cancel(); } catch (Throwable ignore) {} sRecentsExitAnim = null; }
@@ -663,12 +602,12 @@ public class BlurEnhanceModule extends XposedModule {
 
     private void startExitFadeOut(final View v, final String why) {
         final float from = Math.max(0.0f, sRecentsLastRadius);
-        // cancel any running enter fade-in first
+
         ValueAnimator oldE = sRecentsEnterAnim;
         if (oldE != null) { try { oldE.cancel(); } catch (Throwable ignore) {} sRecentsEnterAnim = null; }
         ValueAnimator oldX = sRecentsExitAnim;
         if (oldX != null) { try { oldX.cancel(); } catch (Throwable ignore) {} sRecentsExitAnim = null; }
-        sRecentsPhase = 3; // EXITING gate: no enter may start during the fade-out
+        sRecentsPhase = 3;
         final ValueAnimator va = ValueAnimator.ofFloat(from, 0.0f);
         va.setDuration(EXIT_FADE_MS);
         va.setInterpolator(new DecelerateInterpolator());
@@ -683,7 +622,7 @@ public class BlurEnhanceModule extends XposedModule {
         va.addListener(new android.animation.AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(android.animation.Animator a) {
                 sRecentsExitAnim = null;
-                // fully drop the render effect and reset to IDLE
+
                 sRecentsAnimRadius = 0.0f;
                 sRecentsLastRadius = -1.0f;
                 sRecentsBlurView = null;
@@ -701,17 +640,11 @@ public class BlurEnhanceModule extends XposedModule {
         ModuleLog.d("DRAGALPHA", "exit fade-out started (" + from + " -> 0, why=" + why + ")");
     }
 
-    /**
-     * [v10] Cheap self-blur on the given view, with depth-zoom compensation.
-     * The DragLayer is scaled by sDragScale during the recents "depth" anim; a blur drawn on it
-     * would visually shrink with that scale. To keep the *visual* radius constant we DIVIDE the
-     * radius we set by the current scale (r_visual = r / scale).
-     */
     private void applySelfBlur(View v, float r) {
         if (v == null) return;
         sRecentsBlurView = v;
         sRecentsTargetRadius = r;
-        // [v11] scale is pinned to 1.0 by the setScaleX/Y hook, so no compensation needed.
+
         float rApplied = r;
         try {
             v.setRenderEffect(rApplied > 0.5f
@@ -720,9 +653,6 @@ public class BlurEnhanceModule extends XposedModule {
         } catch (Throwable ignore) {}
     }
 
-
-
-    /** Hard-clear recents blur (cancel any running anim, drop RenderEffect). */
     private void forceClearRecentsBlur(View v, String why) {
         ValueAnimator old = sRecentsBlurAnim;
         if (old != null) {
@@ -733,7 +663,7 @@ public class BlurEnhanceModule extends XposedModule {
         sRecentsLastRadius = -1.0f;
         sRecentsBlurView = null;
         sRecentsTargetRadius = -1.0f;
-        // [v15] reset the state machine to IDLE so a later enter starts fresh (with one ramp).
+
         sRecentsPhase = 0;
         sRecentsBlurDoneForEntry = false;
         if (v != null) {
@@ -772,7 +702,6 @@ public class BlurEnhanceModule extends XposedModule {
             }
             if (n == 0) ModuleLog.d("RECENTS", "[miss] supportIconBlur() not found");
 
-        // ===== intercept desktop fade-out: hook OplusDragLayer.setAlpha(F) =====
         try {
             Class<?> dl = Reflect.loadClass(CLS_OPLUS_DRAGLAYER, loader);
             if (dl == null) {
@@ -799,9 +728,7 @@ public class BlurEnhanceModule extends XposedModule {
                                             float cur = v.getAlpha();
                                             ModuleLog.d("DRAGALPHA", "setAlpha a=" + a + " cur=" + cur);
                                             if (a < 0.999f) {
-                                                // [v19] the enter decision is now driven by the scale TARGET value
-                                                // (see setScaleX/Y hook). setAlpha only logs; it must NOT start the
-                                                // fade-in anymore (that caused double triggers).
+
                                                 ModuleLog.d("DRAGALPHA", "setAlpha descent (log only, enter by scale)");
                                                 args[0] = 1.0f;
                                                 return chain.proceed(args);
@@ -823,7 +750,6 @@ public class BlurEnhanceModule extends XposedModule {
             ModuleLog.e("RECENTS", "hook dragLayer alpha failed", t);
         }
 
-        // ===== [v9 diagnostic] log scale/translation/visibility on DragLayer (READ-ONLY, no behavior change) =====
         try {
             Class<?> dls = Reflect.loadClass(CLS_OPLUS_DRAGLAYER, loader);
             if (dls != null) {
@@ -848,16 +774,12 @@ public class BlurEnhanceModule extends XposedModule {
                                             if (self instanceof View) {
                                                 View v = (View) self;
                                                 if (tag.equals("setScaleX") || tag.equals("setScaleY")) {
-                                                    // clamp: never allow a scale below 0.92 (max back-off = 0.92).
+
                                                     float clamped = Math.max(f, 0.92f);
-                                                    // [v24] DIRECTION-BASED detection (matches the real scale trajectory).
-                                                    // Evidence: entering recents = scale falls 1.0 -> 0.92; leaving = rises 0.92 -> 1.0.
-                                                    // Both go through the SAME intermediate values, so value alone can't tell them
-                                                    // apart -- the DIRECTION of travel can. We track the previous scale and look at
-                                                    // which side of the 0.96 midpoint the transition CROSSES.
+
                                                     float prev = sDragScale;
                                                     sDragScale = clamped;
-                                                    // ENTER: crossing 0.96 downward (from above to below) = heading to recents.
+
                                                     if (prev >= 0.96f && clamped < 0.96f) {
                                                         if (sRecentsPhase == 0) {
                                                             sRecentsPhase = 1;
@@ -866,7 +788,7 @@ public class BlurEnhanceModule extends XposedModule {
                                                             startEnterFadeIn(v);
                                                         }
                                                     }
-                                                    // EXIT: crossing 0.96 upward (from below to above) = heading back to desktop.
+
                                                     else if (prev <= 0.96f && clamped > 0.96f) {
                                                         if (sRecentsPhase == 1 || sRecentsPhase == 2) {
                                                             ModuleLog.d("EXITPROBE", "up-cross 0.96 (" + tag + " " + prev + "->" + clamped + ") = EXIT recents -> fade-out, radius=" + sRecentsLastRadius);
@@ -878,9 +800,7 @@ public class BlurEnhanceModule extends XposedModule {
                                                     ModuleLog.d("RECDIAG", tag + " val=" + f + " -> CLAMP " + clamped
                                                             + " scaleX=" + v.getScaleX() + " scaleY=" + v.getScaleY() + " phase=" + sRecentsPhase);
                                                     Object ret = chain.proceed(a);
-                                                    // [v20] desktop fully restored: once the ACTUAL scaleX & scaleY
-                                                    // are both 1.0 while we are EXITING, finish the fade-out instantly
-                                                    // (no lingering fog after returning to the desktop).
+
                                                     if (sRecentsPhase == 3
                                                             && v.getScaleX() >= 0.999f && v.getScaleY() >= 0.999f) {
                                                         ModuleLog.d("EXITPROBE", "actual scale reached 1.0 -> finish exit NOW");
@@ -905,7 +825,6 @@ public class BlurEnhanceModule extends XposedModule {
             ModuleLog.e("RECDIAG", "hook scale diag failed", t);
         }
 
-        // ===== force-clear on reset / exit-recents =====
         for (String rn : new String[]{"resetGaussianAnimState", "resetViewsProperty"}) {
             try {
                 Class<?> dl2 = Reflect.loadClass(CLS_OPLUS_DRAGLAYER, loader);
@@ -936,7 +855,6 @@ public class BlurEnhanceModule extends XposedModule {
             }
         }
 
-        // ===== fallback: desktop window becomes visible again -> hard clear =====
         try {
             Class<?> dl3 = Reflect.loadClass(CLS_OPLUS_DRAGLAYER, loader);
             if (dl3 != null) {
@@ -991,8 +909,7 @@ public class BlurEnhanceModule extends XposedModule {
         } catch (Throwable t) {
             ModuleLog.e("RECENTS", "installRecentsIconBlurProbe failed", t);
         }
-        // ===== [v14] REAL exit signals: startFadeInAnim() + Launcher.onResume() =====
-        // startFadeInAnim() = ValueAnimator(0.0 -> 1.0), the desktop fading back IN after leaving recents.
+
         try {
             Class<?> dlf = Reflect.loadClass(CLS_OPLUS_DRAGLAYER, loader);
             if (dlf != null) {
@@ -1007,7 +924,7 @@ public class BlurEnhanceModule extends XposedModule {
                                 @Override
                                 public Object intercept(XposedInterface.Chain chain) throws Throwable {
                                     Object self = chain.getThisObject();
-                                    // [v17] log only: measured to fire once at cold start, never on exit.
+
                                     ModuleLog.d("EXITPROBE", "startFadeInAnim (log only) radius=" + sRecentsLastRadius + " phase=" + sRecentsPhase);
                                     return chain.proceed();
                                 }
@@ -1020,7 +937,6 @@ public class BlurEnhanceModule extends XposedModule {
             ModuleLog.e("EXITPROBE", "hook startFadeInAnim failed", t);
         }
 
-        // Launcher.onResume() = desktop activity resumed = definitely back on the desktop.
         try {
             Class<?> lc = Reflect.loadClass(CLS_LAUNCHER, loader);
             if (lc != null) {
@@ -1035,9 +951,7 @@ public class BlurEnhanceModule extends XposedModule {
                                 @Override
                                 public Object intercept(XposedInterface.Chain chain) throws Throwable {
                                     Object self = chain.getThisObject();
-                                    // [v17] onResume fires DURING the enter transition too (log evidence t=8708:
-                                    // onResume while already phase=2 in recents) -> it is NOT an exit signal.
-                                    // Keep it as pure logging; exit is driven by the scale-restore signal.
+
                                     ModuleLog.d("EXITPROBE", "Launcher.onResume (log only) radius=" + sRecentsLastRadius + " phase=" + sRecentsPhase);
                                     return chain.proceed();
                                 }
@@ -1075,7 +989,7 @@ public class BlurEnhanceModule extends XposedModule {
                                     if (isPause && sShortcutBlurActive) {
                                         sSwallowCount++;
                                         ModuleLog.d("PAUSE", "swallow pauseWindowBlur during shortcut (#" + sSwallowCount + ")");
-                                        return null; // 吞掉暂停，不放行
+                                        return null;
                                     }
                                     return chain.proceed();
                                 }
@@ -1148,16 +1062,14 @@ public class BlurEnhanceModule extends XposedModule {
         if (view == null) return;
         try {
             ModuleLog.d("LIVE", "armBlurForView id=" + mid);
-            // 【打断退出淡出】若上一轮的退出淡出还没跑完就再次进入，先取消淡出状态。
-            // （已递增的 sPopupSeq 保留，正好让本轮成为“新一轮”，动画能正常启动。）
+
             if (sFadingOut) {
                 sFadingOut = false;
                 ModuleLog.d("ICONANIM", "enter during fade-out, aborted fade-out state");
             }
-            // 【吞暂停】置位窗口开：早于 PopupBlurView.createBlurAnim 内的 pauseWindowBlur 调用，才能吞掉它。
+
             sShortcutBlurActive = true;
-            // 【序列号】“新一轮”的判定完全交给退出端（fadeOutAndRemoveIconBlur 负责 sPopupSeq++ 且 sIconAnimStartedSeq=-1）。
-            // 这里不再依赖带延迟的 wasActive，避免连续快速进出时误判成同一轮 -> 跳过动画。
+
             ModuleLog.d("PAUSE", "window OPEN (armBlurForView id=" + mid + ")");
             final int flags = resolveBlurFlags(view);
             ModuleLog.d("LIVE", "flags=" + flags + " (static=" + ((flags & F_STATIC) != 0)
@@ -1169,23 +1081,18 @@ public class BlurEnhanceModule extends XposedModule {
 
             final View fv = view;
 
-            // 【图标模糊新挂点】在 pbv 之下插入全屏空 View，把模糊挂到它上，
-            // 避免挂 anchor 容器导致图标被吃掉。挂点失败则回退到 fv（保持旧行为）。
-            // 【关键】armed 标志必须打到「实际挂模糊的 target」上，否则 isIconBlurArmed(target) 为 false -> skipped: disarmed。
             View iconTarget = fv;
             if ((flags & (F_ICON | F_ICON_ANIM)) != 0) {
                 View layer = ensureIconBlurLayer(fv);
                 if (layer != null) {
                     iconTarget = layer;
-                    setIconBlurArmed(fv, false);          // 原 anchor 不再需要标志
-                    setIconBlurArmed(iconTarget, true);   // 标志改打到实际挂点
+                    setIconBlurArmed(fv, false);
+                    setIconBlurArmed(iconTarget, true);
                 }
             }
             final View itv = iconTarget;
             if ((flags & (F_ICON | F_ICON_ANIM)) != 0) {
-                // 【渐进】文件夹内(F_ICON_ANIM)与桌面(F_ICON)统一：都不在 armBlurForView 启动动画。
-                // 这里只把起点压到 0（清晰）并置 armed；真正动画改由 onCreateOpenAnimation 在展开开始时启动。
-                // 【幂等】同一轮弹窗内 arm 会被调两次（companion + 本体），只对首次 arm 做起点压 0 + 记录轮次。
+
                 final long seq = sPopupSeq;
                 if (sIconAnimStartedSeq != seq) {
                     sIconAnimStartedSeq = seq;
@@ -1326,9 +1233,6 @@ public class BlurEnhanceModule extends XposedModule {
         }
     }
 
-    /**
-     * @param animate true = 走 0→BLUR_RADIUS 渐进动画（有模糊半径过渡）；false = 一次性设置（旧行为，会“清晰→糊”硬切）。
-     */
     private boolean isCurrentAnimation(String key, ValueAnimator va) {
         synchronized (iconAnims) {
             return iconAnims.get(key) == va;
@@ -1340,8 +1244,6 @@ public class BlurEnhanceModule extends XposedModule {
             iconAnims.remove(key);
         }
     }
-
-
 
     private void clearStaticLayers(View view) {
         try {
@@ -1448,10 +1350,6 @@ public class BlurEnhanceModule extends XposedModule {
         }
     }
 
-    /**
-     * 【图标模糊渐进】造一个控制挂点模糊半径 from->to 的 ValueAnimator。
-     * 与系统菜单展开 AnimatorSet 一起 play，时间轴完全对齐（不再自己 postDelayed 启动）。
-     */
     private Object createIconBlurAnimator(final View view, final float from, final float to, long duration) {
         if (view == null) return null;
         try {
@@ -1514,10 +1412,6 @@ public class BlurEnhanceModule extends XposedModule {
         }
     }
 
-
-
-
-
     private Object getStaticFloatProperty(Object dc, String name) {
         Field f = Reflect.field(dc.getClass(), name);
         if (f == null) return null;
@@ -1559,8 +1453,6 @@ public class BlurEnhanceModule extends XposedModule {
             return null;
         }
     }
-
-
 
     private boolean installPostEffectHooks(ClassLoader loader) {
         Class<?> cls;
@@ -1681,8 +1573,6 @@ public class BlurEnhanceModule extends XposedModule {
             return false;
         }
     }
-
-
 
     private ClassLoader currentClassLoader() {
         return cl;
