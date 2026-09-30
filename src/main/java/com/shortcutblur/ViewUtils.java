@@ -120,7 +120,7 @@ public final class ViewUtils {
             if (!v.isAttachedToWindow()) return false;
             if (!v.isShown()) return false;
             if (v.getWidth() <= 0 || v.getHeight() <= 0) return false;
-
+            // 用局部 Rect，避免多个容器共用静态 Rect 时相互覆盖（正确性 + 线程安全）。
             Rect r = new Rect();
             if (!v.getGlobalVisibleRect(r)) return false;
             if (r.width() < 4 || r.height() < 4) return false;

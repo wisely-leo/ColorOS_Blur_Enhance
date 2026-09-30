@@ -14,10 +14,14 @@
 - **壁纸深度模糊**：接入桌面 depth controller，随桌面状态联动，让模糊层次更自然
 - **后处理采样适配**：统一后处理采样率，改善模糊边缘的马赛克 / 颗粒感
 
-### 多任务图标模糊（Recents，v24 起冻结）
-- **方向穿越判据**：以 `down-cross 0.96` / `up-cross 0.96` 作为进入 / 退出多任务的方向穿越阈值，识别「下拉进入 Recents、上滑退出」手势
-- **桌面图标模糊**：进入 Recents 时为桌面图标叠加模糊，退出时平滑还原
-- **状态机驱动**：由 `sRecentsPhase` 单次流程状态机管理，配合 `isInsideOpenFolder` 与文件夹场景严格隔离，避免与文件夹模糊相互干扰
+### 多任务图标模糊（Recents）
+- **入场时机**：hook launcher 自己的「进入概览动画」入口 `SwipeToRecentAnimationHelper.goOverviewAnimation()`（实测比状态机 / 可见性更早，且每个手势都有）
+- **退场判据**：`LauncherState` 状态机（`onStateTransitionStart(NORMAL)`）+ scale 阈值「**先跌破 0.96、再回升过 0.988**」（先跌破再回升，避免下降途中经过 0.988 造成误退）
+- **桌面不淡出**：拦截 `OplusDragLayer.setAlpha`，`a < 0.999` 时钳回 `1.0`，保持桌面图标层不淡出
+- **渐进动画**：入场 `0 → 64` / 180ms / Decelerate；退场 120ms
+- **不动原生模糊**：`supportIconBlur()` 原样传递（pass-through），不强制打开 launcher 自带图标模糊
+- **代码结构**：控制器 `RecentsBlur.java`（经 `HookApi` 与 XposedModule 解耦）；通用工具 `BlurLib.java`
+- **调参**：免 root，广播 `com.wiselyleo.blurenhance.SETCONF`（`scale_min` / `blur_max` / `scaleexit` / `gts` / `tint` / `diag` / `verbose` 等）
 
 ### 时钟组件字形模糊
 - **字形贴合模糊**：对 ColorOS 桌面时钟组件的**时间 / 日期 / 天气文字**以及**天气图标**，生成与字形轮廓贴合的 Path，通过 setPathProvider + invalidatePath 施加动态高斯模糊

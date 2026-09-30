@@ -12,6 +12,8 @@ public final class Reflect {
 
     private static final int MAX_CACHE = 512;
 
+    // 用带容量上限的 LRU 替代"超限即全清"的粗暴策略，避免周期性缓存全失效导致的反复反射解析。
+    // 访问集中在 hook 回调（主线程为主），用 accessOrder LinkedHashMap + 同步开销可控。
     private static final Map<String, Method> METHOD_CACHE = newCache();
     private static final Map<String, Field> FIELD_CACHE = newCache();
     private static final Map<String, Constructor<?>> CTOR_CACHE = newCache();

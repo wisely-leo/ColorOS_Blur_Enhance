@@ -9,8 +9,12 @@ import java.io.OutputStreamWriter;
 import java.io.Writer;
 
 public final class ModuleLog {
-
-    public static final boolean ENABLED = false;
+    /**
+     * true = release 构建：日志开关变成编译期常量，所有 d/e/i/dv 调用点被 javac 消除
+     *（不写文件、不打 logcat）。rel 构建只需把这里改成 true。
+     */
+    public static final boolean RELEASE = true;
+    public static final boolean ENABLED = !RELEASE;
 
     public static final String TAG = "colorosblurenhance";
 
@@ -34,6 +38,13 @@ public final class ModuleLog {
     private static volatile boolean broken;
 
     private ModuleLog() {}
+
+    // [v26] 高频（每帧）日志开关：默认关，避免动画期“每行一次 open+flush+close”的文件 I/O
+    public static volatile boolean VERBOSE = false;
+    public static void dv(String category, String detail) {
+        if (!VERBOSE) return;
+        d(category, detail);
+    }
 
     public static void d(String category, String detail) {
         if (!ENABLED) return;
