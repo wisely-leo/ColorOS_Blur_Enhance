@@ -1,5 +1,7 @@
 # ColorOS Blur Enhance
 
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPLv3--or--later-blue.svg)](LICENSE) [![Platform](https://img.shields.io/badge/Android-16%20(API%2036)-green.svg)](#-支持环境)
+
 为 **ColorOS 16 桌面、多任务、时钟组件**提供动态模糊增强的 [LSPosed](https://github.com/LSPosed/LSPosed) 模块。
 
 > 本模块由 **wisely-leo/Color-os-shortcut-enhance** 与桌面时钟字形模糊实验合并重构而来：以原 ShortcutBlur 为主体，并入时钟文字 / 天气图标的字形贴合动态高斯模糊能力，以及多任务（Recents）桌面图标模糊。
@@ -81,14 +83,16 @@ ColorOS_Blur_Enhance/
 ├── libs/
 │   └── libxposed-api-102.jar           # 编译依赖（LSPosed API 102）
 └── src/main/java/com/shortcutblur/
-    ├── BlurEnhanceModule.java          # 模块主入口（桌面 / Recents / 时钟 Hook 安装）
+    ├── BlurEnhanceModule.java          # 模块主入口（XposedModule；安装桌面 / 时钟 / 组件 / 弹窗 Hook）
+    ├── RecentsBlur.java                # 多任务（Recents / Overview）模糊控制器（经 HookApi 与框架解耦）
+    ├── BlurLib.java                    # 通用库（launcher 类名常量 + 反射 / View / 状态 / 渲染效果工具）
     ├── GlyphBlurRenderer.java          # 字形贴合模糊渲染（Path 构建 / 轮询刷新）
     ├── WidgetBlurAttacher.java         # 桌面组件（Widget）模糊挂载
     ├── ClockTextAlphaHook.java         # 时钟文字 alpha Hook
     ├── ClockIds.java                   # 时钟文字 / 天气图标 id 常量集中定义
     ├── Reflect.java                    # 反射工具（带容量上限的 LRU 缓存）
     ├── ViewUtils.java                  # 视图工具（视图树遍历 / 可见性判定）
-    └── ModuleLog.java                  # 可选文件日志（编译期开关，默认关闭）
+    └── ModuleLog.java                  # 可选文件日志（RELEASE 编译期开关，发布版即关闭）
 ```
 
 ---
@@ -122,14 +126,17 @@ ColorOS_Blur_Enhance/
 
 ## 🔇 日志
 
-`ModuleLog` 为**编译期开关**的调试文件日志，**发布版本固定关闭**（`ENABLED = false`）：
+`ModuleLog` 是**编译期开关**的调试文件日志，**发布版本固定关闭**：
 
 ```java
-public static final boolean ENABLED = false;
+public static final boolean RELEASE = true;      // 发布：true = 无日志
+public static final boolean ENABLED = !RELEASE;
 ```
 
-- 因 `ENABLED` 是 `final` 常量，javac 常量折叠 + JIT 死代码消除，**关闭时零运行时开销**，且**不产生任何日志文件**。
-- 需调试时改为 `true` 重新构建；日志按进程分流写入：
+- `RELEASE` / `ENABLED` 均为 `final` 常量 → javac 常量折叠 + 死代码消除，**关闭时零运行时开销**，且**不产生任何日志文件**。（已验证：release 版 dex 内 `FileOutputStream` / `OutputStreamWriter` / 日志格式串全部消失）
+- **调试**：把 `RELEASE` 改为 `false` 重新构建即可，所有日志与调参开关照常工作。
+- **二级开关** `ModuleLog.VERBOSE`（默认 `false`）：控制动画期「每帧」日志（`DRAGALPHA` 逐帧 / `SCALECLAMP` / `BLURAPPLY`）。默认关闭，避免过渡动画期间「每行一次 open+flush+close」的文件 I/O 抖动。
+- 日志按进程分流写入：
   - 主进程：`/storage/emulated/0/Download/ColorOSBlurEnhance.log`
   - 后处理进程：`/storage/emulated/0/Download/PostEffectBlur.log`
 - 运行时 logcat 统一 TAG 为 `ColorOSBlurEnhance`。
@@ -142,9 +149,11 @@ public static final boolean ENABLED = false;
 
 | 版本 | 说明 |
 |---|---|
+| **v42-dev**（进行中） | **Recents 解冻重做**：入场改 hook `SwipeToRecentAnimationHelper.goOverviewAnimation()`；退场走 `LauncherState` 状态机 + scale「先跌破 0.96、再回升过 0.988」；`OplusDragLayer.setAlpha` 钳回 1.0（桌面图标层不淡出）；恢复 `0→64` / 180ms 渐进入场；不再强开原生 `supportIconBlur`。**结构拆分**：抽出 `BlurLib`（通用库）与 `RecentsBlur`（多任务控制器，经 `HookApi` 解耦），`BlurEnhanceModule` 2758 → 1302 行 |
+| **v41** | Recents 入场 / 退场双阈值重构 + 性能与清理 |
 | **v40** | 快捷方式吞暂停保活 + 图标模糊独立挂点 + 进入渐进 / 退出渐降（与菜单展开同步）；性能优化：OPlus API 反射缓存、反射缓存 LRU 化、帧内 scratch 复用、视图矩形局部化修复 |
 | v38.6 | 重构：抽出 ClockIds、命名魔法数、补类文档 |
-| v24 | Recents 桌面图标模糊（方向穿越判据） |
+| v24 | Recents 桌面图标模糊（方向穿越判据；v42-dev 已重做，见上） |
 
 > 注：v38.7 为**内部测试版本，未发布到 git**，其内容已随 v40 一并发布，故不单列。
 
@@ -152,4 +161,33 @@ public static final boolean ENABLED = false;
 
 ## 📄 许可证
 
-GPL-3.0，见 [LICENSE](LICENSE)。
+本项目以 **GNU 通用公共许可证第 3 版或更新版本（GPL-3.0-or-later）** 发布，完整条款见 [LICENSE](LICENSE)。
+
+```
+ColorOS Blur Enhance —— ColorOS 16 桌面 / 多任务 / 时钟组件的动态模糊增强（LSPosed 模块）
+Copyright (C) 2026 wisely-leo
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+```
+
+- **源文件版权头**：`src/main/java/com/shortcutblur/` 下每个源文件头部均带有
+  `SPDX-License-Identifier: GPL-3.0-or-later` 与上述版权声明。
+- **源码可得性（GPL-3.0 §6）**：本仓库即对应源码。对外分发编译产物（模块 APK）时，
+  须同时提供或明确指明获取本源码的方式。
+- **派生作品**：基于本项目的修改与再分发，必须同样以 GPL-3.0（或更新版本）开放源码，
+  并保留原有版权与许可声明。
+- **第三方组件**：`libs/libxposed-api-102.jar`（libxposed API）版权归其作者所有，
+  遵循其自身许可；本项目的 GPL 仅覆盖本项目自身代码。
+- **商标与隶属**：本项目为第三方开源项目，与 OPPO / ColorOS / LSPosed 官方无隶属关系，
+  相关商标归各自所有者所有。
