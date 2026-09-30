@@ -7,6 +7,7 @@ import android.content.IntentFilter;
 import android.content.BroadcastReceiver;
 import android.graphics.RenderEffect;
 import android.graphics.Shader;
+import android.os.SystemClock;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
@@ -44,28 +45,23 @@ public class BlurEnhanceModule extends XposedModule {
 
     private static volatile ValueAnimator sRecentsBlurAnim = null;
     private static volatile float sRecentsAnimRadius = 0.0f;
-
-    private static volatile float sDragScale = 1.0f;
-
+    private static volatile float sPrevScale = 1.0f;
+    private static volatile boolean sUsed093 = false;
+    private static volatile long sLastExitTime = 0L;
+    private static volatile boolean sReached9999 = false;
     private static volatile View sRecentsBlurView = null;
 
     private static volatile float sRecentsTargetRadius = -1.0f;
 
     private static volatile int sRecentsPhase = 0;
 
-    private static volatile boolean sRecentsBlurDoneForEntry = false;
-
     private static final long ENTER_FADE_MS = 180L;
     private static final long EXIT_FADE_MS = 120L;
+    private static final long EXIT_COOLDOWN_MS = 400L;
 
     private static volatile ValueAnimator sRecentsEnterAnim = null;
+private static volatile ValueAnimator sRecentsExitAnim = null;
 
-    private static volatile ValueAnimator sRecentsExitAnim = null;
-
-    private static volatile boolean sRecentsArmed = false;
-
-    private static final long ARM_DELAY_MS = 180L;
-    private static Runnable sPendingArm = null;
 
     private static final android.os.Handler sRecentsHandler =
             new android.os.Handler(android.os.Looper.getMainLooper());
@@ -582,13 +578,6 @@ public class BlurEnhanceModule extends XposedModule {
         ModuleLog.d("DRAGALPHA", "enter fade-in started (0 -> " + RECENTS_BLUR_MAX + ")");
     }
 
-    private void clearPendingArm() {
-        if (sPendingArm != null) {
-            try { sRecentsHandler.removeCallbacks(sPendingArm); } catch (Throwable ignore) {}
-            sPendingArm = null;
-        }
-    }
-
     private void finishExitNow(final View v, final String why) {
         ValueAnimator oldX = sRecentsExitAnim;
         if (oldX != null) { try { oldX.cancel(); } catch (Throwable ignore) {} sRecentsExitAnim = null; }
@@ -599,9 +588,6 @@ public class BlurEnhanceModule extends XposedModule {
         sRecentsBlurView = null;
         sRecentsTargetRadius = -1.0f;
         sRecentsPhase = 0;
-        sRecentsBlurDoneForEntry = false;
-        sRecentsArmed = false;
-        clearPendingArm();
         if (v != null) { try { v.setRenderEffect(null); } catch (Throwable ignore) {} }
         ModuleLog.d("DRAGALPHA", why + " -> exit finished NOW (phase=IDLE)");
     }
@@ -634,9 +620,6 @@ public class BlurEnhanceModule extends XposedModule {
                 sRecentsBlurView = null;
                 sRecentsTargetRadius = -1.0f;
                 sRecentsPhase = 0;
-                sRecentsBlurDoneForEntry = false;
-                sRecentsArmed = false;
-                clearPendingArm();
                 if (v != null) { try { v.setRenderEffect(null); } catch (Throwable ignore) {} }
                 ModuleLog.d("DRAGALPHA", why + " -> exit fade-out done (phase=IDLE)");
             }
@@ -671,7 +654,6 @@ public class BlurEnhanceModule extends XposedModule {
         sRecentsTargetRadius = -1.0f;
 
         sRecentsPhase = 0;
-        sRecentsBlurDoneForEntry = false;
         if (v != null) {
             try { v.setRenderEffect(null); } catch (Throwable ignore) {}
         }
@@ -759,7 +741,7 @@ public class BlurEnhanceModule extends XposedModule {
         try {
             Class<?> dls = Reflect.loadClass(CLS_OPLUS_DRAGLAYER, loader);
             if (dls != null) {
-                for (String sn : new String[]{"setScaleX", "setScaleY", "setTranslationX", "setTranslationY", "setScaleXByTaskView", "setScaleYByTaskView", "setTranslationXByTaskView", "setTranslationYByTaskView"}) {
+                for (String sn : new String[]{"setScaleX", "setScaleY"}) {
                     for (Method sm : dls.getDeclaredMethods()) {
                         if (!sm.getName().equals(sn)) continue;
                         Class<?>[] pt = sm.getParameterTypes();
@@ -780,24 +762,40 @@ public class BlurEnhanceModule extends XposedModule {
                                             if (self instanceof View) {
                                                 View v = (View) self;
                                                 if (tag.equals("setScaleX") || tag.equals("setScaleY")) {
-
                                                     float clamped = Math.max(f, 0.92f);
-
-                                                    float prev = sDragScale;
-                                                    sDragScale = clamped;
-
-                                                    if (prev >= 0.96f && clamped < 0.96f) {
-                                                        if (sRecentsPhase == 0) {
-                                                            sRecentsPhase = 1;
-                                                            ModuleLog.d("EXITPROBE", "down-cross 0.96 (" + tag + " " + prev + "->" + clamped + ") = ENTER recents -> fade-in");
+                                                    float prevScale = sPrevScale;
+                                                    sPrevScale = clamped;
+                                                    if (clamped >= 0.9999f) sReached9999 = true;
+                                                    if (sRecentsPhase == 0 && prevScale >= 0.9999f && clamped < 0.9999f) {
+                                                        sRecentsPhase = 1;
+                                                        sUsed093 = false;
+                                                        sReached9999 = false;
+                                                        ModuleLog.d("EXITPROBE", "state<0.9999 (" + tag + " " + clamped + ") = ENTER recents -> fade-in");
+                                                        cancelPendingRecentsClear();
+                                                        startEnterFadeIn(v);
+                                                    }
+                                                    else if (sRecentsPhase == 0 && !sReached9999 && prevScale >= 0.95f && clamped < 0.95f) {
+                                                        sRecentsPhase = 1;
+                                                        sUsed093 = false;
+                                                        ModuleLog.d("EXITPROBE", "state<0.95 (" + tag + " " + clamped + ") = ENTER recents (fallback) -> fade-in");
+                                                        cancelPendingRecentsClear();
+                                                        startEnterFadeIn(v);
+                                                    }
+                                                    else if (prevScale < 0.93f && clamped >= 0.93f) {
+                                                        if ((sRecentsPhase == 1 || sRecentsPhase == 2)
+                                                                && SystemClock.uptimeMillis() - sLastExitTime >= EXIT_COOLDOWN_MS) {
+                                                            sUsed093 = true;
+                                                            sLastExitTime = SystemClock.uptimeMillis();
+                                                            sReached9999 = false;
+                                                            ModuleLog.d("EXITPROBE", "EXIT via 0.93 (" + tag + " prev=" + prevScale + "->" + clamped + " radius=" + sRecentsLastRadius + ") -> fade-out");
                                                             cancelPendingRecentsClear();
-                                                            startEnterFadeIn(v);
+                                                            startExitFadeOut(v, "scaleRestore093");
                                                         }
                                                     }
-
-                                                    else if (prev <= 0.96f && clamped > 0.96f) {
-                                                        if (sRecentsPhase == 1 || sRecentsPhase == 2) {
-                                                            ModuleLog.d("EXITPROBE", "up-cross 0.96 (" + tag + " " + prev + "->" + clamped + ") = EXIT recents -> fade-out, radius=" + sRecentsLastRadius);
+                                                    else if (prevScale <= 0.9980f && clamped > 0.9980f && !sUsed093) {
+                                                        if ((sRecentsPhase == 1 || sRecentsPhase == 2)
+                                                                && SystemClock.uptimeMillis() - sLastExitTime >= EXIT_COOLDOWN_MS) {
+                                                            sReached9999 = false;
                                                             cancelPendingRecentsClear();
                                                             startExitFadeOut(v, "scaleRestore");
                                                         }
@@ -808,15 +806,13 @@ public class BlurEnhanceModule extends XposedModule {
                                                     Object ret = chain.proceed(a);
 
                                                     if (sRecentsPhase == 3
-                                                            && v.getScaleX() >= 0.999f && v.getScaleY() >= 0.999f) {
+                                                            && v.getScaleX() >= 0.999f && v.getScaleY() >= 0.999f
+                                                            && sRecentsExitAnim == null) {
                                                         ModuleLog.d("EXITPROBE", "actual scale reached 1.0 -> finish exit NOW");
                                                         finishExitNow(v, "scaleActual1.0");
                                                     }
                                                     return ret;
                                                 }
-                                                if (ModuleLog.ENABLED) ModuleLog.d("RECDIAG", tag + " val=" + f
-                                                        + " scaleX=" + v.getScaleX() + " scaleY=" + v.getScaleY()
-                                                        + " tx=" + v.getTranslationX() + " ty=" + v.getTranslationY());
                                             }
                                         } catch (Throwable ignore) {}
                                         return chain.proceed();
