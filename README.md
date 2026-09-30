@@ -2,34 +2,37 @@
 
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPLv3--or--later-blue.svg)](LICENSE) [![Platform](https://img.shields.io/badge/Android-16%20(API%2036)-green.svg)](#-支持环境)
 
-为 **ColorOS 16 桌面、多任务、时钟组件**提供动态模糊增强的 [LSPosed](https://github.com/LSPosed/LSPosed) 模块。
+为 **ColorOS 16 桌面、多任务与时钟组件**提供动态模糊增强的 [LSPosed](https://github.com/LSPosed/LSPosed) 模块。
 
-> 本模块由 **wisely-leo/Color-os-shortcut-enhance** 与桌面时钟字形模糊实验合并重构而来：以原 ShortcutBlur 为主体，并入时钟文字 / 天气图标的字形贴合动态高斯模糊能力，以及多任务（Recents）桌面图标模糊。
+> 本项目由 `wisely-leo/Color-os-shortcut-enhance`（原 ShortcutBlur）与桌面时钟字形模糊实验合并重构而来。
 
 ---
 
 ## ✨ 功能
 
-### 桌面模糊（原 ShortcutBlur 能力）
+### 桌面模糊
 - **图标模糊**：长按 / 拖拽图标时，按需为图标叠加动态模糊
-- **文件夹模糊**：打开文件夹时，内部图标模糊并带渐进动画；关闭时平滑还原
-- **壁纸深度模糊**：接入桌面 depth controller，随桌面状态联动，让模糊层次更自然
-- **后处理采样适配**：统一后处理采样率，改善模糊边缘的马赛克 / 颗粒感
+- **文件夹模糊**：打开文件夹时内部图标模糊并带渐进动画，关闭时平滑还原
+- **壁纸深度模糊**：接入桌面深度控制器，随桌面状态联动，模糊层次更自然
+- **后处理采样适配**：提升后处理模糊采样率，改善模糊边缘的颗粒感
 
-### 多任务图标模糊（Recents）
-- **入场时机**：hook launcher 自己的「进入概览动画」入口 `SwipeToRecentAnimationHelper.goOverviewAnimation()`（实测比状态机 / 可见性更早，且每个手势都有）
-- **退场判据**：`LauncherState` 状态机（`onStateTransitionStart(NORMAL)`）+ scale 阈值「**先跌破 0.96、再回升过 0.988**」（先跌破再回升，避免下降途中经过 0.988 造成误退）
-- **桌面不淡出**：拦截 `OplusDragLayer.setAlpha`，`a < 0.999` 时钳回 `1.0`，保持桌面图标层不淡出
-- **渐进动画**：入场 `0 → 64` / 180ms / Decelerate；退场 120ms
-- **不动原生模糊**：`supportIconBlur()` 原样传递（pass-through），不强制打开 launcher 自带图标模糊
-- **代码结构**：控制器 `RecentsBlur.java`（经 `HookApi` 与 XposedModule 解耦）；通用工具 `BlurLib.java`
-- **调参**：免 root，广播 `com.wiselyleo.blurenhance.SETCONF`（`scale_min` / `blur_max` / `scaleexit` / `gts` / `tint` / `diag` / `verbose` 等）
+### 多任务（Recents）桌面模糊
+- **进入多任务**时为桌面图标层叠加模糊，退出时平滑还原
+- **入场时机**取自桌面自身的「进入概览」动画入口，手势一抬即开始
+- **退场判据**以桌面缩放回弹为主，由桌面状态机兜底与校正
+- **桌面图标层不淡出**：进入多任务时保持桌面不透明，只叠加模糊
+- **渐进过渡**：入场由浅入深，退场快速回落
+- **不干预原生行为**：不改动桌面自带的图标模糊开关
 
 ### 时钟组件字形模糊
-- **字形贴合模糊**：对 ColorOS 桌面时钟组件的**时间 / 日期 / 天气文字**以及**天气图标**，生成与字形轮廓贴合的 Path，通过 setPathProvider + invalidatePath 施加动态高斯模糊
-- **时钟文字**：Hook 时钟进程 RemoteViews.setTextColor，对时钟文字颜色叠加 alpha（70% 透明度）
-- **天气图标**：因天气图标由 RemoteViews.setImageViewBitmap() 设置，改用 View.setAlpha() 处理
-- **刷新轮询**：TextClock 不触发 TextWatcher，模块以 500ms 轮询感知文字变化并重建快照
+- 对桌面时钟的**时间 / 日期 / 天气文字**与**天气图标**施加贴合字形轮廓的动态模糊
+- 时钟文字通过颜色透明度叠加，形成字形模糊背景；天气图标由位图设置，改用整体透明度处理
+- 时钟文字不触发文本变化回调，模块以轮询方式感知刷新
+
+### 性能
+- 反射结果缓存（带容量上限的 LRU），避免热点路径反复解析
+- 帧内临时对象复用，减少每帧内存分配
+- 发布版日志在**编译期**彻底关闭，零运行时开销
 
 ---
 
@@ -41,13 +44,16 @@
 | 框架 | LSPosed（libxposed API 102） |
 | 桌面 | **仅 ColorOS / OPPO 系统桌面** |
 
-本模块声明 **5 个作用域包**，分三类：
+模块共声明 **5 个作用域包**，分三类：
 
-- **桌面进程**：com.android.launcher、com.oplus.launcher、com.coloros.launcher（代码中以 isTargetLauncher 统一匹配）。ColorOS 桌面内部复用 AOSP launcher3 的类路径，模块对 PopupBlurView、ArrowPopup、OplusPopupContainerWithArrow 等挂载 Hook，实现图标 / 文件夹 / 壁纸深度模糊与多任务图标模糊；并对 RemoteViews.apply / AppWidgetHostView.updateAppWidget 挂载 Hook，驱动时钟组件字形模糊。
-- **时钟进程**：com.coloros.alarmclock。Hook 时钟文字颜色，实现字形模糊背景与文字透明。
-- **后处理进程**：com.oplus.blur（独立进程，非桌面本身）。模块对类 e.a 的 c / e / d / f 四个方法挂载 Hook，将后处理模糊采样率由系统原生 0.25 提升至 0.5。
+- **桌面进程**（`com.android.launcher` / `com.oplus.launcher` / `com.coloros.launcher`）
+  图标 / 文件夹 / 壁纸深度模糊、多任务模糊、时钟组件字形模糊
+- **时钟进程**（`com.coloros.alarmclock`）
+  时钟文字透明度处理
+- **后处理进程**（`com.oplus.blur`）
+  后处理模糊采样率适配
 
-> ⚠️ 因此本模块**并非只作用于桌面**：必须同时覆盖 com.oplus.blur 与 com.coloros.alarmclock 进程，否则后处理采样适配与时钟字形模糊不会生效。
+> ⚠️ 本模块**并非只作用于桌面**：必须同时覆盖后处理与时钟进程，否则对应能力不会生效。
 
 已在 OnePlus / OPPO PLC110（ColorOS 16.1，Android 16 / API 36）实机验证。
 
@@ -59,7 +65,55 @@
 2. 从 [Releases](../../releases) 下载并安装模块 APK
 3. 在 LSPosed 管理器中启用本模块
 4. **作用域**保持默认（模块已声明，全选即可）
-5. 重启相应作用域（桌面进程、com.oplus.blur 与 com.coloros.alarmclock 进程）生效
+5. 重启相应作用域（桌面进程、后处理进程、时钟进程）后生效
+
+---
+
+## 🧠 工作原理
+
+- **桌面 / 文件夹 / 壁纸模糊**
+  挂接到桌面弹窗的入场 / 退场动画入口，把模糊动画并入原生动画集合，与缩放、透明度同步；按场景分流为「文件夹内图标模糊」与「壁纸深度模糊」两条路径，两者严格隔离，避免互相干扰。
+
+- **多任务模糊**
+  由三类信号共同判断进 / 出时机：桌面自身的「进入概览」动画、桌面状态机、桌面缩放回弹。三类信号先到先得，进入时挂载模糊并保持桌面不透明，退出时平滑还原。
+
+- **时钟组件字形模糊**
+  在组件视图更新后定位到时钟视图，按其文字基线在视图本地坐标系内构建字形轮廓，再对轮廓施加动态模糊；多个时钟组件之间状态相互隔离，避免串扰。
+
+- **后处理采样**
+  提升后处理进程的模糊采样率，改善模糊边缘的马赛克 / 颗粒感。
+
+---
+
+## ⚙️ 运行期调参（免 root）
+
+无需重装：向模块发送广播即可实时调整。所有参数均为**字符串**附加项（`--es`），并需带 `--user 0`。
+
+| 参数 | 作用 |
+|---|---|
+| `blur_max` | 多任务模糊的最大半径 |
+| `scale_min` | 桌面缩放钳制下限 |
+| `scaleexit off` | 关闭「缩放回弹」退场判据（退场仅由状态机负责） |
+| `scaleenter off` | 关闭「缩放跌落」补入场信号 |
+| `gts off` | 关闭桌面状态机源头信号 |
+| `visenter on` / `visexit on` | 启用基于可见性的进 / 退场信号（默认关闭） |
+| `tint on` | 用红色滤镜替代模糊，仅用于肉眼确认生效时机 |
+| `mark <文本>` | 在日志中打一个标记，便于对照某次操作 |
+
+```bash
+am broadcast --user 0 -a com.wiselyleo.blurenhance.SETCONF --es blur_max 48
+am broadcast --user 0 -a com.wiselyleo.blurenhance.SETCONF --es mark "enter-recents"
+```
+
+---
+
+## 🔇 日志与发布
+
+- 日志由**编译期开关**控制：发布版关闭。开关是编译期常量，关闭后日志代码被完全消除 —— **不产生任何日志文件，也没有运行时开销**。
+- 调试时把开关改为开启、重新构建即可；另有「每帧日志」二级开关，默认关闭，以避免过渡动画期间频繁写文件造成的卡顿。
+- 日志按进程分流写入设备 `Download` 目录：主进程与后处理进程各写一个文件；运行时 logcat 使用统一 TAG。
+
+> ⚠️ 这是一个刻意的发布安全设计：开关在编译期决定，不受运行时因素隐式改变。
 
 ---
 
@@ -67,11 +121,15 @@
 
 | 项 | 值 |
 |---|---|
-| 模块 ID（applicationId） | com.wiselyleo.blurenhance |
-| 模块入口 | com.shortcutblur.BlurEnhanceModule |
-| Java 包名（namespace） | com.shortcutblur |
-| 版本 | **v40（versionCode 400）** |
+| 模块 ID（applicationId） | `com.wiselyleo.blurenhance` |
+| 模块入口 | `com.shortcutblur.BlurEnhanceModule` |
+| Java 包名（namespace） | `com.shortcutblur` |
+| 作用域 | 5 个（见「支持环境」） |
 | 最低 / 目标 SDK | 36 / 36 |
+| APK 清单版本 | `v41`（versionCode 401） |
+
+> 📌 当前构建流程只替换 `classes.dex`，APK 清单（版本号 / 版本名）沿用打包模板。
+> 因此**清单中的版本不会随代码版本自动变化** —— 发布新版本前，需先更新模板清单里的 `versionCode` / `versionName`。
 
 ---
 
@@ -83,65 +141,24 @@ ColorOS_Blur_Enhance/
 ├── libs/
 │   └── libxposed-api-102.jar           # 编译依赖（LSPosed API 102）
 └── src/main/java/com/shortcutblur/
-    ├── BlurEnhanceModule.java          # 模块主入口（XposedModule；安装桌面 / 时钟 / 组件 / 弹窗 Hook）
-    ├── RecentsBlur.java                # 多任务（Recents / Overview）模糊控制器（经 HookApi 与框架解耦）
-    ├── BlurLib.java                    # 通用库（launcher 类名常量 + 反射 / View / 状态 / 渲染效果工具）
-    ├── GlyphBlurRenderer.java          # 字形贴合模糊渲染（Path 构建 / 轮询刷新）
+    ├── BlurEnhanceModule.java          # 模块主入口（安装各进程 Hook）
+    ├── RecentsBlur.java                # 多任务模糊控制器（与框架解耦）
+    ├── BlurLib.java                    # 通用库（常量 + 反射 / 视图 / 状态 / 渲染效果工具）
+    ├── GlyphBlurRenderer.java          # 字形贴合模糊渲染
     ├── WidgetBlurAttacher.java         # 桌面组件（Widget）模糊挂载
-    ├── ClockTextAlphaHook.java         # 时钟文字 alpha Hook
-    ├── ClockIds.java                   # 时钟文字 / 天气图标 id 常量集中定义
+    ├── ClockTextAlphaHook.java         # 时钟文字透明度 Hook
+    ├── ClockIds.java                   # 时钟文字 / 天气图标 id 常量
     ├── Reflect.java                    # 反射工具（带容量上限的 LRU 缓存）
-    ├── ViewUtils.java                  # 视图工具（视图树遍历 / 可见性判定）
-    └── ModuleLog.java                  # 可选文件日志（RELEASE 编译期开关，发布版即关闭）
+    ├── ViewUtils.java                  # 视图工具
+    └── ModuleLog.java                  # 可选文件日志（编译期开关）
 ```
 
 ---
 
-## 🧠 实现原理
+## 🔧 构建
 
-### 桌面模糊
-- Hook 桌面弹窗容器的入场 / 退场动画创建入口（onCreateOpenAnimation / onCreateCloseAnimation），把「模糊 0→1 / 1→0」的动画直接 set.play(...) 并进原生 AnimatorSet，与原生 alpha / scale 动画同步。
-- 按视图所处状态分流处理：在文件夹内时走图标模糊路径，其余走壁纸深度模糊路径；判定结果在单次弹窗流程内缓存，流程结束时失效。
-- 模糊由 RenderEffect.createBlurEffect(64f, ...) 实现：优先调用 com.oplus.view.OplusViewBackgroundRenderEffect.setBackgroundRenderEffect(effect, view)，失败则回退标准 View.setRenderEffect(effect)。
-- 图标模糊动画在收尾与逐帧更新时校验有效性，中途状态变化时立即取消，避免闪回。
-
-### 多任务图标模糊（Recents）
-- 通过拦截桌面的动画 / 透明度回调采样容器缩放值，以 `down-cross 0.96` / `up-cross 0.96` 的**方向穿越**判定进入 / 退出 Recents。
-- 用 `sRecentsPhase` 维护单次流程阶段；`isInsideOpenFolder` 用于排除打开文件夹时的误判，保证 **Recents 与文件夹两条链严格隔离**。
-- 进入时为桌面图标挂载模糊，退出时按同一判据平滑还原。
-
-### 时钟字形模糊
-- 桌面进程 Hook RemoteViews.apply / AppWidgetHostView.updateAppWidget，在组件视图更新后定位到 provider 根视图，交给 GlyphBlurRenderer。
-- GlyphBlurRenderer 遍历时间 / 日期 / 天气文字与天气图标，按 getTotalPaddingTop() + getLayout().getLineBaseline(0) 计算基线，在载体 View 的**本地坐标系**内构建字形 Path，再通过 setPathProvider + invalidatePath() 施加动态模糊；矩形遮罩取模糊层 bounds（对齐 provider 根）。
-- 时钟进程 Hook RemoteViews.setTextColor，对目标文字 id 叠加 alpha。
-- 任何 static 全局状态均按 **per-container** 维护，避免多组件串扰。
-
-### 性能优化（v40）
-- **OPlus API 反射结果缓存**：`sOplusEffectResolved` / `sSetBgRenderEffect` 等缓存反射结果，避免热点路径反复 `Class.forName` / 查方法。
-- **反射缓存 LRU 化**：`Reflect` 的 method / field / ctor / class 缓存改为带容量上限的 LRU（access-order），避免「超限即全清」导致的周期性缓存失效与反复解析。
-- **帧内对象复用**：`GlyphBlurRenderer` 用 ThreadLocal 复用 scratch `Path` / `Matrix`，消除每帧对象分配。
-- **视图矩形局部化**：`ViewUtils` 使用局部 `Rect` 而非静态共享实例，避免多容器互相覆盖（正确性 / 线程安全）。
-
----
-
-## 🔇 日志
-
-`ModuleLog` 是**编译期开关**的调试文件日志，**发布版本固定关闭**：
-
-```java
-public static final boolean RELEASE = true;      // 发布：true = 无日志
-public static final boolean ENABLED = !RELEASE;
-```
-
-- `RELEASE` / `ENABLED` 均为 `final` 常量 → javac 常量折叠 + 死代码消除，**关闭时零运行时开销**，且**不产生任何日志文件**。（已验证：release 版 dex 内 `FileOutputStream` / `OutputStreamWriter` / 日志格式串全部消失）
-- **调试**：把 `RELEASE` 改为 `false` 重新构建即可，所有日志与调参开关照常工作。
-- **二级开关** `ModuleLog.VERBOSE`（默认 `false`）：控制动画期「每帧」日志（`DRAGALPHA` 逐帧 / `SCALECLAMP` / `BLURAPPLY`）。默认关闭，避免过渡动画期间「每行一次 open+flush+close」的文件 I/O 抖动。
-- 日志按进程分流写入：
-  - 主进程：`/storage/emulated/0/Download/ColorOSBlurEnhance.log`
-  - 后处理进程：`/storage/emulated/0/Download/PostEffectBlur.log`
-- 运行时 logcat 统一 TAG 为 `ColorOSBlurEnhance`。
-
-> ⚠️ 这是一个**刻意的发布安全设计**：开关在编译期决定，不由 `BuildConfig` 等运行时因素隐式改变。
+- 依赖：JDK 8、Android SDK（API 36）、`libs/libxposed-api-102.jar`
+- 纯 Java 工程（无 Gradle 脚本）：以 `javac` 编译源码，用 `d8` 生成 `classes.dex`，再与模块清单、资源一起打包并签名。
 
 ---
 
@@ -149,11 +166,11 @@ public static final boolean ENABLED = !RELEASE;
 
 | 版本 | 说明 |
 |---|---|
-| **v42-dev**（进行中） | **Recents 解冻重做**：入场改 hook `SwipeToRecentAnimationHelper.goOverviewAnimation()`；退场走 `LauncherState` 状态机 + scale「先跌破 0.96、再回升过 0.988」；`OplusDragLayer.setAlpha` 钳回 1.0（桌面图标层不淡出）；恢复 `0→64` / 180ms 渐进入场；不再强开原生 `supportIconBlur`。**结构拆分**：抽出 `BlurLib`（通用库）与 `RecentsBlur`（多任务控制器，经 `HookApi` 解耦），`BlurEnhanceModule` 2758 → 1302 行 |
-| **v41** | Recents 入场 / 退场双阈值重构 + 性能与清理 |
-| **v40** | 快捷方式吞暂停保活 + 图标模糊独立挂点 + 进入渐进 / 退出渐降（与菜单展开同步）；性能优化：OPlus API 反射缓存、反射缓存 LRU 化、帧内 scratch 复用、视图矩形局部化修复 |
-| v38.6 | 重构：抽出 ClockIds、命名魔法数、补类文档 |
-| v24 | Recents 桌面图标模糊（方向穿越判据；v42-dev 已重做，见上） |
+| **v42-dev**（进行中） | **多任务模糊重做**：入场改取桌面自身的「进入概览」动画入口；退场以缩放回弹为主、状态机兜底；进入多任务时保持桌面不淡出；恢复渐进入场；不再干预桌面自带的图标模糊开关。**结构调整**：抽出通用库与独立的多任务控制器，主入口大幅精简 |
+| **v41** | 多任务入场 / 退场双阈值重构 + 性能与清理 |
+| **v40** | 快捷方式吞暂停保活 + 图标模糊独立挂点 + 进入渐进 / 退出渐降；性能优化：反射结果缓存、缓存 LRU 化、帧内对象复用、视图矩形局部化 |
+| v38.6 | 重构：抽出时钟 id 常量、命名魔法数、补类文档 |
+| v24 | 多任务桌面图标模糊（方向穿越判据；v42-dev 已重做，见上） |
 
 > 注：v38.7 为**内部测试版本，未发布到 git**，其内容已随 v40 一并发布，故不单列。
 
@@ -181,13 +198,8 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 ```
 
-- **源文件版权头**：`src/main/java/com/shortcutblur/` 下每个源文件头部均带有
-  `SPDX-License-Identifier: GPL-3.0-or-later` 与上述版权声明。
-- **源码可得性（GPL-3.0 §6）**：本仓库即对应源码。对外分发编译产物（模块 APK）时，
-  须同时提供或明确指明获取本源码的方式。
-- **派生作品**：基于本项目的修改与再分发，必须同样以 GPL-3.0（或更新版本）开放源码，
-  并保留原有版权与许可声明。
-- **第三方组件**：`libs/libxposed-api-102.jar`（libxposed API）版权归其作者所有，
-  遵循其自身许可；本项目的 GPL 仅覆盖本项目自身代码。
-- **商标与隶属**：本项目为第三方开源项目，与 OPPO / ColorOS / LSPosed 官方无隶属关系，
-  相关商标归各自所有者所有。
+- **源文件版权头**：每个源文件头部均带有 `SPDX-License-Identifier: GPL-3.0-or-later` 与上述版权声明。
+- **源码可得性（GPL-3.0 §6）**：本仓库即对应源码。对外分发编译产物（模块 APK）时，须同时提供或明确指明获取本源码的方式。
+- **派生作品**：基于本项目的修改与再分发，必须同样以 GPL-3.0（或更新版本）开放源码，并保留原有版权与许可声明。
+- **第三方组件**：`libs/libxposed-api-102.jar`（libxposed API）版权归其作者所有，遵循其自身许可；本项目的 GPL 仅覆盖本项目自身代码。
+- **商标与隶属**：本项目为第三方开源项目，与 OPPO / ColorOS / LSPosed 官方无隶属关系，相关商标归各自所有者所有。
