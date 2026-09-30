@@ -45,7 +45,8 @@ public class BlurEnhanceModule extends XposedModule {
 
     private static volatile ValueAnimator sRecentsBlurAnim = null;
     private static volatile float sRecentsAnimRadius = 0.0f;
-    private static volatile float sPrevScale = 1.0f;
+    private static volatile float sPrevScaleX = 1.0f;
+    private static volatile float sPrevScaleY = 1.0f;
     private static volatile boolean sUsed093 = false;
     private static volatile long sLastExitTime = 0L;
     private static volatile boolean sReached9999 = false;
@@ -763,8 +764,9 @@ private static volatile ValueAnimator sRecentsExitAnim = null;
                                                 View v = (View) self;
                                                 if (tag.equals("setScaleX") || tag.equals("setScaleY")) {
                                                     float clamped = Math.max(f, 0.92f);
-                                                    float prevScale = sPrevScale;
-                                                    sPrevScale = clamped;
+                                                    boolean isX = tag.equals("setScaleX");
+                                                    float prevScale = isX ? sPrevScaleX : sPrevScaleY;
+                                                    if (isX) sPrevScaleX = clamped; else sPrevScaleY = clamped;
                                                     if (clamped >= 0.9999f) sReached9999 = true;
                                                     if (sRecentsPhase == 0 && prevScale >= 0.9999f && clamped < 0.9999f) {
                                                         sRecentsPhase = 1;
