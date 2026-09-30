@@ -1,22 +1,3 @@
-/*
- * ColorOS Blur Enhance —— ColorOS 16 桌面 / 多任务 / 时钟组件的动态模糊增强（LSPosed 模块）
- * Copyright (C) 2026 wisely-leo
- *
- * SPDX-License-Identifier: GPL-3.0-or-later
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
 package com.shortcutblur;
 
 import android.animation.ValueAnimator;
@@ -36,128 +17,89 @@ import io.github.libxposed.api.XposedInterface;
 
 import static com.shortcutblur.BlurLib.*;
 
-/**
- * 多任务（Recents / Overview）模糊控制器。
- * 从 BlurEnhanceModule 抽出并解耦：不再依赖 XposedModule，通过 {@link HookApi} 注册 hook。
- * 入口：
- *   installProbes(loader, api)   —— 入场/退场信号 & 诊断探针 hook
- *   installStateHooks(loader, api)—— LauncherState 状态机 hook
- *   applyConf(intent)            —— 接收 SETCONF 广播里的 recents 参数
- *   describe()                   —— VER 日志用的一行状态
- */
 final class RecentsBlur {
     private RecentsBlur() {}
 
-    /** 解耦用的 hook 注册接口（由模块注入）。 */
     public interface HookApi {
         void hook(String id, Executable target, XposedInterface.Hooker hooker);
     }
 
     private static HookApi API;
 
-
     private static volatile boolean sStateInOverview = false;
 
-
     private static volatile float RECENTS_BLUR_MAX = 64.0f;
-
-    // 缩放钳制（纯几何，不含判断）：scale 不低于此值
-    // 缩放钳制默认值（0.96）；可被 /sdcard/Download/ColorOSBlurEnhance.conf 的 scaleMin= 覆盖
 
     private static volatile float sScaleClampMin = 0.96f;
 
     private static volatile long sConfLastRead = 0L;
 
     private static final String CONF_PATH = "/sdcard/Download/ColorOSBlurEnhance.conf";
-    // anchor 模式：true=Workspace（图标网格层，不含卡片）；false=DragLayer（整个桌面容器）
 
     private static volatile boolean sAnchorUseWorkspace = false;
 
     private static volatile boolean sConfErrorLogged = false;
 
-
     private static volatile float sRecentsLastRadius = -1.0f;
-
 
     private static volatile ValueAnimator sRecentsBlurAnim = null;
 
     private static volatile float sRecentsAnimRadius = 0.0f;
 
-
-
     private static volatile View sRecentsBlurView = null;
-
 
     private static volatile float sRecentsTargetRadius = -1.0f;
 
-
     private static volatile int sRecentsPhase = 0;
 
-
     private static volatile boolean sRecentsBlurDoneForEntry = false;
-
 
     private static final long ENTER_FADE_MS = 180L;
 
     private static final long EXIT_FADE_MS = 120L;
 
-
     private static volatile ValueAnimator sRecentsEnterAnim = null;
-
 
     private static volatile ValueAnimator sRecentsExitAnim = null;
 
-
     private static volatile boolean sRecentsArmed = false;
-
 
     private static final long ARM_DELAY_MS = 180L;
 
     private static Runnable sPendingArm = null;
-
 
     private static final android.os.Handler sRecentsHandler =
             new android.os.Handler(android.os.Looper.getMainLooper());
 
     private static Runnable sPendingClear = null;
 
-
     private static final long EXIT_DEBOUNCE_MS = 120L;
-    // [v17] 进场去抖 + alpha 下降早期进场
 
     private static final long ENTER_DEBOUNCE_MS = 80L;
 
     private static volatile Runnable sPendingEnter = null;
 
-    private static volatile boolean sDescentEnterEnabled = false; // [v18] 回退：默认关
+    private static volatile boolean sDescentEnterEnabled = false;
 
     private static volatile float sMinScaleSeen = 1.0f;
-    // [v24] v41 的 scale 阈值退场（scaleexit=off 可关）
 
     private static volatile boolean sScaleExitEnabled = true;
-    // [v23] tint=on：进场把效果换成红色滤镜，用于肉眼判定"效果何时出现在屏幕上"
 
     private static volatile boolean sTintEnabled = false;
-    // [v22] goToState 作为真正的状态机触发（gts=off 关闭）
 
     private static volatile boolean sGtsEnabled = true;
-    // [v21] 最近一次成功解析的锚点：供没有上下文的调用路径（scale/alpha 传 null）回退
 
     private static volatile View sLastAnchor = null;
-    // [v26] 诊断探针总开关（PixelCopy 位图采样 / 绘制探针 / View 树 dump）——默认关，正式运行零额外开销
 
     private static volatile boolean sDiagEnabled = false;
-    // [v26] 缓存的桌面 DragLayer（scale/alpha hook 中记录），StateManager 无 View 上下文时兜底锚点
 
     private static volatile View sCachedDragLayer = null;
-    // [v19] 纯状态机模式：可见性退场也默认关（visexit=on 可开回来）
 
     private static volatile boolean sVisExitEnabled = false;
-    // [v18] scale 阈值进场（回退 vis/alpha 进场后，唯一入场时机判据）
 
-    private static volatile boolean sScaleEnterEnabled = true; // [v20] 低优先级补进场（状态机仍是主判据）
+    private static volatile boolean sScaleEnterEnabled = true;
 
-    private static volatile float sEnterScale = 1.0f; // [v20] 一旦从 1.0 跌落
+    private static volatile float sEnterScale = 1.0f;
 
     private static volatile float sLastScale = 1.0f;
 
@@ -173,21 +115,15 @@ final class RecentsBlur {
 
     private static volatile boolean sSelfAlphaCall = false;
 
-    private static volatile boolean sAlphaExitEnabled = false; // [v19] 纯状态机：默认关
-    // [v12] 早期信号探针的去重键
+    private static volatile boolean sAlphaExitEnabled = false;
 
     private static volatile String sLastVisKey = "";
-    // [v11] View.setRenderEffect 轨迹：看我们的效果何时/被谁清掉
 
     private static volatile String sLastFxKey = "";
-    // [v10] 入场头几次施加后探测 RenderEffect 是否真的存在
 
     private static volatile int sFxProbeLeft = 0;
-    // [v9] A/B 开关：新模块是否强开 launcher 的 supportIconBlur。默认 true = 保持现状
-    // [v24] 不动原生桌面图标模糊：false = 原样传递 launcher 自己的取值
 
     private static volatile boolean sForceIconBlur = false;
-    // [v7] 模糊目标集合（可能多个：图标层 + dock 等）
 
     private static final java.util.List<View> sBlurTargets = new java.util.ArrayList<View>();
 
@@ -196,7 +132,6 @@ final class RecentsBlur {
     private static volatile String sBlurMode = "draglayer";
 
     private static volatile boolean sClampEnabled = true;
-
 
     private static void armBlurTargets(View anchor) {
         sBlurTargets.clear();
@@ -221,8 +156,6 @@ final class RecentsBlur {
                 + " names=" + blurTargetNames());
     }
 
-    // 从 RecentsView 实例往上走，找到"它是 DragLayer 直接子 View"的那一层（要排除的卡片子树）
-
     private static View findRecentsChildOf(ViewGroup dragLayer) {
         Object rv = sRecentsViewObj;
         if (!(rv instanceof View)) return null;
@@ -238,7 +171,6 @@ final class RecentsBlur {
         return null;
     }
 
-
     private static String blurTargetNames() {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < sBlurTargets.size(); i++) {
@@ -247,8 +179,6 @@ final class RecentsBlur {
         }
         return sb.toString();
     }
-
-    // 入场时一次性打印图层清单，看清 DragLayer 里到底有什么
 
     private static void dumpDragLayerTree(View anchor) {
         try {
@@ -273,8 +203,6 @@ final class RecentsBlur {
         }
     }
 
-    // 入场后 700ms 内统计桌面重绘帧数：0 => 桌面被快照化(未实时重绘)，模糊自然"迟到"
-
     private static void startDrawProbe(final View anchor) {
         if (anchor == null) return;
         try {
@@ -296,10 +224,6 @@ final class RecentsBlur {
             ModuleLog.e("DRAW", "probe failed", t);
         }
     }
-
-    // [v9] 用 PixelCopy 采样屏幕像素的"清晰度"，程序化测出模糊真正上屏的时刻（不依赖录屏）
-    //      sharpness = 相邻像素灰度差的平均值：越糊 => 越小；越清晰 => 越大
-    // 从 View 的 Context 解包出 Activity 取 Window（PixelCopy 没有 View 重载）
 
     private static void startPixelProbe(final View anchor, final String tag) {
         if (anchor == null) return;
@@ -367,12 +291,9 @@ final class RecentsBlur {
         }
     }
 
-    // [v12] 早期信号探针：只打时间戳，不改行为。目的＝找出"比 onStateTransitionStart 更早"的时刻
-
     private static int installEarlySignalProbes(ClassLoader loader) {
         int n = 0;
 
-        // 候选1：StateManager.goToState（状态机入口）
         String[] sms = {"com.android.launcher3.statemanager.StateManager",
                         "com.android.launcher3.statemanager.StateManagerImpl"};
         for (String sn : sms) {
@@ -389,7 +310,7 @@ final class RecentsBlur {
                                         Object[] a = chain.getArgs().toArray();
                                         Object st = (a.length > 0) ? a[0] : null;
                                         ModuleLog.d("EARLY", "goToState n=" + a.length + " to=" + stateName(st));
-                                        // [v22] 提升为真正的状态机触发：比 onStateTransitionStart 更靠源头
+
                                         if (sGtsEnabled && st != null) {
                                             Object gSelf = chain.getThisObject();
                                             if (isOverviewState(st)) {
@@ -411,7 +332,6 @@ final class RecentsBlur {
             }
         }
 
-        // 候选2：launcher 自己为"上滑"创建的图标模糊动画
         try {
             Class<?> anim = Reflect.loadClass("com.oplus.quickstep.anim.SwipeUpIconBlurAnim", loader);
             if (anim == null) {
@@ -434,7 +354,6 @@ final class RecentsBlur {
             ModuleLog.e("EARLY", "hook SwipeUpIconBlurAnim failed", t);
         }
 
-        // 候选3：Recents/Overview 视图的可见性变化
         try {
             java.lang.reflect.Method va = Reflect.method(android.view.View.class, "onVisibilityAggregated", boolean.class);
             if (va != null) {
@@ -472,8 +391,6 @@ final class RecentsBlur {
         return n;
     }
 
-    // [v14] 唯一退场入口：状态机 Normal 与 visible=false 谁先到谁触发（保证每次进场都有对应退场）
-
     private static void exitOverviewFrom(Object lrvSelf, String why) {
         if (!sStateInOverview) return;
         sStateInOverview = false;
@@ -486,13 +403,10 @@ final class RecentsBlur {
         }
     }
 
-
-    // [v13] 唯一入场入口：可由"卡片视图变可见"或状态机兜底触发
-
     private static void enterOverviewFrom(Object lrvSelf, String why) {
         if (sStateInOverview) return;
         View anchor = resolveBlurAnchor(lrvSelf);
-        // [v22] 拿不到锚点就不占用状态：否则先到的信号会把后面的信号去重吃掉，导致整段没模糊
+
         if (anchor == null) {
             ModuleLog.d("STATEBLUR", "ENTER skipped (anchor null) why=" + why);
             return;
@@ -500,15 +414,12 @@ final class RecentsBlur {
         sStateInOverview = true;
         sMinAlphaIn = 1.0f;
         sSawAlphaDescent = false;
-        sMinScaleSeen = 1.0f; // [v25]
+        sMinScaleSeen = 1.0f;
         ModuleLog.d("STATEBLUR", "ENTER overview (" + why + ") -> startEnterFadeIn anchor=" + anchorName(anchor));
         cancelPendingRecentsClear();
         sRecentsPhase = 1;
         startEnterFadeIn(anchor);
     }
-
-
-    // [v17] 进场去抖：visible=true 先挂 ENTER_DEBOUNCE_MS，期间 visible=false 回来就取消
 
     private static void scheduleEnterDebounced(final String why) {
         cancelPendingEnter();
@@ -524,7 +435,6 @@ final class RecentsBlur {
         try { sRecentsHandler.postDelayed(sPendingEnter, ENTER_DEBOUNCE_MS); } catch (Throwable ignore) {}
     }
 
-
     private static void cancelPendingEnter() {
         Runnable r = sPendingEnter;
         if (r != null) {
@@ -532,8 +442,6 @@ final class RecentsBlur {
             sPendingEnter = null;
         }
     }
-
-    // [v16] 退场去抖：visible=false 先挂 EXIT_DEBOUNCE_MS，期间 visible=true 回来就取消
 
     private static void scheduleExitDebounced(final String why) {
         cancelPendingExit();
@@ -549,7 +457,6 @@ final class RecentsBlur {
         try { sRecentsHandler.postDelayed(sPendingExit, EXIT_DEBOUNCE_MS); } catch (Throwable ignore) {}
     }
 
-
     private static void cancelPendingExit() {
         Runnable r = sPendingExit;
         if (r != null) {
@@ -557,7 +464,6 @@ final class RecentsBlur {
             sPendingExit = null;
         }
     }
-
 
     private static void cancelPendingRecentsClear() {
         Runnable r = sPendingClear;
@@ -567,7 +473,6 @@ final class RecentsBlur {
         }
     }
 
-
     private static void startEnterFadeIn(final View v) {
         ValueAnimator old = sRecentsEnterAnim;
         if (old != null) { try { old.cancel(); } catch (Throwable ignore) {} sRecentsEnterAnim = null; }
@@ -575,13 +480,13 @@ final class RecentsBlur {
         if (oldX != null) { try { oldX.cancel(); } catch (Throwable ignore) {} sRecentsExitAnim = null; }
         sRecentsBlurView = v;
         armBlurTargets(v);
-        // [v26] 诊断探针默认关（动画期 Bitmap/PixelCopy/View 树扫描 -> 额外 I/O 与拷贝）
+
         if (sDiagEnabled) {
             dumpDragLayerTree(v);
             startDrawProbe(v);
             startPixelProbe(v, "enter");
         }
-        // [v25] 恢复 v41 的渐进入场动画：0 -> 64，180ms，Decelerate（原来被 v4 改成立即置满，渐进没了）
+
         sRecentsAnimRadius = 0.0f;
         sRecentsLastRadius = 0.0f;
         final ValueAnimator va = ValueAnimator.ofFloat(0.0f, RECENTS_BLUR_MAX);
@@ -615,16 +520,12 @@ final class RecentsBlur {
         ModuleLog.d("DRAGALPHA", "enter fade-in started (0 -> " + RECENTS_BLUR_MAX + ")");
     }
 
-
     private static void clearPendingArm() {
         if (sPendingArm != null) {
             try { sRecentsHandler.removeCallbacks(sPendingArm); } catch (Throwable ignore) {}
             sPendingArm = null;
         }
     }
-
-    // [stateOnly] 原“缩放回到 1.0 时清场”的入口已移除。
-
 
     private static void startExitFadeOut(final View v, final String why) {
         final float from = Math.max(0.0f, sRecentsLastRadius);
@@ -670,8 +571,6 @@ final class RecentsBlur {
         if (sDiagEnabled) startPixelProbe(v, "exit");
     }
 
-    // [v7] 扇出：v 是锚点；真正被模糊的是 sBlurTargets（可能含图标层+dock 多个 View）
-
     private static void applySelfBlur(View v, float r) {
         sRecentsTargetRadius = r;
         if (sBlurTargets.isEmpty()) {
@@ -682,7 +581,6 @@ final class RecentsBlur {
             }
         }
     }
-
 
     private static void blurOne(View v, float r) {
         if (v == null) return;
@@ -696,7 +594,7 @@ final class RecentsBlur {
         }
         float rApplied = r;
         try {
-            // [v23] tint 模式：红色滤镜（观测量测用，默认关）
+
             if (rApplied > 0.5f && sTintEnabled) {
                 RenderEffect fx = RenderEffect.createColorFilterEffect(
                         new android.graphics.BlendModeColorFilter(
@@ -704,7 +602,7 @@ final class RecentsBlur {
                 ModuleLog.d("TINT", "colorFilter on=" + v.getClass().getSimpleName());
                 v.setRenderEffect(fx);
             } else {
-                BlurLib.setBlurRadius(v, rApplied); // [refactor] 改用库函数
+                BlurLib.setBlurRadius(v, rApplied);
             }
             ModuleLog.dv("BLURAPPLY", "r=" + rApplied + " on=" + v.getClass().getSimpleName()
                     + " setOk=true");
@@ -712,7 +610,6 @@ final class RecentsBlur {
             ModuleLog.e("BLURAPPLY", "setRenderEffect failed r=" + rApplied, t);
         }
     }
-
 
     private static void forceClearRecentsBlur(View v, String why) {
         sBlurTargets.clear();
@@ -734,12 +631,10 @@ final class RecentsBlur {
         ModuleLog.d("DRAGALPHA", why + " -> hard clear (phase=IDLE)");
     }
 
-
     private static int installRecentsIconBlurProbe(ClassLoader loader) {
         int n = 0;
         installEarlySignalProbes(loader);
 
-        // [v11] 监听进程内每一次 setRenderEffect：我们的效果是否被清、被谁清、何时清
         try {
             java.lang.reflect.Method fx = Reflect.method(android.view.View.class, "setRenderEffect",
                     android.graphics.RenderEffect.class);
@@ -814,8 +709,7 @@ final class RecentsBlur {
                                     Object[] args = chain.getArgs().toArray();
                                     float a = (args.length > 0 && args[0] instanceof Number)
                                             ? ((Number) args[0]).floatValue() : 1.0f;
-                                    // [v16] alpha 回升 = 过渡正在退回 -> 早期退场（比 visible=false 早）
-                                    // 安全阀：必须先在本轮 overview 内见过 alpha 下降，否则进场首帧 a=1.0 会误判
+
                                     float prevA = sLastAlphaIn;
                                     if (!sSelfAlphaCall) {
                                         sLastAlphaIn = a;
@@ -829,7 +723,7 @@ final class RecentsBlur {
                                             }
                                         }
                                     }
-                                    // [v17] 桌面开始淡出（alpha 下降）= 正在离开桌面 -> 立即进场（状态机可晚 2.9s）
+
                                     if (!sSelfAlphaCall && !sStateInOverview && sDescentEnterEnabled
                                             && prevA >= 0.95f && a < 0.95f) {
                                         ModuleLog.d("STATEBLUR", "alpha falling (" + prevA + " -> " + a + ") -> early enter");
@@ -840,7 +734,7 @@ final class RecentsBlur {
                                     try {
                                         if (self instanceof View) {
                                             View v = (View) self;
-                                            sCachedDragLayer = v; // [v26] cache DragLayer
+                                            sCachedDragLayer = v;
                                             float cur = v.getAlpha();
                                             ModuleLog.dv("DRAGALPHA", "setAlpha a=" + a + " cur=" + cur);
                                             if (a < 0.999f) {
@@ -866,11 +760,6 @@ final class RecentsBlur {
             ModuleLog.e("RECENTS", "hook dragLayer alpha failed", t);
         }
 
-        // [stateOnly] 原基于 OplusDragLayer 缩放的旧判断链已整体移除；进/退完全由 LauncherState 状态机驱动。
-
-        // [v24] v41 的入场钩子：launcher 自己的"进入概览动画"入口
-        //（com.android.quickstep.touch.SwipeToRecentAnimationHelper.goOverviewAnimation）
-        //  v41 就是靠它拿到入场时机的：反射读 mDragLayer -> startEnterFadeIn
         try {
             Class<?> sh = Reflect.loadClass("com.android.quickstep.touch.SwipeToRecentAnimationHelper", loader);
             if (sh == null) {
@@ -917,7 +806,6 @@ final class RecentsBlur {
             ModuleLog.e("ENTERHOOK", "hook goOverviewAnimation failed", t);
         }
 
-        // --- scale 钳制：scale 不低于 SCALE_CLAMP_MIN（桌面最多缩 5%）；无进/退判断 ---
         try {
             Class<?> dls = Reflect.loadClass(CLS_OPLUS_DRAGLAYER, loader);
             if (dls != null) {
@@ -931,23 +819,20 @@ final class RecentsBlur {
                         API.hook("recents.scaleclamp." + sn, (Executable) sm, new XposedInterface.Hooker() {
                                     @Override
                                     public Object intercept(XposedInterface.Chain chain) throws Throwable {
-                                        Object self = chain.getThisObject(); // [v21] = OplusDragLayer 本身
-                                        if (self instanceof View) sCachedDragLayer = (View) self; // [v26] 缓存 DragLayer
+                                        Object self = chain.getThisObject();
+                                        if (self instanceof View) sCachedDragLayer = (View) self;
                                         Object[] a = chain.getArgs().toArray();
                                         if (a.length > 0 && a[0] instanceof Number) {
                                             float f = ((Number) a[0]).floatValue();
                                             reloadConfigIfStale();
-                                            // [v25] scale 阈值退场：必须"先跌破 0.96、再回升过 0.988"才算回桌面
-                                            //（v24 只判 >=0.988，而下降途中 1.0->0.92 必然经过 0.988，导致刚挂上就误退）
+
                                             if (f < sMinScaleSeen) sMinScaleSeen = f;
                                             if (sScaleExitEnabled && sStateInOverview && sMinScaleSeen < 0.96f && f >= 0.988f) {
                                                 ModuleLog.d("STATEBLUR", "scale rose to " + f + " (min seen " + sMinScaleSeen
                                                         + ") -> early exit (scaleRise)");
                                                 exitOverviewFrom(self, "scaleRise");
                                             }
-                                            // [v20] scale 补进场（低优先级）：一旦桌面 scale 从 1.0 跌落就挂模糊；
-                                            // 状态机仍是主判据：它先到就不用 scale；它给 Normal/Cancel 也能立刻退掉模糊
-                                            // 需“从 >= 阈值 下穿到 < 阈值-1e-3”，否则退出时桌面回弹的帧会把模糊又拉回来
+
                                             float prevScale = sLastScale;
                                             sLastScale = f;
                                             if (sScaleEnterEnabled && !sStateInOverview
@@ -975,8 +860,6 @@ final class RecentsBlur {
             ModuleLog.e("RECENTS", "hook scale clamp failed", t);
         }
 
-
-
         for (String rn : new String[]{"resetGaussianAnimState", "resetViewsProperty"}) {
             try {
                 Class<?> dl2 = Reflect.loadClass(CLS_OPLUS_DRAGLAYER, loader);
@@ -991,7 +874,7 @@ final class RecentsBlur {
                                     Object self = chain.getThisObject();
                                     ModuleLog.d("EXITPROBE", "reset(" + rid + ") radius=" + sRecentsLastRadius);
                                     if (self instanceof View) {
-                                        // [已停用] 旧兜底清场，避免与状态机驱动冲突（仅诊断）
+
                                         ModuleLog.d("EXITPROBE", "reset(" + rid + ") [diag only]");
                                     }
                                     return chain.proceed();
@@ -1029,7 +912,7 @@ final class RecentsBlur {
                                                     ? ((Number) args[0]).intValue() : -1;
                                             ModuleLog.d("EXITPROBE", "onWindowVisibilityChanged vis=" + vis + " radius=" + sRecentsLastRadius);
                                             if (vis == View.VISIBLE && self instanceof View && sRecentsLastRadius >= 0.0f) {
-                                                // [已停用] 旧兜底清场（仅诊断）
+
                                                 ModuleLog.d("EXITPROBE", "windowVisible [diag only]");
                                             }
                                         } else {
@@ -1037,7 +920,7 @@ final class RecentsBlur {
                                                     ? ((Number) args[0]).floatValue() : 1.0f;
                                             ModuleLog.d("EXITPROBE", "setAlphaByTaskView a=" + a + " radius=" + sRecentsLastRadius);
                                             if (a >= 0.999f && self instanceof View && sRecentsLastRadius >= 0.0f) {
-                                                // [已停用] 旧兜底清场（仅诊断）
+
                                                 ModuleLog.d("EXITPROBE", "alphaByTaskView>=1 [diag only]");
                                             }
                                         }
@@ -1109,15 +992,6 @@ final class RecentsBlur {
         return n;
     }
 
-    // =========================================================================
-    // 状态机驱动的进/退判断（替换 OplusDragLayer.setScaleX 穿越 0.96 的启发式）
-    //
-    // 真信号：LauncherRecentsView implements StateManager$StateListener，
-    //   onStateTransitionStart(LauncherState toState)      —— 过渡开始
-    //   onStateTransitionComplete(LauncherState finalState) —— 过渡结束
-    // 与动画/手势无关，覆盖所有入口（手势/通知/长按/返回），中途松手也归到最终态。
-    // =========================================================================
-
     private static int installRecentsStateBlurHooks(ClassLoader loader) {
         int n = 0;
         try {
@@ -1128,7 +1002,6 @@ final class RecentsBlur {
                 return 0;
             }
 
-            // --- onStateTransitionStart(LauncherState) → 进入 OVERVIEW 时入场 ---
             for (Method m : lrv.getDeclaredMethods()) {
                 if (!m.getName().equals(M_ON_STATE_TRANSITION_START)) continue;
                 Class<?>[] pt = m.getParameterTypes();
@@ -1159,7 +1032,6 @@ final class RecentsBlur {
                 n++;
                 ModuleLog.d("STATEBLUR", "[hook] LRV.onStateTransitionStart");
 
-            // [v13] 进场真起点：卡片视图变可见（实测比状态机早 ~1.5s，与桌面淡出同步）
             try {
                 final Class<?> lrvCls = lrv;
                 java.lang.reflect.Method va = Reflect.method(android.view.View.class,
@@ -1197,7 +1069,6 @@ final class RecentsBlur {
             }
             }
 
-            // --- onStateTransitionComplete(LauncherState) → 回到 NORMAL 时退场 ---
             for (Method m : lrv.getDeclaredMethods()) {
                 if (!m.getName().equals(M_ON_STATE_TRANSITION_COMPLETE)) continue;
                 Class<?>[] pt = m.getParameterTypes();
@@ -1213,7 +1084,7 @@ final class RecentsBlur {
                                 ModuleLog.d("STATEBLUR", "onStateTransitionComplete finalState="
                                         + stateName(finalState) + " toNormal=" + toNormal);
                                 if (toNormal && sStateInOverview) {
-                                    // 兜底：若 start(NORMAL) 未触发退场，这里补一次
+
                                     sStateInOverview = false;
                                     View anchor = resolveBlurAnchor(self);
                                     ModuleLog.d("STATEBLUR", "EXIT overview(complete-fallback) -> startExitFadeOut anchor=" + anchorName(anchor));
@@ -1229,7 +1100,6 @@ final class RecentsBlur {
                 ModuleLog.d("STATEBLUR", "[hook] LRV.onStateTransitionComplete");
             }
 
-            // --- onStateTransitionCancel(LauncherState) -> 过渡被取消（手势回弹）时清掉模糊 ---
             for (Method m : lrv.getDeclaredMethods()) {
                 if (!m.getName().equals(M_ON_STATE_TRANSITION_CANCEL)) continue;
                 Class<?>[] pt = m.getParameterTypes();
@@ -1261,28 +1131,24 @@ final class RecentsBlur {
         return n;
     }
 
-    // 目标模糊锚点：优先用 Launcher 的 DragLayer（覆盖整个桌面+过渡层）
-    // [v21] 记录并返回锚点：所有成功解析都走这里，供无上下文路径回退
-
     private static View useAnchor(View v) {
         if (v != null) sLastAnchor = v;
         return v;
     }
 
-
     private static View resolveBlurAnchor(Object lrvSelf) {
         try {
-            // 1) 若 sRecentsBlurView 仍有效，直接复用
+
             View cached = sRecentsBlurView;
             if (cached != null) return useAnchor(cached);
-            // 1b) [v21] 无上下文（scale / alpha 路径传 null）时回退到最近一次成功解析的锚点
+
             View last = sLastAnchor;
             if (last != null) {
                 try {
                     if (last.isAttachedToWindow()) return last;
                 } catch (Throwable ignore) {}
             }
-            // 2) 通过 Launcher 单例拿 DragLayer
+
             Object launcher = null;
             try {
                 if (lrvSelf instanceof View) launcher = getLauncherQuietly((View) lrvSelf);
@@ -1299,13 +1165,13 @@ final class RecentsBlur {
                 Object dl = Reflect.call(launcher, "getDragLayer", 0);
                 if (dl instanceof View) return useAnchor((View) dl);
             }
-            // 3) 退化：用 lrvSelf 的父 View
+
             if (lrvSelf instanceof View) {
                 View v = (View) lrvSelf;
                 if (v.getParent() instanceof View) return useAnchor((View) v.getParent());
                 return useAnchor(v);
             }
-            // 4) [v26] 兜底：scale/alpha hook 缓存的桌面 DragLayer（StateManager 无 View 上下文时用）
+
             View cdl = sCachedDragLayer;
             if (cdl != null) {
                 try { if (cdl.isAttachedToWindow()) return useAnchor(cdl); } catch (Throwable ignore) {}
@@ -1316,8 +1182,6 @@ final class RecentsBlur {
                 + " lastAnchor=" + (sLastAnchor == null ? "null" : "detached"));
         return null;
     }
-
-    // 判断 state 是否属于"多任务/Overview 态"（含 modal / split / quick switch）
 
     private static void probeRenderEffect(final View v, final String tag) {
         if (v == null) return;
@@ -1353,10 +1217,6 @@ final class RecentsBlur {
         }
     }
 
-
-    // ---------------------------------------------------------------
-    // 安装入口（由 BlurEnhanceModule 调用）
-    // ---------------------------------------------------------------
     static int installProbes(ClassLoader loader, HookApi api) {
         API = api;
         return installRecentsIconBlurProbe(loader);
@@ -1367,9 +1227,6 @@ final class RecentsBlur {
         return installRecentsStateBlurHooks(loader);
     }
 
-    // ---------------------------------------------------------------
-    // 配置：由模块的 SETCONF 广播转交（recents 参数）
-    // ---------------------------------------------------------------
     static void applyConf(Intent i) {
         if (i == null) return;
         try {
@@ -1419,7 +1276,6 @@ final class RecentsBlur {
         }
     }
 
-    /** VER 日志用的一行状态（供模块拼接）。 */
     static String describe() {
         return " | enter: scale=" + sScaleEnterEnabled + "(<" + sEnterScale + ")"
                 + " vis=" + sVisEnterEnabled + " alphaFall=" + sDescentEnterEnabled + " state=on"
@@ -1433,7 +1289,7 @@ final class RecentsBlur {
         long now = android.os.SystemClock.uptimeMillis();
         if (now - sConfLastRead < 2000L) return;
         sConfLastRead = now;
-        // 源1: Settings.System（settings put system coloros_blur_scale_min 0.96 / coloros_blur_anchor workspace）
+
         try {
             android.content.Context ctx = currentAppContext();
             if (ctx != null) {
@@ -1446,7 +1302,7 @@ final class RecentsBlur {
                 if (m != null) sAnchorUseWorkspace = m.trim().equalsIgnoreCase("workspace");
             }
         } catch (Throwable ignore) {}
-        // 源2: 文件（launcher 可能因 EACCES 读不了；读不了只记一次）
+
         try {
             java.io.File f = new java.io.File(CONF_PATH);
             if (!f.exists()) return;

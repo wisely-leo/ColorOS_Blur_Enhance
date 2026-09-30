@@ -1,22 +1,3 @@
-/*
- * ColorOS Blur Enhance —— ColorOS 16 桌面 / 多任务 / 时钟组件的动态模糊增强（LSPosed 模块）
- * Copyright (C) 2026 wisely-leo
- *
- * SPDX-License-Identifier: GPL-3.0-or-later
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
 package com.shortcutblur;
 
 import android.content.Context;
@@ -139,7 +120,7 @@ public final class ViewUtils {
             if (!v.isAttachedToWindow()) return false;
             if (!v.isShown()) return false;
             if (v.getWidth() <= 0 || v.getHeight() <= 0) return false;
-            // 用局部 Rect，避免多个容器共用静态 Rect 时相互覆盖（正确性 + 线程安全）。
+
             Rect r = new Rect();
             if (!v.getGlobalVisibleRect(r)) return false;
             if (r.width() < 4 || r.height() < 4) return false;

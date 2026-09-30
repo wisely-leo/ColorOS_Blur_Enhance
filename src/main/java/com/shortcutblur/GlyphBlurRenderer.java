@@ -1,22 +1,3 @@
-/*
- * ColorOS Blur Enhance —— ColorOS 16 桌面 / 多任务 / 时钟组件的动态模糊增强（LSPosed 模块）
- * Copyright (C) 2026 wisely-leo
- *
- * SPDX-License-Identifier: GPL-3.0-or-later
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
 package com.shortcutblur;
 
 import android.graphics.Path;
@@ -435,13 +416,13 @@ public class GlyphBlurRenderer {
     static Path snapshotsToPath(GlyphSnapshot[] snaps) {
         Path out = new Path();
         if (snaps == null) return out;
-        // 复用线程内的 scratch Path 与 Matrix，避免每帧为每个 snapshot new Path/new Matrix
+
         Path scratch = TL_SCRATCH.get();
         android.graphics.Matrix mtx = TL_MATRIX.get();
         for (GlyphSnapshot s : snaps) {
             if (s.localPath == null) continue;
             if (s.offX == 0f && s.offY == 0f) {
-                // 无需平移，直接并入，省一次拷贝+transform
+
                 out.addPath(s.localPath);
                 continue;
             }
@@ -479,7 +460,7 @@ public class GlyphBlurRenderer {
         private String lastLogState = null;
         private boolean ranOnce = false;
         private boolean changedLogged = false;
-        // 缓存上次每个文本的 offset，避免每次 tick 都向上遍历 View 树求 localOffset。
+
         private final java.util.HashMap<Integer, Integer> lastOffX = new java.util.HashMap<Integer, Integer>();
         private final java.util.HashMap<Integer, Integer> lastOffY = new java.util.HashMap<Integer, Integer>();
         private final java.util.HashMap<Integer, String> lastText = new java.util.HashMap<Integer, String>();
@@ -611,7 +592,7 @@ public class GlyphBlurRenderer {
                 CharSequence cs = ((TextView) v).getText();
                 String text = cs == null ? "" : cs.toString();
                 sb.append(text);
-                // 文本未变时，位置通常也未变，沿用缓存 offset，跳过向上遍历 View 树。
+
                 Integer lo = lastOffX.get(id);
                 int ox;
                 int oy;

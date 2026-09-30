@@ -1,22 +1,3 @@
-/*
- * ColorOS Blur Enhance —— ColorOS 16 桌面 / 多任务 / 时钟组件的动态模糊增强（LSPosed 模块）
- * Copyright (C) 2026 wisely-leo
- *
- * SPDX-License-Identifier: GPL-3.0-or-later
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
 package com.shortcutblur;
 
 import android.animation.ValueAnimator;
@@ -50,7 +31,6 @@ import static com.shortcutblur.BlurLib.*;
 
 public class BlurEnhanceModule extends XposedModule {
 
-    // === [refactor] 与 RecentsBlur 解耦：把 hook 注册能力作为回调注入 ===
     private final RecentsBlur.HookApi recentsApi = new RecentsBlur.HookApi() {
         @Override public void hook(String id, Executable target, XposedInterface.Hooker hooker) {
             hookEx(id, target, hooker);
@@ -96,9 +76,9 @@ public class BlurEnhanceModule extends XposedModule {
     private static volatile boolean sScreenReceiverInstalled = false;
     private static volatile boolean sConfReceiverInstalled = false;
     private static final String ACTION_SETCONF = "com.wiselyleo.blurenhance.SETCONF";
-    // [v16] 退场去抖 + alpha 回升早期退场
-    private static final String BUILD_TAG = "v42-dev";
-    // [v25] 本轮 overview 里见过的最小请求 scale（用于"先跌破再回升"的退场判据）
+
+    private static final String BUILD_TAG = "v42.5";
+
     private volatile boolean installed = false;
     private final java.util.WeakHashMap<android.view.View, String> sLastClockText = new java.util.WeakHashMap<android.view.View, String>();
 
@@ -119,7 +99,6 @@ public class BlurEnhanceModule extends XposedModule {
     private static volatile long sPopupSeq = 0L;
     private static volatile long sIconAnimStartedSeq = -1L;
 
-    // 热点反射结果缓存：避免在动画每帧回调里反复 Class.forName / 拼字符串查 Method。
     private static volatile boolean sOplusEffectResolved = false;
     private static volatile Class<?> sOplusEffectCls = null;
     private static volatile Method sSetBgRenderEffect = null;
@@ -252,9 +231,6 @@ public class BlurEnhanceModule extends XposedModule {
         }
     }
 
-    // 实时配置：任何普通 App 都能用广播即时调参（无需重装）
-    //   am broadcast -a com.wiselyleo.blurenhance.SETCONF --es anchor workspace
-    //   am broadcast -a com.wiselyleo.blurenhance.SETCONF --ef scale_min 0.96 --ef blur_max 64
     private void registerConfReceiver(Context ctx) {
         synchronized (BlurEnhanceModule.class) {
             if (sConfReceiverInstalled) return;
@@ -264,7 +240,7 @@ public class BlurEnhanceModule extends XposedModule {
                     @Override public void onReceive(Context c, Intent i) {
                         if (i == null) return;
                         try {
-                            // [refactor] recents 参数（scale/anchor/clamp/gts/tint/vis/alpha/iconblur/diag）全交给 RecentsBlur
+
                             RecentsBlur.applyConf(i);
                             String mk = i.getStringExtra("mark");
                             if (mk != null) ModuleLog.d("MARK", "==== " + mk + " ====");
@@ -289,7 +265,6 @@ public class BlurEnhanceModule extends XposedModule {
         }
     }
 
-    // ===== [v7] 按真实图层结构决定模糊目标 =====
     private static boolean isTargetLauncher(String p) {
         return "com.android.launcher".equals(p)
                 || "com.oplus.launcher".equals(p)
@@ -325,7 +300,7 @@ public class BlurEnhanceModule extends XposedModule {
             r.total += r.critical;
             r.total += installSwallowPauseHook(loader);
             r.total += RecentsBlur.installProbes(loader, recentsApi);
-            // 状态机驱动的进/退判断（真正生效的路径）
+
             r.critical += RecentsBlur.installStateHooks(loader, recentsApi);
             ModuleLog.d("INSTALL", "critical=" + r.critical + " total=" + r.total);
         } catch (Throwable t) {
@@ -583,7 +558,6 @@ public class BlurEnhanceModule extends XposedModule {
         }
     }
 
-
     private int installSwallowPauseHook(ClassLoader loader) {
         int n = 0;
         try {
@@ -655,7 +629,7 @@ public class BlurEnhanceModule extends XposedModule {
 
     private int resolveBlurFlags(View view) {
         if (view == null) return 0;
-        // hook 回调在主线程执行，flagsCache 无需加锁（WeakHashMap 单线程访问）。
+
         Integer c = flagsCache.get(view);
         if (c != null) return c;
         int flags = isInsideOpenFolder(view)
@@ -829,7 +803,6 @@ public class BlurEnhanceModule extends XposedModule {
         }
     }
 
-    /** 解析并缓存 OplusViewBackgroundRenderEffect 类及其 setBackgroundRenderEffect 方法（只做一次）。 */
     private Class<?> resolveOplusEffectCls() {
         if (sOplusEffectResolved) return sOplusEffectCls;
         synchronized (BlurEnhanceModule.class) {
@@ -1317,5 +1290,3 @@ public class BlurEnhanceModule extends XposedModule {
     }
 
 }
-
-

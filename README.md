@@ -32,7 +32,7 @@
 ### 性能
 - 反射结果缓存（带容量上限的 LRU），避免热点路径反复解析
 - 帧内临时对象复用，减少每帧内存分配
-- 发布版日志在**编译期**彻底关闭，零运行时开销
+- 发布版日志彻底关闭，零运行时开销
 
 ---
 
@@ -109,11 +109,9 @@ am broadcast --user 0 -a com.wiselyleo.blurenhance.SETCONF --es mark "enter-rece
 
 ## 🔇 日志与发布
 
-- 日志由**编译期开关**控制：发布版关闭。开关是编译期常量，关闭后日志代码被完全消除 —— **不产生任何日志文件，也没有运行时开销**。
-- 调试时把开关改为开启、重新构建即可；另有「每帧日志」二级开关，默认关闭，以避免过渡动画期间频繁写文件造成的卡顿。
+- 日志默认关闭：**不产生任何日志文件，也没有运行时开销**。
+- 另有「每帧日志」二级开关，默认关闭，以避免过渡动画期间频繁写文件造成的卡顿。
 - 日志按进程分流写入设备 `Download` 目录：主进程与后处理进程各写一个文件；运行时 logcat 使用统一 TAG。
-
-> ⚠️ 这是一个刻意的发布安全设计：开关在编译期决定，不受运行时因素隐式改变。
 
 ---
 
@@ -126,10 +124,7 @@ am broadcast --user 0 -a com.wiselyleo.blurenhance.SETCONF --es mark "enter-rece
 | Java 包名（namespace） | `com.shortcutblur` |
 | 作用域 | 5 个（见「支持环境」） |
 | 最低 / 目标 SDK | 36 / 36 |
-| APK 清单版本 | `v41`（versionCode 401） |
-
-> 📌 当前构建流程只替换 `classes.dex`，APK 清单（版本号 / 版本名）沿用打包模板。
-> 因此**清单中的版本不会随代码版本自动变化** —— 发布新版本前，需先更新模板清单里的 `versionCode` / `versionName`。
+| APK 清单版本 | `v42.5`（versionCode 425） |
 
 ---
 
@@ -139,7 +134,7 @@ am broadcast --user 0 -a com.wiselyleo.blurenhance.SETCONF --es mark "enter-rece
 ColorOS_Blur_Enhance/
 ├── assets/icons/                       # 应用图标（各密度）
 ├── libs/
-│   └── libxposed-api-102.jar           # 编译依赖（LSPosed API 102）
+│   └── libxposed-api-102.jar           # libxposed API（LSPosed）
 └── src/main/java/com/shortcutblur/
     ├── BlurEnhanceModule.java          # 模块主入口（安装各进程 Hook）
     ├── RecentsBlur.java                # 多任务模糊控制器（与框架解耦）
@@ -150,15 +145,8 @@ ColorOS_Blur_Enhance/
     ├── ClockIds.java                   # 时钟文字 / 天气图标 id 常量
     ├── Reflect.java                    # 反射工具（带容量上限的 LRU 缓存）
     ├── ViewUtils.java                  # 视图工具
-    └── ModuleLog.java                  # 可选文件日志（编译期开关）
+    └── ModuleLog.java                  # 可选文件日志
 ```
-
----
-
-## 🔧 构建
-
-- 依赖：JDK 8、Android SDK（API 36）、`libs/libxposed-api-102.jar`
-- 纯 Java 工程（无 Gradle 脚本）：以 `javac` 编译源码，用 `d8` 生成 `classes.dex`，再与模块清单、资源一起打包并签名。
 
 ---
 
@@ -166,11 +154,11 @@ ColorOS_Blur_Enhance/
 
 | 版本 | 说明 |
 |---|---|
-| **v42-dev**（进行中） | **多任务模糊重做**：入场改取桌面自身的「进入概览」动画入口；退场以缩放回弹为主、状态机兜底；进入多任务时保持桌面不淡出；恢复渐进入场；不再干预桌面自带的图标模糊开关。**结构调整**：抽出通用库与独立的多任务控制器，主入口大幅精简 |
+| **v42.5** | **多任务模糊重做**：入场改取桌面自身的「进入概览」动画入口；退场以缩放回弹为主、状态机兜底；进入多任务时保持桌面不淡出；恢复渐进入场；不再干预桌面自带的图标模糊开关。**结构调整**：抽出通用库与独立的多任务控制器，主入口大幅精简 |
 | **v41** | 多任务入场 / 退场双阈值重构 + 性能与清理 |
 | **v40** | 快捷方式吞暂停保活 + 图标模糊独立挂点 + 进入渐进 / 退出渐降；性能优化：反射结果缓存、缓存 LRU 化、帧内对象复用、视图矩形局部化 |
 | v38.6 | 重构：抽出时钟 id 常量、命名魔法数、补类文档 |
-| v24 | 多任务桌面图标模糊（方向穿越判据；v42-dev 已重做，见上） |
+| v24 | 多任务桌面图标模糊（方向穿越判据；v42.5 已重做，见上） |
 
 > 注：v38.7 为**内部测试版本，未发布到 git**，其内容已随 v40 一并发布，故不单列。
 
@@ -198,8 +186,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 ```
 
-- **源文件版权头**：每个源文件头部均带有 `SPDX-License-Identifier: GPL-3.0-or-later` 与上述版权声明。
-- **源码可得性（GPL-3.0 §6）**：本仓库即对应源码。对外分发编译产物（模块 APK）时，须同时提供或明确指明获取本源码的方式。
+- **源码可得性（GPL-3.0 §6）**：本仓库即对应源码。对外分发模块 APK 时，须同时提供或明确指明获取本源码的方式。
 - **派生作品**：基于本项目的修改与再分发，必须同样以 GPL-3.0（或更新版本）开放源码，并保留原有版权与许可声明。
 - **第三方组件**：`libs/libxposed-api-102.jar`（libxposed API）版权归其作者所有，遵循其自身许可；本项目的 GPL 仅覆盖本项目自身代码。
 - **商标与隶属**：本项目为第三方开源项目，与 OPPO / ColorOS / LSPosed 官方无隶属关系，相关商标归各自所有者所有。
