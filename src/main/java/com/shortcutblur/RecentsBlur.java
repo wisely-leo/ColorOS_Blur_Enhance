@@ -611,7 +611,6 @@ final class RecentsBlur {
         }
     }
 
-
     private static int installRecentsIconBlurProbe(ClassLoader loader) {
         int n = 0;
         installEarlySignalProbes(loader);
@@ -1163,7 +1162,6 @@ final class RecentsBlur {
                 + " lastAnchor=" + (sLastAnchor == null ? "null" : "detached"));
         return null;
     }
-
 
     static int installProbes(ClassLoader loader, HookApi api) {
         API = api;

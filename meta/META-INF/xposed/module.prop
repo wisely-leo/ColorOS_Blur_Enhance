@@ -1,9 +1,0 @@
-id=com.wiselyleo.blurenhance
-name=ColorOS Blur Enhance
-version=v42.5
-versionCode=425
-author=wisely-leo
-minApiVersion=102
-targetApiVersion=102
-staticScope=true
-description=Recents blur driven by system setBlur, with a built-in settings GUI

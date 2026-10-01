@@ -10,9 +10,8 @@ import java.io.Writer;
 
 public final class ModuleLog {
 
-    /** 兼容字段：仅用于构建脚本注入阅读，不再控制日志。 */
     public static final boolean RELEASE = true;
-    /** 运行期日志开关：读 FeatureFlags.LOG_ENABLED（默认 false）。 */
+
     public static boolean enabled() { return FeatureFlags.LOG_ENABLED; }
 
     public static final String TAG = "colorosblurenhance";

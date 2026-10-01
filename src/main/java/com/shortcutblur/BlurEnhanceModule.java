@@ -59,7 +59,6 @@ public class BlurEnhanceModule extends XposedModule {
     private static final String CLS_EA = "e.a";
 
     private static final String CLS_BLUR_MGR = "com.oplus.posteffect.manager.BlurDrawableManager";
-    // 采样倍率改由 FeatureFlags.SAMPLE_SCALE 提供（运行期读 blur.conf，由 GUI 滑块写入 0.0~1.0）
 
     private static final float BLUR_RADIUS = 64.0f;
     private static final long BLUR_DURATION = 330L;
@@ -119,7 +118,7 @@ public class BlurEnhanceModule extends XposedModule {
         try {
             if (param == null) return;
             String pkg = param.getPackageName();
-            FeatureFlags.load();   // 装配前读一次开关（幂等）
+            FeatureFlags.load();
             ModuleLog.i("onPackageReady pkg=" + pkg);
             installScreenReceiverViaApp(param);
             if (PKG_POSTEFFECT.equals(pkg)) {
@@ -298,7 +297,7 @@ public class BlurEnhanceModule extends XposedModule {
 
         Set<Method> hooked = new HashSet<>();
         try {
-            // ---------- (1) shortcut 背景模糊（模块自实现）----------
+
             if (FeatureFlags.SHORTCUT_BLUR) {
                 Class<?> cls = Reflect.loadClass(CLS_POPUP_BLUR_VIEW, loader);
                 if (cls != null) {
@@ -309,7 +308,7 @@ public class BlurEnhanceModule extends XposedModule {
                 if (comp != null) {
                     r.total += hookViewReturningMethod(comp, M_GET_POP_BLUR_VIEW, "pbv_companion");
                 }
-    
+
                 for (String cn : new String[]{CLS_OPLUS_POPUP, CLS_ARROW_POPUP, CLS_POPUP_BLUR_VIEW}) {
                     Class<?> ac = Reflect.loadClass(cn, loader);
                     if (ac == null) continue;
@@ -321,10 +320,10 @@ public class BlurEnhanceModule extends XposedModule {
             } else {
                 ModuleLog.d("INSTALL", "shortcut blur disabled by flag, skip");
             }
-            // ---------- (2) recents 模糊 ----------
+
             if (FeatureFlags.RECENTS_BLUR) {
                 r.total += RecentsBlur.installProbes(loader, recentsApi);
-    
+
                 r.critical += RecentsBlur.installStateHooks(loader, recentsApi);
             } else {
                 ModuleLog.d("INSTALL", "recents blur disabled by flag, skip");

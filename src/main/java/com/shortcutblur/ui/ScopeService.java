@@ -9,18 +9,8 @@ import android.os.Parcel;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 
-/**
- * Shizuku / Sui 的 UserService —— 本类由 Shizuku 以【shell（或 root）身份】加载运行，
- * 所以这里的 Runtime.exec 就是 ADB 权限（不借用、也不消耗本应用自身的权限）。
- *
- * 协议：手写 binder，不依赖 AIDL 编译 ——
- *   transact(CODE_EXEC, data{String cmd}, reply{int rc, String out})
- *
- * 为什么用 UserService：Shizuku 13 起已移除 newProcess，UserService 是官方推荐路线。
- */
 public class ScopeService extends Service {
 
-    /** 执行一条 sh 命令。 */
     public static final int CODE_EXEC = 0x5A01;
 
     private final IBinder binder = new Binder() {
