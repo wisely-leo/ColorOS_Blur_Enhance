@@ -273,6 +273,17 @@ public final class SettingsStore {
         } catch (Throwable ignored) {}
         return "unknown";
     }
+
+    public long versionCode() {
+        try {
+            android.content.pm.PackageInfo pi = ctx.getPackageManager()
+                    .getPackageInfo(ctx.getPackageName(), 0);
+            return (android.os.Build.VERSION.SDK_INT >= 28)
+                    ? pi.getLongVersionCode() : pi.versionCode;
+        } catch (Throwable ignored) {}
+        return 0L;
+    }
+
     public String authorName()  { return moduleProp("author",  "Wisely_Leo"); }
 
     public String appLabel(String pkg) {

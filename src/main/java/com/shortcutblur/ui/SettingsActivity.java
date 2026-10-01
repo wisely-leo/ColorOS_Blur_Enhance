@@ -446,6 +446,33 @@ public class SettingsActivity extends Activity {
         }
     }
 
+    private static long tagToCode(String tag) {
+        if (tag == null) return -1L;
+        StringBuilder d = new StringBuilder();
+        for (int i = 0; i < tag.length(); i++) {
+            char c = tag.charAt(i);
+            if ((c >= '0' && c <= '9') || c == '.') d.append(c);
+        }
+        String num = d.toString();
+        if (num.length() == 0) return -1L;
+
+        while (num.startsWith(".")) num = num.substring(1);
+        while (num.endsWith(".")) num = num.substring(0, num.length() - 1);
+        if (num.length() == 0) return -1L;
+        String[] parts = num.split("\\.");
+        try {
+            long major = Long.parseLong(parts[0]);
+            long minor = 0L;
+            if (parts.length >= 2 && parts[1].length() > 0) {
+                String mn = parts[1];
+                if (mn.length() > 1) mn = mn.substring(0, 1);
+                minor = Long.parseLong(mn);
+            }
+            return major * 10L + minor;
+        } catch (Throwable ignored) {}
+        return -1L;
+    }
+
     private void checkUpdate(final android.widget.TextView status) {
         new Thread(() -> {
             String msg;
@@ -472,10 +499,20 @@ public class SettingsActivity extends Activity {
                     if (tag == null || tag.length() == 0) {
                         msg = "!无法解析版本";
                     } else {
-                        String local = store.versionName();
-                        msg = tag.equalsIgnoreCase(local)
-                                ? ("已是最新 " + tag)
-                                : ("发现新版本 " + tag);
+
+                        long localCode = store.versionCode();
+                        long remoteCode = tagToCode(tag);
+                        String localName = store.versionName();
+                        if (remoteCode <= 0) {
+
+                            msg = tag.equalsIgnoreCase(localName)
+                                    ? ("已是最新 " + tag)
+                                    : ("发现新版本 " + tag);
+                        } else if (remoteCode > localCode) {
+                            msg = "发现新版本 " + tag;
+                        } else {
+                            msg = "已是最新 " + tag;
+                        }
                     }
                 }
                 conn.disconnect();
