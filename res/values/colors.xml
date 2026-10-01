@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- SoftUi 设计 token：语义命名，不绑品牌 -->
+    <color name="canvas">#FFF2F2F7</color>
+    <color name="surface">#FFFFFFFF</color>
+    <color name="accent">#FF007AFF</color>
+    <color name="text_primary">#FF000000</color>
+    <color name="text_secondary">#993C3C43</color>
+    <color name="divider">#5C3C3C43</color>
+</resources>

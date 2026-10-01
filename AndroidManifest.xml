@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.wiselyleo.blurenhance"
+    android:versionCode="425"
+    android:versionName="v42.5">
+
+    <uses-sdk
+        android:minSdkVersion="36"
+        android:targetSdkVersion="36" />
+
+    <!-- 网络：检查更新（请求 GitHub Releases API） -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Shizuku / Sui：ADB 权限通道（provider 负责与 Shizuku 服务握手） -->
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+
+    <application
+        android:name="com.shortcutblur.ui.App"
+        android:label="ColorOS Blur Enhance"
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:extractNativeLibs="false">
+
+        <!-- libxposed service provider（io.github.libxposed:service 提供实现，已打入 dex） -->
+        <provider
+            android:name="io.github.libxposed.service.XposedProvider"
+            android:authorities="com.wiselyleo.blurenhance.XposedService"
+            android:exported="true" />
+
+        <!-- Shizuku/Sui 客户端 provider（authority 固定为 <applicationId>.shizuku） -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="com.wiselyleo.blurenhance.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
+        <!-- Shizuku/Sui：告诉它本应用使用 v3 API（Sui 也需要） -->
+        <meta-data
+            android:name="moe.shizuku.client.V3_SUPPORT"
+            android:value="true" />
+
+        <!--
+            Shizuku UserService：本类【不在本进程中运行】，
+            由 Shizuku 以 shell 身份加载执行 sh（重启作用域用）。
+            exported=false：只有 Shizuku 通过 bindUserService 才能拉起它。
+        -->
+        <service
+            android:name="com.shortcutblur.ui.ScopeService"
+            android:exported="false" />
+
+        <!-- GUI 入口：设置界面 -->
+        <activity
+            android:name="com.shortcutblur.ui.SettingsActivity"
+            android:label="ColorOS Blur Enhance"
+            android:exported="true"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+    </application>
+</manifest>
