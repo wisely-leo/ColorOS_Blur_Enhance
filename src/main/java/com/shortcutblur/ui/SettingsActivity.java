@@ -479,6 +479,36 @@ public class SettingsActivity extends Activity {
      * 检查 GitHub Releases 是否有更新。
      * 请求 api.github.com 的 latest release，解析 tag_name，与本地版本比对。
      */
+    /** 把 GitHub tag 解析为与 versionCode 同语义的数字（宽松）。
+     *  v43 -> 430 ; v43.0 -> 430 ; v42.5 -> 425 ; release-v43-beta -> 430
+     *  解析不出返回 -1。 */
+    private static long tagToCode(String tag) {
+        if (tag == null) return -1L;
+        StringBuilder d = new StringBuilder();
+        for (int i = 0; i < tag.length(); i++) {
+            char c = tag.charAt(i);
+            if ((c >= '0' && c <= '9') || c == '.') d.append(c);
+        }
+        String num = d.toString();
+        if (num.length() == 0) return -1L;
+        // 去掉首尾多余的点
+        while (num.startsWith(".")) num = num.substring(1);
+        while (num.endsWith(".")) num = num.substring(0, num.length() - 1);
+        if (num.length() == 0) return -1L;
+        String[] parts = num.split("\\.");
+        try {
+            long major = Long.parseLong(parts[0]);
+            long minor = 0L;
+            if (parts.length >= 2 && parts[1].length() > 0) {
+                String mn = parts[1];
+                if (mn.length() > 1) mn = mn.substring(0, 1);   // 只取第 1 位（3位码规则）
+                minor = Long.parseLong(mn);
+            }
+            return major * 10L + minor;
+        } catch (Throwable ignored) {}
+        return -1L;
+    }
+
     private void checkUpdate(final android.widget.TextView status) {
         new Thread(() -> {
             String msg;
@@ -505,10 +535,20 @@ public class SettingsActivity extends Activity {
                     if (tag == null || tag.length() == 0) {
                         msg = "!无法解析版本";
                     } else {
-                        String local = store.versionName();
-                        msg = tag.equalsIgnoreCase(local)
-                                ? ("已是最新 " + tag)
-                                : ("发现新版本 " + tag);
+                        // 版本比较：仅当 GitHub 版本「高于」本地时才提示新版本
+                        long localCode = store.versionCode();          // 本地，如 430
+                        long remoteCode = tagToCode(tag);             // GitHub tag -> 同语义数字，如 v43 -> 430
+                        String localName = store.versionName();
+                        if (remoteCode <= 0) {
+                            // tag 无法解析出数字：宽松处理，只判不同
+                            msg = tag.equalsIgnoreCase(localName)
+                                    ? ("已是最新 " + tag)
+                                    : ("发现新版本 " + tag);
+                        } else if (remoteCode > localCode) {
+                            msg = "发现新版本 " + tag;
+                        } else {
+                            msg = "已是最新 " + tag;   // 相等 或 远程更旧，均视为最新
+                        }
                     }
                 }
                 conn.disconnect();

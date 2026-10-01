@@ -354,6 +354,17 @@ public final class SettingsStore {
         } catch (Throwable ignored) {}
         return "unknown";
     }
+    /** 【新增】读取本 APK 的 versionCode（用于「检查更新」版本比较）。 */
+    public long versionCode() {
+        try {
+            android.content.pm.PackageInfo pi = ctx.getPackageManager()
+                    .getPackageInfo(ctx.getPackageName(), 0);
+            return (android.os.Build.VERSION.SDK_INT >= 28)
+                    ? pi.getLongVersionCode() : pi.versionCode;
+        } catch (Throwable ignored) {}
+        return 0L;
+    }
+
     public String authorName()  { return moduleProp("author",  "Wisely_Leo"); }
 
     /** 包名 -> 应用友好名（拿不到就回退包名）。用于作用域列表展示。 */
