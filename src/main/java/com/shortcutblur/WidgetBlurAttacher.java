@@ -1,6 +1,7 @@
 package com.shortcutblur;
 
 import android.view.View;
+import android.view.ViewGroup;
 
 import java.lang.reflect.Method;
 
@@ -28,6 +29,13 @@ public class WidgetBlurAttacher {
         if (root == null) return;
         try {
             View host = ViewUtils.ancestorOfType(root, "AppWidgetHostView");
+            if (host == null) { ModuleLog.e("BW", tag + " host not found", null); return; }
+
+            synchronized (sDoneHost) {
+                View bound = sDoneHost.get(host);
+                if (bound != null && Boolean.TRUE.equals(sDone.get(bound))) return;
+            }
+
             View containerEarly = ViewUtils.findByViewId(root, ClockIds.TARGET_ROOT);
             boolean hasT = (containerEarly != null);
             if (hasT) {
@@ -47,12 +55,43 @@ public class WidgetBlurAttacher {
             View container = containerEarly;
             if (container == null) { container = ViewUtils.findByViewId(root, ClockIds.CONTAINER); }
             if (container == null) {
+
+                container = findBestContentContainer(root, host);
+                if (container != null) {
+                    ModuleLog.d("BW", tag + " adaptive container=" + container.getClass().getName()
+                            + " 0x" + Integer.toHexString(container.getId())
+                            + " " + container.getWidth() + "x" + container.getHeight());
+                }
+            }
+            if (container == null) {
                 if (attempt < ATTACH_MAX_RETRY && root != null) {
                     root.postDelayed(new Runnable() {
                         @Override public void run() { attach(tag, root, cl, attempt + 1); }
                     }, ATTACH_RETRY_MS);
                 }
                 return;
+            }
+
+            if (container == host) {
+                ModuleLog.e("BW", tag + " container==host, reject (would crash)", null);
+                return;
+            }
+            if (container.getWidth() <= 0 || container.getHeight() <= 0) {
+
+                if (attempt < ATTACH_MAX_RETRY && root != null) {
+                    root.postDelayed(new Runnable() {
+                        @Override public void run() { attach(tag, root, cl, attempt + 1); }
+                    }, ATTACH_RETRY_MS);
+                }
+                return;
+            }
+
+            View promoted = promoteContainerIfNeeded(container, host);
+            if (promoted != null) {
+                ModuleLog.d("BW", "container promoted: "
+                        + container.getClass().getSimpleName() + " " + container.getWidth() + "x" + container.getHeight()
+                        + " -> " + promoted.getClass().getSimpleName() + " " + promoted.getWidth() + "x" + promoted.getHeight());
+                container = promoted;
             }
             synchronized (sDone) {
                 View bound = sDoneHost.get(host);
@@ -70,6 +109,79 @@ public class WidgetBlurAttacher {
             GlyphBlurRenderer.attachGlyphBlur(container, container.getContext().getClassLoader());
         } catch (Throwable t) {
             ModuleLog.e("BW", "attach fail", t);
+        }
+    }
+    private static int countTextIdsIn(View v) {
+        if (v == null) return 0;
+        int n = 0;
+        for (int id : ClockIds.TEXT_IDS) {
+            try { if (v.findViewById(id) != null) n++; } catch (Throwable ignored) {}
+        }
+        return n;
+    }
+
+    private static View findBestContentContainer(View root, View host) {
+        try {
+            View scanRoot = (host != null) ? host : root;
+            if (!(scanRoot instanceof ViewGroup)) return null;
+            final int total = ClockIds.TEXT_IDS.length;
+            final View[] best = new View[]{null};
+            final int[] bestScore = new int[]{0};
+            findBestRec((ViewGroup) scanRoot, 0, total, best, bestScore, scanRoot);
+            return best[0];
+        } catch (Throwable t) {
+            ModuleLog.e("BW", "findBestContentContainer fail", t);
+            return null;
+        }
+    }
+
+    private static void findBestRec(ViewGroup g, int depth, int total,
+                                    View[] best, int[] bestScore, View excludeRoot) {
+        if (g == null || depth > 12) return;
+
+        if (g != excludeRoot) {
+            int c = countTextIdsIn(g);
+            boolean sized = g.getWidth() > 0 && g.getHeight() > 0;
+
+            if (c >= 2 && sized) {
+                int score = c * 100000 + (g.getWidth() * g.getHeight() / 1000);
+                if (score > bestScore[0]) {
+                    bestScore[0] = score;
+                    best[0] = g;
+                }
+            }
+
+            if (c >= total) return;
+        }
+        for (int i = 0; i < g.getChildCount(); i++) {
+            View ch = g.getChildAt(i);
+            if (ch instanceof ViewGroup) findBestRec((ViewGroup) ch, depth + 1, total, best, bestScore, excludeRoot);
+        }
+    }
+
+    private static View promoteContainerIfNeeded(View container, View host) {
+        try {
+            if (container == null) return null;
+            int baseCount = countTextIdsIn(container);
+            int total = ClockIds.TEXT_IDS.length;
+            if (baseCount >= total) return null;
+
+            View best = null;
+            int bestCount = baseCount;
+            android.view.ViewParent p = container.getParent();
+            int guard = 0;
+            while ((p instanceof View) && guard++ < 16) {
+                View pv = (View) p;
+                if (host != null && !ViewUtils.isDescendantOrSelf(host, pv)) break;
+                int c = countTextIdsIn(pv);
+                if (c > bestCount) { bestCount = c; best = pv; }
+                if (c >= total) break;
+                p = pv.getParent();
+            }
+            return best;
+        } catch (Throwable t) {
+            ModuleLog.e("BW", "promoteContainerIfNeeded fail", t);
+            return null;
         }
     }
 

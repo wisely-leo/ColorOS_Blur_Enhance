@@ -46,10 +46,18 @@ public class GlyphBlurRenderer {
 
     private static final java.util.WeakHashMap<View, GlyphSnapshot[]> sSnapsMap = new java.util.WeakHashMap<View, GlyphSnapshot[]>();
     private static volatile boolean sScreenOn = true;
-    private static final java.util.WeakHashMap<View, PollRunner> sRunners = new java.util.WeakHashMap<View, PollRunner>();
+    private static final java.util.WeakHashMap<View, ClockBlurStateMachine> sRunners = new java.util.WeakHashMap<View, ClockBlurStateMachine>();
 
-    private static final java.util.HashMap<Integer, Integer> sIconFp = new java.util.HashMap<Integer, Integer>();
-    private static final java.util.HashMap<Integer, Path> sIconFpPath = new java.util.HashMap<Integer, Path>();
+    private static final class IconCacheEntry {
+        final int fp;
+        final int ivW, ivH;
+        final Path path;
+        IconCacheEntry(int fp, int ivW, int ivH, Path path) {
+            this.fp = fp; this.ivW = ivW; this.ivH = ivH; this.path = path;
+        }
+    }
+    private static final java.util.WeakHashMap<View, java.util.HashMap<Integer, IconCacheEntry>> sIconCache =
+            new java.util.WeakHashMap<View, java.util.HashMap<Integer, IconCacheEntry>>();
 
     private static int iconFingerprint(android.graphics.Bitmap b) {
         if (b == null || b.isRecycled()) return 0;
@@ -72,16 +80,16 @@ public class GlyphBlurRenderer {
         if (!changed) return;
         try {
             synchronized (sRunners) {
-                for (PollRunner pr : new java.util.ArrayList<PollRunner>(sRunners.values())) pr.onScreenStateChanged();
+                for (ClockBlurStateMachine pr : new java.util.ArrayList<ClockBlurStateMachine>(sRunners.values())) pr.onScreenStateChanged();
             }
         } catch (Throwable t) { ModuleLog.e("GB", "screenStateChanged fail", t); }
     }
 
     public static void notifyContentMaybeChangedAll() {
         try {
-            java.util.List<PollRunner> list;
-            synchronized (sRunners) { list = new java.util.ArrayList<PollRunner>(sRunners.values()); }
-            for (PollRunner pr : list) pr.kick();
+            java.util.List<ClockBlurStateMachine> list;
+            synchronized (sRunners) { list = new java.util.ArrayList<ClockBlurStateMachine>(sRunners.values()); }
+            for (ClockBlurStateMachine pr : list) pr.onContentChanged();
         } catch (Throwable t) { ModuleLog.e("GB", "kickAll fail", t); }
     }
 
@@ -205,18 +213,8 @@ public class GlyphBlurRenderer {
 
     static void onWidgetUpdated(final View container) {
         if (container == null) return;
-        ModuleLog.d("GB", "poll -> WIDGET_UPDATED (evt: updateAppWidget)");
+
         notifyContentMaybeChangedAll();
-
-        rebuildSnapshotsNow(container);
-
-        container.postOnAnimation(new Runnable() {
-            @Override public void run() { rebuildSnapshotsNow(container); }
-        });
-
-        container.postDelayed(new Runnable() {
-            @Override public void run() { rebuildSnapshotsNow(container); }
-        }, 50L);
     }
 
     private static void rebuildSnapshotsNow(View container) {
@@ -233,6 +231,46 @@ public class GlyphBlurRenderer {
         } catch (Throwable t) { ModuleLog.e("GB", "rebuildSnapshotsNow fail", t); }
     }
 
+    private static android.graphics.Bitmap drawableToBitmap(android.graphics.drawable.Drawable d, View host) {
+        if (d == null) return null;
+        try {
+
+            if (d instanceof android.graphics.drawable.BitmapDrawable) {
+                android.graphics.Bitmap b = ((android.graphics.drawable.BitmapDrawable) d).getBitmap();
+                if (b != null && !b.isRecycled()) return b;
+            }
+
+            if (d instanceof android.graphics.drawable.TransitionDrawable) {
+                android.graphics.drawable.TransitionDrawable td =
+                        (android.graphics.drawable.TransitionDrawable) d;
+                int n = td.getNumberOfLayers();
+                for (int i = n - 1; i >= 0; i--) {
+                    android.graphics.drawable.Drawable layer = td.getDrawable(i);
+                    android.graphics.Bitmap lb = drawableToBitmap(layer, host);
+                    if (lb != null) return lb;
+                }
+            }
+
+            int w = d.getIntrinsicWidth();
+            int h = d.getIntrinsicHeight();
+            if (w <= 0 || h <= 0) {
+                w = (host != null) ? host.getWidth() : 0;
+                h = (host != null) ? host.getHeight() : 0;
+            }
+            if (w <= 0) w = 1;
+            if (h <= 0) h = 1;
+            android.graphics.Bitmap out = android.graphics.Bitmap.createBitmap(
+                    w, h, android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.Canvas c = new android.graphics.Canvas(out);
+            d.setBounds(0, 0, w, h);
+            d.draw(c);
+            return out;
+        } catch (Throwable t) {
+            ModuleLog.e("GB", "drawableToBitmap fail cls=" + (d == null ? "null" : d.getClass().getName()), t);
+            return null;
+        }
+    }
+
     private static void appendWeatherIconSnapshots(View container, View base, java.util.ArrayList<GlyphSnapshot> list) {
         int[] iconIds = ClockIds.ICON_IDS;
         for (int id : iconIds) {
@@ -246,21 +284,17 @@ public class GlyphBlurRenderer {
                 android.widget.ImageView iv = (android.widget.ImageView) v;
                 android.graphics.drawable.Drawable d = iv.getDrawable();
                 if (d == null) continue;
-                android.graphics.Bitmap bmp = null;
-                if (d instanceof android.graphics.drawable.BitmapDrawable) {
-                    bmp = ((android.graphics.drawable.BitmapDrawable) d).getBitmap();
-                }
+                android.graphics.Bitmap bmp = drawableToBitmap(d, iv);
                 if (bmp == null || bmp.isRecycled()) continue;
                 if (bmp.getWidth() <= 0 || bmp.getHeight() <= 0) continue;
 
                 int fp = iconFingerprint(bmp);
-                Integer cFp = sIconFp.get(id);
-                if (cFp != null && cFp.intValue() == fp) {
-                    Path cached = sIconFpPath.get(id);
-                    if (cached != null) {
-                        list.add(new GlyphSnapshot(cached, localOffsetX(v, base), localOffsetY(v, base)));
-                        continue;
-                    }
+                int ivW = iv.getWidth(), ivH = iv.getHeight();
+                java.util.HashMap<Integer, IconCacheEntry> cache = sIconCache.get(container);
+                IconCacheEntry ce = (cache == null) ? null : cache.get(Integer.valueOf(id));
+                if (ce != null && ce.fp == fp && ce.ivW == ivW && ce.ivH == ivH && ce.path != null) {
+                    list.add(new GlyphSnapshot(ce.path, localOffsetX(v, base), localOffsetY(v, base)));
+                    continue;
                 }
 
                 int bw = Math.min(bmp.getWidth(), ICON_SAMPLE_MAX_W);
@@ -296,8 +330,8 @@ public class GlyphBlurRenderer {
                 float dx = localOffsetX(v, base);
                 float dy = localOffsetY(v, base);
                 list.add(new GlyphSnapshot(iconPath, dx, dy));
-                sIconFp.put(Integer.valueOf(id), Integer.valueOf(fp));
-                sIconFpPath.put(Integer.valueOf(id), iconPath);
+                if (cache == null) { cache = new java.util.HashMap<Integer, IconCacheEntry>(); sIconCache.put(container, cache); }
+                cache.put(Integer.valueOf(id), new IconCacheEntry(fp, ivW, ivH, iconPath));
             } catch (Throwable t) { ModuleLog.e("GB", "iconPath fail id=0x" + Integer.toHexString(id), t); }
         }
     }
@@ -366,10 +400,15 @@ public class GlyphBlurRenderer {
                 float baseline;
                 float startX;
                 android.text.Layout lay = tv.getLayout();
+
+                boolean layFresh = false;
                 if (lay != null && lay.getLineCount() > 0) {
+                    CharSequence ls = lay.getText();
+                    layFresh = (ls != null) && ls.toString().equals(text);
+                }
+                if (layFresh) {
                     int line = 0;
                     baseline = tv.getTotalPaddingTop() + lay.getLineBaseline(line) + GLYPH_DY;
-
                     startX = tv.getTotalPaddingLeft() + lay.getLineLeft(line);
                 } else {
                     android.graphics.Paint.FontMetrics fm = tp.getFontMetrics();
@@ -425,140 +464,180 @@ public class GlyphBlurRenderer {
         return out;
     }
 
-    private static final java.util.WeakHashMap<View, Boolean> sPolling = new java.util.WeakHashMap<View, Boolean>();
-    private static final java.util.WeakHashMap<View, String> sPollState = new java.util.WeakHashMap<View, String>();
     private static final android.os.Handler sHandler = new android.os.Handler(android.os.Looper.getMainLooper());
 
     private static void installRefreshPoller(final View container, final Object blurDrawable) {
-        PollRunner pr;
+        ClockBlurStateMachine pr;
         synchronized (sRunners) {
             if (sRunners.containsKey(container)) { return; }
-            pr = new PollRunner(container, blurDrawable);
+            pr = new ClockBlurStateMachine(container, blurDrawable);
             sRunners.put(container, pr);
-            sPolling.put(container, Boolean.TRUE);
         }
-        pr.schedule(0L);
-        ModuleLog.d("GB", "poller installed");
+        pr.start();
     }
 
-    private static final class PollRunner implements Runnable {
+    private static final long FALLBACK_CHECK_MS = 2000L;
+
+    private static final long FALLBACK_HIDDEN_PROBE_MS = 250L;
+    private static final long REBUILD_SETTLE_MS = 50L;
+
+    private static final class ClockBlurStateMachine {
+        private static final int IDLE = 0;
+        private static final int DIRTY = 1;
+        private static final int REBUILDING = 2;
+        private static final int PAUSED = 3;
+
         private final View container;
         private final Object blurDrawable;
-        private long intervalMs = POLL_INTERVAL_TICK_MS;
-        private int stableCount = 0;
-        private volatile boolean stopped = false;
-        private volatile boolean visible = true;
-        private String lastLogState = null;
-        private boolean ranOnce = false;
-        private boolean changedLogged = false;
+        private volatile int state = IDLE;
+        private String lastStateSig = null;
 
-        private final java.util.HashMap<Integer, Integer> lastOffX = new java.util.HashMap<Integer, Integer>();
-        private final java.util.HashMap<Integer, Integer> lastOffY = new java.util.HashMap<Integer, Integer>();
-        private final java.util.HashMap<Integer, String> lastText = new java.util.HashMap<Integer, String>();
+        private String lastFingerprint = null;
+
         private final StringBuilder sb = new StringBuilder(128);
+        private final Runnable rebuildTask = new Runnable() {
+            @Override public void run() { performRebuild(); }
+        };
+        private final Runnable fallbackTask = new Runnable() {
+            @Override public void run() { fallbackCheck(); }
+        };
 
-        PollRunner(View container, Object blurDrawable) {
+        ClockBlurStateMachine(View container, Object blurDrawable) {
             this.container = container;
             this.blurDrawable = blurDrawable;
         }
 
-        void schedule(long delayMs) {
-            if (stopped) return;
-            sHandler.postDelayed(this, Math.max(0L, delayMs));
+        void start() {
+
+            transitionToDirty();
         }
 
-        void onScreenStateChanged() {
+        void onContentChanged() {
+            if (!sScreenOn) return;
+
+            transitionToDirty();
+        }
+
+        synchronized void onScreenStateChanged() {
             if (sScreenOn) {
-                stopped = false;
-                stableCount = 0;
-                intervalMs = POLL_INTERVAL_TICK_MS;
-                logOnce("SCREEN_ON");
-                sHandler.removeCallbacks(this);
-                schedule(0L);
+                if (state == PAUSED) transitionToDirty();
             } else {
-                logOnce("SCREEN_OFF");
-                stopped = true;
-                sHandler.removeCallbacks(this);
+                state = PAUSED;
+                sHandler.removeCallbacks(rebuildTask);
+                sHandler.removeCallbacks(fallbackTask);
             }
         }
 
-        void kick() {
-            stopped = false;
-            stableCount = 0;
-            intervalMs = POLL_INTERVAL_TICK_MS;
-            sHandler.removeCallbacks(this);
-            ModuleLog.d("GB", "poll -> KICK (evt-driven)");
-            schedule(0L);
+        private long lastRebuildAt = 0L;
+        private static final long MIN_REBUILD_INTERVAL_MS = 100L;
+
+        private synchronized void transitionToDirty() {
+            if (state == PAUSED && !sScreenOn) return;
+            if (state == DIRTY || state == REBUILDING) return;
+            state = DIRTY;
+            sHandler.removeCallbacks(rebuildTask);
+            sHandler.removeCallbacks(fallbackTask);
+
+            long now = android.os.SystemClock.uptimeMillis();
+            long since = now - lastRebuildAt;
+            long delay = (since >= MIN_REBUILD_INTERVAL_MS) ? 0L : (MIN_REBUILD_INTERVAL_MS - since);
+            if (delay == 0L) {
+
+                container.postOnAnimation(rebuildTask);
+            } else {
+                container.postDelayed(rebuildTask, delay);
+            }
         }
 
-        private void logOnce(String st) {
-            if ("STABLE".equals(st)) {
-                ModuleLog.d("GB", "poll -> STABLE (interval=" + intervalMs + ")");
+        private synchronized void performRebuild() {
+            sHandler.removeCallbacks(rebuildTask);
+            if (state == PAUSED && !sScreenOn) return;
+            if (!sScreenOn) { state = PAUSED; return; }
+            if (!ViewUtils.isReallyVisible(container)) {
+
+                state = IDLE;
+                scheduleFallbackSoon();
                 return;
             }
-            if (st.equals(lastLogState)) return;
-            lastLogState = st;
-            ModuleLog.d("GB", "poll -> " + st + " (interval=" + intervalMs + ")");
+            state = REBUILDING;
+
+            final android.view.ViewTreeObserver vto = container.getViewTreeObserver();
+            if (vto != null && vto.isAlive()) {
+                vto.addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener() {
+                    @Override public boolean onPreDraw() {
+                        final android.view.ViewTreeObserver cur = container.getViewTreeObserver();
+                        if (cur != null && cur.isAlive()) cur.removeOnPreDrawListener(this);
+                        synchronized (ClockBlurStateMachine.this) {
+                            if (state == PAUSED) return true;
+                            try {
+                                doRebuild();
+                                applyClockBrighten(container);
+                            } catch (Throwable t) {
+                                ModuleLog.e("GB", "sm predraw rebuild fail", t);
+                            }
+                        }
+                        return true;
+                    }
+                });
+                container.invalidate();
+            } else {
+                try {
+                    doRebuild();
+                    applyClockBrighten(container);
+                } catch (Throwable t) {
+                    ModuleLog.e("GB", "sm rebuild fail", t);
+                }
+            }
+
+            container.postDelayed(new Runnable() {
+                @Override public void run() {
+                    synchronized (ClockBlurStateMachine.this) {
+                        if (state == PAUSED) return;
+                        try {
+                            String cur = computeSignature();
+                            if (lastStateSig == null || !lastStateSig.equals(cur)) {
+                                doRebuild();
+                                applyClockBrighten(container);
+                            }
+                        } catch (Throwable t) {
+                            ModuleLog.e("GB", "sm settle fail", t);
+                        }
+                        lastRebuildAt = android.os.SystemClock.uptimeMillis();
+                        state = IDLE;
+                        scheduleFallback();
+                    }
+                }
+            }, REBUILD_SETTLE_MS);
         }
 
-        @Override public void run() {
-            if (stopped) return;
-            try {
-                if (!ranOnce) {
-                    ranOnce = true;
-                    ModuleLog.d("GB", "poll -> START (interval=" + intervalMs + ")");
-                }
-                if (!sScreenOn) {
-                    logOnce("SCREEN_OFF");
-                    stopped = true;
-                    return;
-                }
-                if (!ViewUtils.isReallyVisible(container)) {
-                    visible = false;
-                    stableCount++;
-                    if (stableCount >= POLL_STABLE_THRESHOLD) {
-                        if (intervalMs != POLL_INTERVAL_HIDDEN_MS) {
-                            intervalMs = POLL_INTERVAL_HIDDEN_MS;
-                            logOnce("HIDDEN");
-                        }
-                    } else {
-                        intervalMs = POLL_INTERVAL_TICK_MS;
-                    }
-                    sHandler.postDelayed(this, intervalMs);
-                    return;
-                }
-                if (!visible) {
-                    visible = true;
-                    stableCount = 0;
-                    intervalMs = POLL_INTERVAL_TICK_MS;
-                    logOnce("VISIBLE");
-                }
-                boolean changed = pollOnce();
-                if (changed) {
-                    if (!changedLogged) {
-                        changedLogged = true;
-                        ModuleLog.d("GB", "poll -> CHANGED (first change detected)");
-                    }
-                    stableCount = 0;
-                    intervalMs = POLL_INTERVAL_TICK_MS;
+        private void scheduleFallback() {
+            sHandler.removeCallbacks(fallbackTask);
+            sHandler.postDelayed(fallbackTask, FALLBACK_CHECK_MS);
+        }
 
-                    applyClockBrighten(container);
+        private void scheduleFallbackSoon() {
+            sHandler.removeCallbacks(fallbackTask);
+            sHandler.postDelayed(fallbackTask, FALLBACK_HIDDEN_PROBE_MS);
+        }
+
+        private synchronized void fallbackCheck() {
+            if (!sScreenOn) { state = PAUSED; return; }
+
+            if (!ViewUtils.isReallyVisible(container)) { scheduleFallbackSoon(); return; }
+            try {
+                String cur = computeFallbackFingerprint();
+                if (lastFingerprint == null || !lastFingerprint.equals(cur)) {
+                    transitionToDirty();
                 } else {
-                    stableCount++;
-                    if (stableCount >= POLL_STABLE_THRESHOLD && intervalMs < POLL_INTERVAL_MAX_MS) {
-                        intervalMs = Math.min(POLL_INTERVAL_MAX_MS, intervalMs + POLL_INTERVAL_TICK_MS);
-                        stableCount = 0;
-                        logOnce("STABLE");
-                    }
+                    scheduleFallback();
                 }
             } catch (Throwable t) {
-                ModuleLog.e("GB", "poll fail", t);
+                ModuleLog.e("GB", "sm fallback fail", t);
+                scheduleFallback();
             }
-            if (!stopped) sHandler.postDelayed(this, intervalMs);
         }
 
-        private boolean pollOnce() {
-            StringBuilder sb = this.sb;
+        private String computeFallbackFingerprint() {
             sb.setLength(0);
             int[] ids = ClockIds.TEXT_IDS;
             for (int id : ids) {
@@ -567,39 +646,59 @@ public class GlyphBlurRenderer {
                     View root = ViewUtils.descendantJustBelow(container, "AppWidgetHostView");
                     if (root != null) v = root.findViewById(id);
                 }
-                if (!(v instanceof TextView)) { sb.append("-"); sb.append("|"); continue; }
+                if (!(v instanceof TextView)) { sb.append('-').append('|'); continue; }
                 CharSequence cs = ((TextView) v).getText();
-                String text = cs == null ? "" : cs.toString();
-                sb.append(text);
-
-                Integer lo = lastOffX.get(id);
-                int ox;
-                int oy;
-                if (lo == null || !text.equals(lastText.get(id))) {
-                    ox = (int) localOffsetX(v, container);
-                    oy = (int) localOffsetY(v, container);
-                    lastOffX.put(id, Integer.valueOf(ox));
-                    lastOffY.put(id, Integer.valueOf(oy));
-                    lastText.put(id, text);
-                } else {
-                    ox = lo.intValue();
-                    Integer loft = lastOffY.get(id);
-                    oy = loft == null ? (int) localOffsetY(v, container) : loft.intValue();
+                sb.append(cs == null ? "" : cs.toString());
+                sb.append('|');
+            }
+            for (int id : ClockIds.ICON_IDS) {
+                View v = container.findViewById(id);
+                if (!(v instanceof View)) {
+                    View root = ViewUtils.descendantJustBelow(container, "AppWidgetHostView");
+                    if (root != null) v = root.findViewById(id);
                 }
-                sb.append("@").append(ox).append(",").append(oy);
-                sb.append("|");
+                sb.append(v == null ? '-' : (v.getWidth() + "x" + v.getHeight()));
+                sb.append('|');
             }
-            String cur = sb.toString();
-            String prev = sPollState.get(container);
-            if (prev == null || !prev.equals(cur)) {
-                sPollState.put(container, cur);
-                rebuildSnapshots(container);
-                Method inv = Reflect.method(blurDrawable.getClass(), "invalidatePath", 0);
-                if (inv != null) { try { inv.setAccessible(true); inv.invoke(blurDrawable); } catch (Throwable ignored) {} }
-                container.invalidate();
-                return true;
+            return sb.toString();
+        }
+
+        private String computeSignature() {
+            sb.setLength(0);
+            int[] ids = ClockIds.TEXT_IDS;
+            for (int id : ids) {
+                View v = container.findViewById(id);
+                if (!(v instanceof TextView)) {
+                    View root = ViewUtils.descendantJustBelow(container, "AppWidgetHostView");
+                    if (root != null) v = root.findViewById(id);
+                }
+                if (!(v instanceof TextView)) { sb.append('-').append('|'); continue; }
+                CharSequence cs = ((TextView) v).getText();
+                sb.append(cs == null ? "" : cs.toString());
+                sb.append('@').append((int) localOffsetX(v, container))
+                  .append(',').append((int) localOffsetY(v, container));
+                sb.append('|');
             }
-            return false;
+
+            for (int id : ClockIds.ICON_IDS) {
+                View v = container.findViewById(id);
+                if (!(v instanceof View)) {
+                    View root = ViewUtils.descendantJustBelow(container, "AppWidgetHostView");
+                    if (root != null) v = root.findViewById(id);
+                }
+                sb.append(v == null ? '-' : (v.getWidth() + "x" + v.getHeight()));
+                sb.append('|');
+            }
+            return sb.toString();
+        }
+
+        private void doRebuild() {
+            rebuildSnapshots(container);
+            lastStateSig = computeSignature();
+            lastFingerprint = computeFallbackFingerprint();
+            Method inv = Reflect.method(blurDrawable.getClass(), "invalidatePath", 0);
+            if (inv != null) { try { inv.setAccessible(true); inv.invoke(blurDrawable); } catch (Throwable ignored) {} }
+            container.invalidate();
         }
     }
 

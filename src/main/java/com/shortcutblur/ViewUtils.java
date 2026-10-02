@@ -76,6 +76,17 @@ public final class ViewUtils {
         return findByViewId(root, id, 0);
     }
 
+    public static boolean isDescendantOrSelf(View ancestor, View v) {
+        View cur = v;
+        int guard = 0;
+        while (cur != null && guard++ < MAX_DEPTH) {
+            if (cur == ancestor) return true;
+            ViewParent p = cur.getParent();
+            cur = (p instanceof View) ? (View) p : null;
+        }
+        return false;
+    }
+
     private static View findByViewId(View root, int id, int depth) {
         if (root == null || depth > MAX_DEPTH) return null;
         if (root.getId() == id) return root;
