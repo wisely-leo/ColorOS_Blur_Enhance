@@ -40,6 +40,11 @@ public class BlurEnhanceModule extends XposedModule {
     private void hookEx(String id, Executable target, XposedInterface.Hooker hooker) {
         hook(target).setId(id).setExceptionMode(XposedInterface.ExceptionMode.DEFAULT).intercept(hooker);
     }
+
+    /** 供外部辅助类（如 QuickSearchBlur）装配 hook 的公共入口。 */
+    public void hookPublic(String id, Executable target, XposedInterface.Hooker hooker) {
+        hookEx(id, target, hooker);
+    }
     private static final String CLS_POPUP_BLUR_VIEW = "com.android.launcher3.popup.PopupBlurView";
     private static final String CLS_OPLUS_POPUP = "com.android.launcher3.popup.OplusPopupContainerWithArrow";
     private static final String CLS_ARROW_POPUP = "com.android.launcher3.popup.ArrowPopup";
@@ -54,6 +59,8 @@ public class BlurEnhanceModule extends XposedModule {
     private static final String M_GET_POP_BLUR_VIEW = "getPopBlurView";
 
     private static final String PKG_POSTEFFECT = "com.oplus.blur";
+
+    private static final String PKG_QUICKSEARCH = "com.heytap.quicksearchbox";
 
     private static final String PKG_CLOCK = "com.coloros.alarmclock";
     private static final String CLS_EA = "e.a";
@@ -135,6 +142,17 @@ public class BlurEnhanceModule extends XposedModule {
                 }
                 if (installPostEffectHooks(peLoader)) {
                     postEffectInstalled = true;
+                }
+                return;
+            }
+
+            // ---------- 【下拉搜索实时模糊】全局搜索背景透明化 ----------
+            // 默认开。仅当进入来源为桌面时透明化，透出桌面实时模糊；其它来源保持原背景。
+            if (PKG_QUICKSEARCH.equals(pkg)) {
+                if (FeatureFlags.QUICKSEARCH_BLUR) {
+                    QuickSearchBlur.install(this, param.getClassLoader());
+                } else {
+                    ModuleLog.d("READY", "quicksearch blur disabled by flag, skip");
                 }
                 return;
             }

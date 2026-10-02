@@ -27,6 +27,8 @@ public final class SettingsStore {
     /** 自定义背景图（应用私有目录下的文件名，空 = 未设置） */
     private static final String KEY_BG_FILE     = "bg_file";
     private static final String KEY_LOG         = "log";
+    /** 【下拉搜索实时模糊】全局搜索背景透明化（默认开）。 */
+    private static final String KEY_QS_PROBE    = "quicksearch_blur";
 
     private final SharedPreferences sp;
     /** 持有上下文（appName 等需要用它读模块信息）。 */
@@ -44,6 +46,8 @@ public final class SettingsStore {
     public static final boolean DEF_POSTEFFECT = true;
     public static final float   DEF_SAMPLE_SCALE = 0.5f;
     public static final boolean DEF_LOG        = false;
+    /** 【下拉搜索实时模糊】默认开。 */
+    public static final boolean DEF_QS_PROBE   = true;
 
     // ==================== 同步层（UI -> 宿主）====================
 
@@ -57,6 +61,7 @@ public final class SettingsStore {
             "com.coloros.alarmclock",
             "com.android.launcher",
             "com.oplus.blur",
+            "com.heytap.quicksearchbox",
     };
 
     /** 与宿主 BlurEnhanceModule.ACTION_SETCONF 必须完全一致。 */
@@ -145,6 +150,7 @@ public final class SettingsStore {
         sb.append("posteffect=").append(isPostEffect() ? 1 : 0).append("\n");
         sb.append("sample_scale=").append(getSampleScale()).append("\n");
         sb.append("log_enabled=").append(isLog() ? 1 : 0).append("\n");
+        sb.append("quicksearch_blur=").append(isQsProbe() ? 1 : 0).append("\n");
         return sb.toString();
     }
 
@@ -167,6 +173,7 @@ public final class SettingsStore {
                 i.putExtra("posteffect",    isPostEffect() ? "1" : "0");
                 i.putExtra("sample_scale",  String.valueOf(getSampleScale()));
                 i.putExtra("log_enabled",   isLog() ? "1" : "0");
+                i.putExtra("quicksearch_blur", isQsProbe() ? "1" : "0");
                 ctx.sendBroadcast(i);
                 ok++;
             } catch (Throwable t) {
@@ -183,6 +190,8 @@ public final class SettingsStore {
     public boolean isPostEffect()  { return sp.getBoolean(KEY_POSTEFFECT, DEF_POSTEFFECT); }
     public float   getSampleScale(){ return sp.getFloat(KEY_SAMPLE_SCALE, DEF_SAMPLE_SCALE); }
     public boolean isLog()         { return sp.getBoolean(KEY_LOG, DEF_LOG); }
+    /** 【Test·验证】全局搜索背景透明化探针。 */
+    public boolean isQsProbe()     { return sp.getBoolean(KEY_QS_PROBE, DEF_QS_PROBE); }
 
     // ---- setters（统一 apply，返回 this 便于链式）----
     public SettingsStore setShortcut(boolean v)   { sp.edit().putBoolean(KEY_SHORTCUT, v).apply(); syncToHost(); return this; }
@@ -191,6 +200,8 @@ public final class SettingsStore {
     public SettingsStore setPostEffect(boolean v) { sp.edit().putBoolean(KEY_POSTEFFECT, v).apply(); syncToHost(); return this; }
     public SettingsStore setSampleScale(float v)  { sp.edit().putFloat(KEY_SAMPLE_SCALE, v).apply(); syncToHost(); return this; }
     public SettingsStore setLog(boolean v)        { sp.edit().putBoolean(KEY_LOG, v).apply(); syncToHost(); return this; }
+    /** 【Test·验证】全局搜索背景透明化探针。 */
+    public SettingsStore setQsProbe(boolean v)    { sp.edit().putBoolean(KEY_QS_PROBE, v).apply(); syncToHost(); return this; }
 
 
     /**

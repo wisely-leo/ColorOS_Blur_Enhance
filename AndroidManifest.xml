@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.wiselyleo.blurenhance"
-    android:versionCode="425"
-    android:versionName="v42.5">
+    android:versionCode="440"
+    android:versionName="v44">
 
     <uses-sdk
         android:minSdkVersion="36"

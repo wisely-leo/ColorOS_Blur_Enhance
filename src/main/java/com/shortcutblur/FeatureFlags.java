@@ -25,6 +25,14 @@ public final class FeatureFlags {
     /** (3) 组件模糊的全部实现（含时钟组件半透明）。 */
     public static volatile boolean WIDGET_BLUR = true;
 
+    /**
+     * (5) 【下拉搜索实时模糊】全局搜索（com.heytap.quicksearchbox）背景透明化。
+     * 原理：进入来源为桌面时，把搜索页顶层背景置透明，透出下层桌面的实时模糊；
+     *       其它来源（负一屏等）保持搜索默认背景模糊。
+     * 默认开。关闭 = 不装 hook，该功能一行不跑。
+     */
+    public static volatile boolean QUICKSEARCH_BLUR = true;
+
     /** (4) 后处理（PostEffect）实现。关闭 = 不装后处理 hook，采样交给系统原值。 */
     public static volatile boolean POSTEFFECT = true;
 
@@ -107,6 +115,8 @@ public final class FeatureFlags {
         if (b != null) WIDGET_BLUR = b;
         b = readSettingBool(cr, "coloros_blur_feature_posteffect");
         if (b != null) POSTEFFECT = b;
+        b = readSettingBool(cr, "coloros_blur_feature_quicksearch");
+        if (b != null) QUICKSEARCH_BLUR = b;
 
         try {
             String s = android.provider.Settings.System.getString(cr, "coloros_blur_feature_sample_scale");
@@ -146,6 +156,11 @@ public final class FeatureFlags {
             case "post_effect":
                 POSTEFFECT = parseBool(v, POSTEFFECT);
                 break;
+            case "quicksearch_blur":
+            case "quicksearch":
+            case "qs_blur":
+                QUICKSEARCH_BLUR = parseBool(v, QUICKSEARCH_BLUR);
+                break;
             case "log_enabled":
             case "log":
                 LOG_ENABLED = parseBool(v, LOG_ENABLED);
@@ -180,6 +195,7 @@ public final class FeatureFlags {
                 + " recents=" + RECENTS_BLUR
                 + " widget=" + WIDGET_BLUR
                 + " posteffect=" + POSTEFFECT
+                + " qsBlur=" + QUICKSEARCH_BLUR
                 + " sampleScale=" + SAMPLE_SCALE
                 + " log=" + LOG_ENABLED;
     }

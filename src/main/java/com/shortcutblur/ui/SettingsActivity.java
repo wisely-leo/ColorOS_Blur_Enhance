@@ -122,6 +122,8 @@ public class SettingsActivity extends Activity {
                 clearRowRef[0] = clearRow;              // 供 lambda 回调引用
                 otherRows.add(clearRow);
             }
+            otherRows.add(SoftUi.toggle(this, "下拉搜索实时模糊", store.isQsProbe(),
+                    v -> store.setQsProbe(v)));
             otherRows.add(SoftUi.toggle(this, "日志开关", store.isLog(),
                     v -> store.setLog(v)));
             SoftUi.Card cardOther = SoftUi.card(this,
