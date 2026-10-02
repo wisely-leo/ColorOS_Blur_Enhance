@@ -4,7 +4,6 @@ import android.content.Context;
 import android.graphics.RenderEffect;
 import android.graphics.Shader;
 import android.view.View;
-import android.view.ViewGroup;
 
 import java.lang.reflect.Method;
 

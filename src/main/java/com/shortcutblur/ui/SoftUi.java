@@ -98,8 +98,6 @@ public final class SoftUi {
     public static float HEADER_H      = 76f;
     /** 顶栏与内容首项的呼吸间距 */
     public static float HEADER_GAP    = 12f;
-    /** 诊断：给顶栏画红框 */
-    public static boolean DEBUG_HEADER = false;
     /** 顶栏叠加色（半透明白，iOS 风） */
     public static int   HEADER_TINT   = 0x33FFFFFF;   // 白纱：20% 不透明度白（与 GLASS_TINT 统一）
     /** 顶栏底部分割线：颜色（半透明）与高度（dp，0 表示不画） */

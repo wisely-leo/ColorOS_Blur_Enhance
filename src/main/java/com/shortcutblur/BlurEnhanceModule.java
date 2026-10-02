@@ -9,11 +9,9 @@ import android.graphics.RenderEffect;
 import android.graphics.Shader;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.ViewParent;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.RemoteViews;
 
-import java.lang.reflect.Constructor;
 import java.lang.reflect.Executable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -75,8 +73,6 @@ public class BlurEnhanceModule extends XposedModule {
     private static final int F_ICON = 1 << 1;
     private static final int F_WALL = 1 << 2;
     private static final int F_ICON_ANIM = 1 << 3;
-
-    private static final long ICON_BLUR_DELAY = 32L;
     private static final long DEPTH_FALLBACK_DELAY = 500L;
 
     private volatile ClassLoader cl;
@@ -96,9 +92,6 @@ public class BlurEnhanceModule extends XposedModule {
     private final Map<String, ValueAnimator> iconAnims = new ConcurrentHashMap<>();
     private final Set<String> dumpedCls = new HashSet<>();
     private final Map<View, Integer> flagsCache = new WeakHashMap<>();
-
-    private volatile RenderEffect blurEffect;
-
     static volatile boolean sShortcutBlurActive = false;
 
     private static volatile View sIconBlurLayer = null;

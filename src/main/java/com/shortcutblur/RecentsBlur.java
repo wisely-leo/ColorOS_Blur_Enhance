@@ -4,7 +4,6 @@ import android.animation.ValueAnimator;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.RenderEffect;
-import android.graphics.Shader;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.animation.DecelerateInterpolator;
@@ -41,9 +40,6 @@ final class RecentsBlur {
     private static volatile boolean sConfErrorLogged = false;
 
     private static volatile float sRecentsLastRadius = -1.0f;
-
-    private static volatile ValueAnimator sRecentsBlurAnim = null;
-
     private static volatile float sRecentsAnimRadius = 0.0f;
 
     private static volatile View sRecentsBlurView = null;
@@ -63,9 +59,6 @@ final class RecentsBlur {
     private static volatile ValueAnimator sRecentsExitAnim = null;
 
     private static volatile boolean sRecentsArmed = false;
-
-    private static final long ARM_DELAY_MS = 180L;
-
     private static Runnable sPendingArm = null;
 
     private static final android.os.Handler sRecentsHandler =
@@ -120,9 +113,6 @@ final class RecentsBlur {
     private static volatile String sLastVisKey = "";
 
     private static volatile String sLastFxKey = "";
-
-    private static volatile int sFxProbeLeft = 0;
-
     private static volatile boolean sForceIconBlur = false;
 
     private static final java.util.List<View> sBlurTargets = new java.util.ArrayList<View>();

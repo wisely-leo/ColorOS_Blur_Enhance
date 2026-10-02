@@ -16,18 +16,6 @@ public class GlyphBlurRenderer {
     private static final float GLYPH_DY = 0.0f;
     private static final long RETRY_DELAY_MS = 120L;
 
-    private static final long POLL_INTERVAL_ON_MS = 500L;
-
-    private static final long POLL_INTERVAL_OFF_MS = 3000L;
-
-    private static final long POLL_INTERVAL_HIDDEN_MS = 1500L;
-
-    private static final long POLL_INTERVAL_MAX_MS = 2000L;
-
-    private static final long POLL_INTERVAL_TICK_MS = 500L;
-
-    private static final int  POLL_STABLE_THRESHOLD = 6;
-
     private static final float ICON_ALPHA = 0.30f;
 
     private static final int ICON_ALPHA_THRESHOLD = 40;
