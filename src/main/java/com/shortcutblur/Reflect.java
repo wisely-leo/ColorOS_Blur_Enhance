@@ -1,24 +1,17 @@
 package com.shortcutblur;
-
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Executable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Map;
-
 public final class Reflect {
-
     private static final int MAX_DEPTH = 16;
-
     private static final int MAX_CACHE = 512;
-
     private static final Map<String, Method> METHOD_CACHE = newCache();
     private static final Map<String, Field> FIELD_CACHE = newCache();
     private static final Map<String, Constructor<?>> CTOR_CACHE = newCache();
     private static final Map<String, Class<?>> CLASS_CACHE = newCache();
-
     private Reflect() {}
-
     private static <V> Map<String, V> newCache() {
         return java.util.Collections.synchronizedMap(
                 new java.util.LinkedHashMap<String, V>(64, 0.75f, true) {
@@ -27,15 +20,12 @@ public final class Reflect {
                     }
                 });
     }
-
     private static <V> V cacheGet(Map<String, V> cache, String key) {
         return cache.get(key);
     }
-
     private static <V> void cachePut(Map<String, V> cache, String key, V value) {
         cache.put(key, value);
     }
-
     public static Method method(Class<?> c, String name, int paramCount) {
         if (c == null || name == null) return null;
         String key = c.getName() + "#n:" + name + "/" + paramCount;
@@ -57,7 +47,6 @@ public final class Reflect {
         }
         return null;
     }
-
     public static Method method(Class<?> c, String name, Class<?>... paramTypes) {
         if (c == null || name == null) return null;
         StringBuilder sb = new StringBuilder(c.getName()).append('#').append(name).append('(');
@@ -76,7 +65,6 @@ public final class Reflect {
             return null;
         }
     }
-
     public static Field field(Class<?> c, String name) {
         if (c == null || name == null) return null;
         String key = c.getName() + "#" + name;
@@ -97,7 +85,6 @@ public final class Reflect {
         }
         return null;
     }
-
     public static Object newInstance(Class<?> c) {
         if (c == null) return null;
         String key = c.getName();
@@ -113,7 +100,6 @@ public final class Reflect {
             return null;
         }
     }
-
     public static Object call(Object target, String name) {
         if (target == null) return null;
         Method m = method(target.getClass(), name, 0);
@@ -124,7 +110,6 @@ public final class Reflect {
             return null;
         }
     }
-
     public static Object call(Object target, String name, int paramCount, Object... args) {
         if (target == null) return null;
         Method m = method(target.getClass(), name, paramCount);
@@ -135,14 +120,12 @@ public final class Reflect {
             return null;
         }
     }
-
     public static void setAccessible(Executable e) {
         try {
             e.setAccessible(true);
         } catch (Throwable ignore) {
         }
     }
-
     public static Class<?> loadClass(String name, ClassLoader loader) {
         if (loader == null) return null;
         String key = name + "@" + System.identityHashCode(loader);
@@ -156,7 +139,6 @@ public final class Reflect {
             return null;
         }
     }
-
     public static Object readField(Object target, String name) {
         if (target == null) return null;
         Field f = field(target.getClass(), name);

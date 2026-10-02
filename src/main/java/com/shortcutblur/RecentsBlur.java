@@ -1,5 +1,4 @@
 package com.shortcutblur;
-
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.content.Intent;
@@ -7,122 +6,68 @@ import android.graphics.RenderEffect;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.animation.DecelerateInterpolator;
-
 import java.lang.reflect.Executable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-
 import io.github.libxposed.api.XposedInterface;
-
 import static com.shortcutblur.BlurLib.*;
-
 final class RecentsBlur {
     private RecentsBlur() {}
-
     public interface HookApi {
         void hook(String id, Executable target, XposedInterface.Hooker hooker);
     }
-
     private static HookApi API;
-
     private static volatile boolean sStateInOverview = false;
-
     private static volatile float RECENTS_BLUR_MAX = 64.0f;
-
     private static volatile float sScaleClampMin = 0.96f;
-
     private static volatile long sConfLastRead = 0L;
-
     private static final String CONF_PATH = "/sdcard/Download/ColorOSBlurEnhance.conf";
-
     private static volatile boolean sAnchorUseWorkspace = false;
-
     private static volatile boolean sConfErrorLogged = false;
-
     private static volatile float sRecentsLastRadius = -1.0f;
     private static volatile float sRecentsAnimRadius = 0.0f;
-
     private static volatile View sRecentsBlurView = null;
-
     private static volatile float sRecentsTargetRadius = -1.0f;
-
     private static volatile int sRecentsPhase = 0;
-
     private static volatile boolean sRecentsBlurDoneForEntry = false;
-
     private static final long ENTER_FADE_MS = 180L;
-
     private static final long EXIT_FADE_MS = 120L;
-
     private static volatile ValueAnimator sRecentsEnterAnim = null;
-
     private static volatile ValueAnimator sRecentsExitAnim = null;
-
     private static volatile boolean sRecentsArmed = false;
     private static Runnable sPendingArm = null;
-
     private static final android.os.Handler sRecentsHandler =
             new android.os.Handler(android.os.Looper.getMainLooper());
-
     private static Runnable sPendingClear = null;
-
     private static final long EXIT_DEBOUNCE_MS = 120L;
-
     private static final long ENTER_DEBOUNCE_MS = 80L;
-
     private static volatile Runnable sPendingEnter = null;
-
     private static volatile boolean sDescentEnterEnabled = false;
-
     private static volatile float sMinScaleSeen = 1.0f;
-
     private static volatile boolean sScaleExitEnabled = true;
-
     private static volatile boolean sTintEnabled = false;
-
     private static volatile boolean sGtsEnabled = true;
-
     private static volatile View sLastAnchor = null;
-
     private static volatile boolean sDiagEnabled = false;
-
     private static volatile View sCachedDragLayer = null;
-
     private static volatile boolean sVisExitEnabled = false;
-
     private static volatile boolean sScaleEnterEnabled = true;
-
     private static volatile float sEnterScale = 1.0f;
-
     private static volatile float sLastScale = 1.0f;
-
     private static volatile boolean sVisEnterEnabled = false;
-
     private static volatile Runnable sPendingExit = null;
-
     private static volatile float sLastAlphaIn = -1.0f;
-
     private static volatile float sMinAlphaIn = 1.0f;
-
     private static volatile boolean sSawAlphaDescent = false;
-
     private static volatile boolean sSelfAlphaCall = false;
-
     private static volatile boolean sAlphaExitEnabled = false;
-
     private static volatile String sLastVisKey = "";
-
     private static volatile String sLastFxKey = "";
     private static volatile boolean sForceIconBlur = false;
-
     private static final java.util.List<View> sBlurTargets = new java.util.ArrayList<View>();
-
     private static volatile Object sRecentsViewObj = null;
-
     private static volatile String sBlurMode = "draglayer";
-
     private static volatile boolean sClampEnabled = true;
-
     private static void armBlurTargets(View anchor) {
         sBlurTargets.clear();
         if (anchor == null) return;
@@ -145,7 +90,6 @@ final class RecentsBlur {
         ModuleLog.d("BLURTARGET", "mode=" + mode + " count=" + sBlurTargets.size()
                 + " names=" + blurTargetNames());
     }
-
     private static View findRecentsChildOf(ViewGroup dragLayer) {
         Object rv = sRecentsViewObj;
         if (!(rv instanceof View)) return null;
@@ -160,7 +104,6 @@ final class RecentsBlur {
         }
         return null;
     }
-
     private static String blurTargetNames() {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < sBlurTargets.size(); i++) {
@@ -169,7 +112,6 @@ final class RecentsBlur {
         }
         return sb.toString();
     }
-
     private static void dumpDragLayerTree(View anchor) {
         try {
             if (!(anchor instanceof ViewGroup)) {
@@ -192,7 +134,6 @@ final class RecentsBlur {
             ModuleLog.e("TREE", "dump failed", t);
         }
     }
-
     private static void startDrawProbe(final View anchor) {
         if (anchor == null) return;
         try {
@@ -214,7 +155,6 @@ final class RecentsBlur {
             ModuleLog.e("DRAW", "probe failed", t);
         }
     }
-
     private static void startPixelProbe(final View anchor, final String tag) {
         if (anchor == null) return;
         final long[] delays = {40L, 100L, 200L, 350L, 600L, 1200L};
@@ -280,10 +220,8 @@ final class RecentsBlur {
             }, d);
         }
     }
-
     private static int installEarlySignalProbes(ClassLoader loader) {
         int n = 0;
-
         String[] sms = {"com.android.launcher3.statemanager.StateManager",
                         "com.android.launcher3.statemanager.StateManagerImpl"};
         for (String sn : sms) {
@@ -300,7 +238,6 @@ final class RecentsBlur {
                                         Object[] a = chain.getArgs().toArray();
                                         Object st = (a.length > 0) ? a[0] : null;
                                         ModuleLog.d("EARLY", "goToState n=" + a.length + " to=" + stateName(st));
-
                                         if (sGtsEnabled && st != null) {
                                             Object gSelf = chain.getThisObject();
                                             if (isOverviewState(st)) {
@@ -321,7 +258,6 @@ final class RecentsBlur {
                 ModuleLog.e("EARLY", "hook " + sn + " failed", t);
             }
         }
-
         try {
             Class<?> anim = Reflect.loadClass("com.oplus.quickstep.anim.SwipeUpIconBlurAnim", loader);
             if (anim == null) {
@@ -343,7 +279,6 @@ final class RecentsBlur {
         } catch (Throwable t) {
             ModuleLog.e("EARLY", "hook SwipeUpIconBlurAnim failed", t);
         }
-
         try {
             java.lang.reflect.Method va = Reflect.method(android.view.View.class, "onVisibilityAggregated", boolean.class);
             if (va != null) {
@@ -377,10 +312,8 @@ final class RecentsBlur {
         } catch (Throwable t) {
             ModuleLog.e("EARLY", "hook visAgg failed", t);
         }
-
         return n;
     }
-
     private static void exitOverviewFrom(Object lrvSelf, String why) {
         if (!sStateInOverview) return;
         sStateInOverview = false;
@@ -392,11 +325,9 @@ final class RecentsBlur {
             startExitFadeOut(anchor, why);
         }
     }
-
     private static void enterOverviewFrom(Object lrvSelf, String why) {
         if (sStateInOverview) return;
         View anchor = resolveBlurAnchor(lrvSelf);
-
         if (anchor == null) {
             ModuleLog.d("STATEBLUR", "ENTER skipped (anchor null) why=" + why);
             return;
@@ -410,7 +341,6 @@ final class RecentsBlur {
         sRecentsPhase = 1;
         startEnterFadeIn(anchor);
     }
-
     private static void scheduleEnterDebounced(final String why) {
         cancelPendingEnter();
         if (sStateInOverview) return;
@@ -424,7 +354,6 @@ final class RecentsBlur {
         };
         try { sRecentsHandler.postDelayed(sPendingEnter, ENTER_DEBOUNCE_MS); } catch (Throwable ignore) {}
     }
-
     private static void cancelPendingEnter() {
         Runnable r = sPendingEnter;
         if (r != null) {
@@ -432,7 +361,6 @@ final class RecentsBlur {
             sPendingEnter = null;
         }
     }
-
     private static void scheduleExitDebounced(final String why) {
         cancelPendingExit();
         if (!sStateInOverview) return;
@@ -446,7 +374,6 @@ final class RecentsBlur {
         };
         try { sRecentsHandler.postDelayed(sPendingExit, EXIT_DEBOUNCE_MS); } catch (Throwable ignore) {}
     }
-
     private static void cancelPendingExit() {
         Runnable r = sPendingExit;
         if (r != null) {
@@ -454,7 +381,6 @@ final class RecentsBlur {
             sPendingExit = null;
         }
     }
-
     private static void cancelPendingRecentsClear() {
         Runnable r = sPendingClear;
         if (r != null) {
@@ -462,7 +388,6 @@ final class RecentsBlur {
             sPendingClear = null;
         }
     }
-
     private static void startEnterFadeIn(final View v) {
         ValueAnimator old = sRecentsEnterAnim;
         if (old != null) { try { old.cancel(); } catch (Throwable ignore) {} sRecentsEnterAnim = null; }
@@ -470,13 +395,11 @@ final class RecentsBlur {
         if (oldX != null) { try { oldX.cancel(); } catch (Throwable ignore) {} sRecentsExitAnim = null; }
         sRecentsBlurView = v;
         armBlurTargets(v);
-
         if (sDiagEnabled) {
             dumpDragLayerTree(v);
             startDrawProbe(v);
             startPixelProbe(v, "enter");
         }
-
         sRecentsAnimRadius = 0.0f;
         sRecentsLastRadius = 0.0f;
         final ValueAnimator va = ValueAnimator.ofFloat(0.0f, RECENTS_BLUR_MAX);
@@ -509,17 +432,14 @@ final class RecentsBlur {
         try { va.start(); } catch (Throwable t) { ModuleLog.e("DRAGALPHA", "enter anim start failed", t); }
         ModuleLog.d("DRAGALPHA", "enter fade-in started (0 -> " + RECENTS_BLUR_MAX + ")");
     }
-
     private static void clearPendingArm() {
         if (sPendingArm != null) {
             try { sRecentsHandler.removeCallbacks(sPendingArm); } catch (Throwable ignore) {}
             sPendingArm = null;
         }
     }
-
     private static void startExitFadeOut(final View v, final String why) {
         final float from = Math.max(0.0f, sRecentsLastRadius);
-
         ValueAnimator oldE = sRecentsEnterAnim;
         if (oldE != null) { try { oldE.cancel(); } catch (Throwable ignore) {} sRecentsEnterAnim = null; }
         ValueAnimator oldX = sRecentsExitAnim;
@@ -560,7 +480,6 @@ final class RecentsBlur {
         ModuleLog.d("DRAGALPHA", "exit fade-out started (" + from + " -> 0, why=" + why + ")");
         if (sDiagEnabled) startPixelProbe(v, "exit");
     }
-
     private static void applySelfBlur(View v, float r) {
         sRecentsTargetRadius = r;
         if (sBlurTargets.isEmpty()) {
@@ -571,12 +490,10 @@ final class RecentsBlur {
             }
         }
     }
-
     private static void blurOne(View v, float r) {
         if (v == null) return;
         sRecentsBlurView = v;
         sRecentsTargetRadius = r;
-
         if (sAnchorUseWorkspace && r > 0.5f) {
             sSelfAlphaCall = true;
             try { v.setAlpha(1.0f); } catch (Throwable ignore) {}
@@ -584,7 +501,6 @@ final class RecentsBlur {
         }
         float rApplied = r;
         try {
-
             if (rApplied > 0.5f && sTintEnabled) {
                 RenderEffect fx = RenderEffect.createColorFilterEffect(
                         new android.graphics.BlendModeColorFilter(
@@ -600,12 +516,9 @@ final class RecentsBlur {
             ModuleLog.e("BLURAPPLY", "setRenderEffect failed r=" + rApplied, t);
         }
     }
-
-
     private static int installRecentsIconBlurProbe(ClassLoader loader) {
         int n = 0;
         installEarlySignalProbes(loader);
-
         try {
             java.lang.reflect.Method fx = Reflect.method(android.view.View.class, "setRenderEffect",
                     android.graphics.RenderEffect.class);
@@ -662,7 +575,6 @@ final class RecentsBlur {
                 ModuleLog.d("RECENTS", "[hook] supportIconBlur -> switchable (default force true)");
             }
             if (n == 0) ModuleLog.d("RECENTS", "[miss] supportIconBlur() not found");
-
         try {
             Class<?> dl = Reflect.loadClass(CLS_OPLUS_DRAGLAYER, loader);
             if (dl == null) {
@@ -680,7 +592,6 @@ final class RecentsBlur {
                                     Object[] args = chain.getArgs().toArray();
                                     float a = (args.length > 0 && args[0] instanceof Number)
                                             ? ((Number) args[0]).floatValue() : 1.0f;
-
                                     float prevA = sLastAlphaIn;
                                     if (!sSelfAlphaCall) {
                                         sLastAlphaIn = a;
@@ -694,14 +605,12 @@ final class RecentsBlur {
                                             }
                                         }
                                     }
-
                                     if (!sSelfAlphaCall && !sStateInOverview && sDescentEnterEnabled
                                             && prevA >= 0.95f && a < 0.95f) {
                                         ModuleLog.d("STATEBLUR", "alpha falling (" + prevA + " -> " + a + ") -> early enter");
                                         cancelPendingExit();
                                         enterOverviewFrom(null, "alphaFall");
                                     }
-
                                     try {
                                         if (self instanceof View) {
                                             View v = (View) self;
@@ -709,7 +618,6 @@ final class RecentsBlur {
                                             float cur = v.getAlpha();
                                             ModuleLog.dv("DRAGALPHA", "setAlpha a=" + a + " cur=" + cur);
                                             if (a < 0.999f) {
-
                                                 ModuleLog.dv("DRAGALPHA", "setAlpha descent -> clamp1.0 (keep DragLayer opaque)");
                                                 args[0] = 1.0f;
                                                 return chain.proceed(args);
@@ -730,7 +638,6 @@ final class RecentsBlur {
         } catch (Throwable t) {
             ModuleLog.e("RECENTS", "hook dragLayer alpha failed", t);
         }
-
         try {
             Class<?> sh = Reflect.loadClass("com.android.quickstep.touch.SwipeToRecentAnimationHelper", loader);
             if (sh == null) {
@@ -776,7 +683,6 @@ final class RecentsBlur {
         } catch (Throwable t) {
             ModuleLog.e("ENTERHOOK", "hook goOverviewAnimation failed", t);
         }
-
         try {
             Class<?> dls = Reflect.loadClass(CLS_OPLUS_DRAGLAYER, loader);
             if (dls != null) {
@@ -796,14 +702,12 @@ final class RecentsBlur {
                                         if (a.length > 0 && a[0] instanceof Number) {
                                             float f = ((Number) a[0]).floatValue();
                                             reloadConfigIfStale();
-
                                             if (f < sMinScaleSeen) sMinScaleSeen = f;
                                             if (sScaleExitEnabled && sStateInOverview && sMinScaleSeen < 0.96f && f >= 0.988f) {
                                                 ModuleLog.d("STATEBLUR", "scale rose to " + f + " (min seen " + sMinScaleSeen
                                                         + ") -> early exit (scaleRise)");
                                                 exitOverviewFrom(self, "scaleRise");
                                             }
-
                                             float prevScale = sLastScale;
                                             sLastScale = f;
                                             if (sScaleEnterEnabled && !sStateInOverview
@@ -830,7 +734,6 @@ final class RecentsBlur {
         } catch (Throwable t) {
             ModuleLog.e("RECENTS", "hook scale clamp failed", t);
         }
-
         for (String rn : new String[]{"resetGaussianAnimState", "resetViewsProperty"}) {
             try {
                 Class<?> dl2 = Reflect.loadClass(CLS_OPLUS_DRAGLAYER, loader);
@@ -845,7 +748,6 @@ final class RecentsBlur {
                                     Object self = chain.getThisObject();
                                     ModuleLog.d("EXITPROBE", "reset(" + rid + ") radius=" + sRecentsLastRadius);
                                     if (self instanceof View) {
-
                                         ModuleLog.d("EXITPROBE", "reset(" + rid + ") [diag only]");
                                     }
                                     return chain.proceed();
@@ -858,7 +760,6 @@ final class RecentsBlur {
                 ModuleLog.e("RECENTS", "hook " + rn + " failed", t);
             }
         }
-
         try {
             Class<?> dl3 = Reflect.loadClass(CLS_OPLUS_DRAGLAYER, loader);
             if (dl3 != null) {
@@ -883,7 +784,6 @@ final class RecentsBlur {
                                                     ? ((Number) args[0]).intValue() : -1;
                                             ModuleLog.d("EXITPROBE", "onWindowVisibilityChanged vis=" + vis + " radius=" + sRecentsLastRadius);
                                             if (vis == View.VISIBLE && self instanceof View && sRecentsLastRadius >= 0.0f) {
-
                                                 ModuleLog.d("EXITPROBE", "windowVisible [diag only]");
                                             }
                                         } else {
@@ -891,7 +791,6 @@ final class RecentsBlur {
                                                     ? ((Number) args[0]).floatValue() : 1.0f;
                                             ModuleLog.d("EXITPROBE", "setAlphaByTaskView a=" + a + " radius=" + sRecentsLastRadius);
                                             if (a >= 0.999f && self instanceof View && sRecentsLastRadius >= 0.0f) {
-
                                                 ModuleLog.d("EXITPROBE", "alphaByTaskView>=1 [diag only]");
                                             }
                                         }
@@ -911,7 +810,6 @@ final class RecentsBlur {
         } catch (Throwable t) {
             ModuleLog.e("RECENTS", "installRecentsIconBlurProbe failed", t);
         }
-
         try {
             Class<?> dlf = Reflect.loadClass(CLS_OPLUS_DRAGLAYER, loader);
             if (dlf != null) {
@@ -923,7 +821,6 @@ final class RecentsBlur {
                                 @Override
                                 public Object intercept(XposedInterface.Chain chain) throws Throwable {
                                     Object self = chain.getThisObject();
-
                                     ModuleLog.d("EXITPROBE", "startFadeInAnim (log only) radius=" + sRecentsLastRadius + " phase=" + sRecentsPhase);
                                     return chain.proceed();
                                 }
@@ -935,7 +832,6 @@ final class RecentsBlur {
         } catch (Throwable t) {
             ModuleLog.e("EXITPROBE", "hook startFadeInAnim failed", t);
         }
-
         try {
             Class<?> lc = Reflect.loadClass(CLS_LAUNCHER, loader);
             if (lc != null) {
@@ -947,7 +843,6 @@ final class RecentsBlur {
                                 @Override
                                 public Object intercept(XposedInterface.Chain chain) throws Throwable {
                                     Object self = chain.getThisObject();
-
                                     ModuleLog.d("EXITPROBE", "Launcher.onResume (log only) radius=" + sRecentsLastRadius + " phase=" + sRecentsPhase);
                                     return chain.proceed();
                                 }
@@ -959,10 +854,8 @@ final class RecentsBlur {
         } catch (Throwable t) {
             ModuleLog.e("EXITPROBE", "hook Launcher.onResume failed", t);
         }
-
         return n;
     }
-
     private static int installRecentsStateBlurHooks(ClassLoader loader) {
         int n = 0;
         try {
@@ -972,7 +865,6 @@ final class RecentsBlur {
                 ModuleLog.d("STATEBLUR", "[miss] LRV or LauncherState");
                 return 0;
             }
-
             for (Method m : lrv.getDeclaredMethods()) {
                 if (!m.getName().equals(M_ON_STATE_TRANSITION_START)) continue;
                 Class<?>[] pt = m.getParameterTypes();
@@ -1002,7 +894,6 @@ final class RecentsBlur {
                         });
                 n++;
                 ModuleLog.d("STATEBLUR", "[hook] LRV.onStateTransitionStart");
-
             try {
                 final Class<?> lrvCls = lrv;
                 java.lang.reflect.Method va = Reflect.method(android.view.View.class,
@@ -1039,7 +930,6 @@ final class RecentsBlur {
                 ModuleLog.e("STATEBLUR", "hook visAgg failed", t);
             }
             }
-
             for (Method m : lrv.getDeclaredMethods()) {
                 if (!m.getName().equals(M_ON_STATE_TRANSITION_COMPLETE)) continue;
                 Class<?>[] pt = m.getParameterTypes();
@@ -1055,7 +945,6 @@ final class RecentsBlur {
                                 ModuleLog.d("STATEBLUR", "onStateTransitionComplete finalState="
                                         + stateName(finalState) + " toNormal=" + toNormal);
                                 if (toNormal && sStateInOverview) {
-
                                     sStateInOverview = false;
                                     View anchor = resolveBlurAnchor(self);
                                     ModuleLog.d("STATEBLUR", "EXIT overview(complete-fallback) -> startExitFadeOut anchor=" + anchorName(anchor));
@@ -1070,7 +959,6 @@ final class RecentsBlur {
                 n++;
                 ModuleLog.d("STATEBLUR", "[hook] LRV.onStateTransitionComplete");
             }
-
             for (Method m : lrv.getDeclaredMethods()) {
                 if (!m.getName().equals(M_ON_STATE_TRANSITION_CANCEL)) continue;
                 Class<?>[] pt = m.getParameterTypes();
@@ -1095,31 +983,25 @@ final class RecentsBlur {
                 n++;
                 ModuleLog.d("STATEBLUR", "[hook] LRV.onStateTransitionCancel");
             }
-
         } catch (Throwable t) {
             ModuleLog.e("STATEBLUR", "installRecentsStateBlurHooks failed", t);
         }
         return n;
     }
-
     private static View useAnchor(View v) {
         if (v != null) sLastAnchor = v;
         return v;
     }
-
     private static View resolveBlurAnchor(Object lrvSelf) {
         try {
-
             View cached = sRecentsBlurView;
             if (cached != null) return useAnchor(cached);
-
             View last = sLastAnchor;
             if (last != null) {
                 try {
                     if (last.isAttachedToWindow()) return last;
                 } catch (Throwable ignore) {}
             }
-
             Object launcher = null;
             try {
                 if (lrvSelf instanceof View) launcher = getLauncherQuietly((View) lrvSelf);
@@ -1136,13 +1018,11 @@ final class RecentsBlur {
                 Object dl = Reflect.call(launcher, "getDragLayer", 0);
                 if (dl instanceof View) return useAnchor((View) dl);
             }
-
             if (lrvSelf instanceof View) {
                 View v = (View) lrvSelf;
                 if (v.getParent() instanceof View) return useAnchor((View) v.getParent());
                 return useAnchor(v);
             }
-
             View cdl = sCachedDragLayer;
             if (cdl != null) {
                 try { if (cdl.isAttachedToWindow()) return useAnchor(cdl); } catch (Throwable ignore) {}
@@ -1153,18 +1033,14 @@ final class RecentsBlur {
                 + " lastAnchor=" + (sLastAnchor == null ? "null" : "detached"));
         return null;
     }
-
-
     static int installProbes(ClassLoader loader, HookApi api) {
         API = api;
         return installRecentsIconBlurProbe(loader);
     }
-
     static int installStateHooks(ClassLoader loader, HookApi api) {
         API = api;
         return installRecentsStateBlurHooks(loader);
     }
-
     static void applyConf(Intent i) {
         if (i == null) return;
         try {
@@ -1213,7 +1089,6 @@ final class RecentsBlur {
             ModuleLog.e("CONF", "applyConf failed", t);
         }
     }
-
     static String describe() {
         return " | enter: scale=" + sScaleEnterEnabled + "(<" + sEnterScale + ")"
                 + " vis=" + sVisEnterEnabled + " alphaFall=" + sDescentEnterEnabled + " state=on"
@@ -1222,12 +1097,10 @@ final class RecentsBlur {
                 + " | verbose=" + ModuleLog.VERBOSE + " diag=" + sDiagEnabled
                 + " | deb enter=" + ENTER_DEBOUNCE_MS + " exit=" + EXIT_DEBOUNCE_MS;
     }
-
     private static void reloadConfigIfStale() {
         long now = android.os.SystemClock.uptimeMillis();
         if (now - sConfLastRead < 2000L) return;
         sConfLastRead = now;
-
         try {
             android.content.Context ctx = currentAppContext();
             if (ctx != null) {
@@ -1240,7 +1113,6 @@ final class RecentsBlur {
                 if (m != null) sAnchorUseWorkspace = m.trim().equalsIgnoreCase("workspace");
             }
         } catch (Throwable ignore) {}
-
         try {
             java.io.File f = new java.io.File(CONF_PATH);
             if (!f.exists()) return;

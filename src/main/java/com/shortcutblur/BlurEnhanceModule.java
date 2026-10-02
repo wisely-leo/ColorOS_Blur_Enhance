@@ -1,5 +1,4 @@
 package com.shortcutblur;
-
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.content.Intent;
@@ -11,7 +10,6 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.RemoteViews;
-
 import java.lang.reflect.Executable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -20,26 +18,19 @@ import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
-
 import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedModule;
 import io.github.libxposed.api.XposedModuleInterface;
-
 import static com.shortcutblur.BlurLib.*;
-
 public class BlurEnhanceModule extends XposedModule {
-
     private final RecentsBlur.HookApi recentsApi = new RecentsBlur.HookApi() {
         @Override public void hook(String id, Executable target, XposedInterface.Hooker hooker) {
             hookEx(id, target, hooker);
         }
     };
-
     private void hookEx(String id, Executable target, XposedInterface.Hooker hooker) {
         hook(target).setId(id).setExceptionMode(XposedInterface.ExceptionMode.DEFAULT).intercept(hooker);
     }
-
-    /** 供外部辅助类（如 QuickSearchBlur）装配 hook 的公共入口。 */
     public void hookPublic(String id, Executable target, XposedInterface.Hooker hooker) {
         hookEx(id, target, hooker);
     }
@@ -55,71 +46,52 @@ public class BlurEnhanceModule extends XposedModule {
     private static final String CLS_TIME_INTERPOLATOR = "android.animation.TimeInterpolator";
     private static final String CLS_DECELERATE = "android.view.animation.DecelerateInterpolator";
     private static final String M_GET_POP_BLUR_VIEW = "getPopBlurView";
-
     private static final String PKG_POSTEFFECT = "com.oplus.blur";
-
     private static final String PKG_QUICKSEARCH = "com.heytap.quicksearchbox";
-
     private static final String PKG_CLOCK = "com.coloros.alarmclock";
     private static final String CLS_EA = "e.a";
-
     private static final String CLS_BLUR_MGR = "com.oplus.posteffect.manager.BlurDrawableManager";
-    // 采样倍率改由 FeatureFlags.SAMPLE_SCALE 提供（运行期读 blur.conf，由 GUI 滑块写入 0.0~1.0）
-
     private static final float BLUR_RADIUS = 64.0f;
     private static final long BLUR_DURATION = 330L;
-
     private static final int F_STATIC = 1 << 0;
     private static final int F_ICON = 1 << 1;
     private static final int F_WALL = 1 << 2;
     private static final int F_ICON_ANIM = 1 << 3;
     private static final long DEPTH_FALLBACK_DELAY = 500L;
-
     private volatile ClassLoader cl;
     private static volatile boolean sScreenReceiverInstalled = false;
     private static volatile boolean sConfReceiverInstalled = false;
     private static final String ACTION_SETCONF = "com.wiselyleo.blurenhance.SETCONF";
-
     private static final String BUILD_TAG = "v42.5";
-
     private volatile boolean installed = false;
     private final java.util.WeakHashMap<android.view.View, String> sLastClockText = new java.util.WeakHashMap<android.view.View, String>();
-
     private volatile boolean postEffectInstalled = false;
     private final Set<Method> peHooked = new HashSet<>();
-
     private final Map<View, Boolean> armed = new WeakHashMap<>();
     private final Map<String, ValueAnimator> iconAnims = new ConcurrentHashMap<>();
     private final Set<String> dumpedCls = new HashSet<>();
     private final Map<View, Integer> flagsCache = new WeakHashMap<>();
     static volatile boolean sShortcutBlurActive = false;
-
     private static volatile View sIconBlurLayer = null;
-
     private static volatile long sPopupSeq = 0L;
     private static volatile long sIconAnimStartedSeq = -1L;
-
     private static volatile boolean sOplusEffectResolved = false;
     private static volatile Class<?> sOplusEffectCls = null;
     private static volatile Method sSetBgRenderEffect = null;
     private static volatile Method sSetRenderEffectViewMethod = null;
     private static volatile boolean sOplusApiDumped = false;
-
     private static volatile boolean sFadingOut = false;
-
     private static final long SWALLOW_RESET_DELAY = 450L;
-
     private static volatile int sSwallowCount = 0;
     @Override
     public void onModuleLoaded(XposedModuleInterface.ModuleLoadedParam param) {
     }
-
     @Override
     public void onPackageReady(XposedModuleInterface.PackageReadyParam param) {
         try {
             if (param == null) return;
             String pkg = param.getPackageName();
-            FeatureFlags.load();   // 装配前读一次开关（幂等）
+            FeatureFlags.load();
             ModuleLog.i("onPackageReady pkg=" + pkg);
             installScreenReceiverViaApp(param);
             if (PKG_POSTEFFECT.equals(pkg)) {
@@ -138,9 +110,6 @@ public class BlurEnhanceModule extends XposedModule {
                 }
                 return;
             }
-
-            // ---------- 【下拉搜索实时模糊】全局搜索背景透明化 ----------
-            // 默认开。仅当进入来源为桌面时透明化，透出桌面实时模糊；其它来源保持原背景。
             if (PKG_QUICKSEARCH.equals(pkg)) {
                 if (FeatureFlags.QUICKSEARCH_BLUR) {
                     QuickSearchBlur.install(this, param.getClassLoader());
@@ -149,7 +118,6 @@ public class BlurEnhanceModule extends XposedModule {
                 }
                 return;
             }
-
             if (PKG_CLOCK.equals(pkg)) {
                 if (FeatureFlags.WIDGET_BLUR) {
                     ClockTextAlphaHook.install(this, param.getClassLoader());
@@ -157,7 +125,6 @@ public class BlurEnhanceModule extends XposedModule {
                     ModuleLog.d("READY", "clock alpha disabled by flag, skip");
                 }
             }
-
             ClassLoader anyLoader = param.getClassLoader();
             if (anyLoader != null) {
                 if (FeatureFlags.WIDGET_BLUR) {
@@ -167,18 +134,15 @@ public class BlurEnhanceModule extends XposedModule {
                     ModuleLog.d("READY", "widget blur disabled by flag, skip");
                 }
             }
-
             if (!isTargetLauncher(pkg)) return;
             ClassLoader loader = param.getClassLoader();
             if (loader == null) return;
             this.cl = loader;
             BlurLib.LOADER = loader;
-
             if (installed) {
                 ModuleLog.d("READY", "already installed, skip");
                 return;
             }
-
             if (FeatureFlags.SHORTCUT_BLUR) {
                 hookTextViewSetText(loader);
             }
@@ -193,7 +157,6 @@ public class BlurEnhanceModule extends XposedModule {
             ModuleLog.e("READY", "onPackageReady failed", t);
         }
     }
-
     private void installScreenReceiverViaApp(XposedModuleInterface.PackageReadyParam param) {
         if (sScreenReceiverInstalled) return;
         synchronized (BlurEnhanceModule.class) {
@@ -232,7 +195,6 @@ public class BlurEnhanceModule extends XposedModule {
             }
         }
     }
-
     private void registerScreenReceiver(Context ctx) {
         synchronized (BlurEnhanceModule.class) {
             if (sScreenReceiverInstalled) return;
@@ -258,7 +220,6 @@ public class BlurEnhanceModule extends XposedModule {
             }
         }
     }
-
     private void registerConfReceiver(Context ctx) {
         synchronized (BlurEnhanceModule.class) {
             if (sConfReceiverInstalled) return;
@@ -268,7 +229,6 @@ public class BlurEnhanceModule extends XposedModule {
                     @Override public void onReceive(Context c, Intent i) {
                         if (i == null) return;
                         try {
-
                             RecentsBlur.applyConf(i);
                             String mk = i.getStringExtra("mark");
                             if (mk != null) ModuleLog.d("MARK", "==== " + mk + " ====");
@@ -292,24 +252,19 @@ public class BlurEnhanceModule extends XposedModule {
             }
         }
     }
-
     private static boolean isTargetLauncher(String p) {
         return "com.android.launcher".equals(p)
                 || "com.oplus.launcher".equals(p)
                 || "com.coloros.launcher".equals(p);
     }
-
     private static final class HookInstallResult {
         int critical;
         int total;
     }
-
     private HookInstallResult installHooks(ClassLoader loader) {
         HookInstallResult r = new HookInstallResult();
-
         Set<Method> hooked = new HashSet<>();
         try {
-            // ---------- (1) shortcut 背景模糊（模块自实现）----------
             if (FeatureFlags.SHORTCUT_BLUR) {
                 Class<?> cls = Reflect.loadClass(CLS_POPUP_BLUR_VIEW, loader);
                 if (cls != null) {
@@ -320,7 +275,6 @@ public class BlurEnhanceModule extends XposedModule {
                 if (comp != null) {
                     r.total += hookViewReturningMethod(comp, M_GET_POP_BLUR_VIEW, "pbv_companion");
                 }
-    
                 for (String cn : new String[]{CLS_OPLUS_POPUP, CLS_ARROW_POPUP, CLS_POPUP_BLUR_VIEW}) {
                     Class<?> ac = Reflect.loadClass(cn, loader);
                     if (ac == null) continue;
@@ -332,10 +286,8 @@ public class BlurEnhanceModule extends XposedModule {
             } else {
                 ModuleLog.d("INSTALL", "shortcut blur disabled by flag, skip");
             }
-            // ---------- (2) recents 模糊 ----------
             if (FeatureFlags.RECENTS_BLUR) {
                 r.total += RecentsBlur.installProbes(loader, recentsApi);
-    
                 r.critical += RecentsBlur.installStateHooks(loader, recentsApi);
             } else {
                 ModuleLog.d("INSTALL", "recents blur disabled by flag, skip");
@@ -346,7 +298,6 @@ public class BlurEnhanceModule extends XposedModule {
         }
         return r;
     }
-
     private int hookPopupFinish(Class<?> cls) {
         int n = 0;
         try {
@@ -373,7 +324,6 @@ public class BlurEnhanceModule extends XposedModule {
                                         if ((flags & F_WALL) != 0) {
                                             animateDepthBlur(v, 1.0f, 0.0f, BLUR_DURATION);
                                         }
-
                                         fadeOutAndRemoveIconBlur();
                                         scheduleSwallowReset(v);
                                     }
@@ -390,7 +340,6 @@ public class BlurEnhanceModule extends XposedModule {
         }
         return n;
     }
-
     private int hookPopupOpenCloseAnimation(Class<?> cls, final String methodName, final boolean opening,
                                   Set<Method> hooked) {
         int n = 0;
@@ -401,7 +350,6 @@ public class BlurEnhanceModule extends XposedModule {
                     Class<?>[] pt = m.getParameterTypes();
                     if (pt.length != 1) continue;
                     if (!"android.animation.AnimatorSet".equals(pt[0].getName())) continue;
-
                     if (!hooked.add(m)) {
                         ModuleLog.d("INSTALL", "skip dup hook " + c.getName() + "." + methodName);
                         continue;
@@ -434,7 +382,6 @@ public class BlurEnhanceModule extends XposedModule {
                                                     playIntoAnimatorSet(set, anim);
                                                 }
                                             }
-
                                             if (opening && (flags & (F_ICON | F_ICON_ANIM)) != 0) {
                                                 final View lt = sIconBlurLayer;
                                                 if (lt != null) {
@@ -447,7 +394,6 @@ public class BlurEnhanceModule extends XposedModule {
                                             }
                                             if (!opening) {
                                                 clearBlurFlagsCache(anchor);
-
                                                 fadeOutAndRemoveIconBlur();
                                                 scheduleSwallowReset(anchor);
                                             }
@@ -466,7 +412,6 @@ public class BlurEnhanceModule extends XposedModule {
         }
         return n;
     }
-
     private static View ensureIconBlurLayer(View pbv) {
         try {
             if (pbv == null) return null;
@@ -476,7 +421,6 @@ public class BlurEnhanceModule extends XposedModule {
                 return null;
             }
             ViewGroup vg = (ViewGroup) parent;
-
             View existing = sIconBlurLayer;
             if (existing != null && existing.getParent() == vg) {
                 ModuleLog.d("ICONBLUR", "icon blur layer reused (already attached)");
@@ -499,16 +443,13 @@ public class BlurEnhanceModule extends XposedModule {
             return null;
         }
     }
-
     private void fadeOutAndRemoveIconBlur() {
         final View layer = sIconBlurLayer;
-
         if (sFadingOut) {
             ModuleLog.d("ICONANIM", "already fading out, skip duplicate fade-out");
             return;
         }
         sFadingOut = true;
-
         sPopupSeq++;
         sIconAnimStartedSeq = -1L;
         if (layer == null) { sFadingOut = false; return; }
@@ -540,7 +481,6 @@ public class BlurEnhanceModule extends XposedModule {
                 public void run() {
                     try {
                         removeAnimation(key);
-
                         if (sIconBlurLayer != layer) {
                             ModuleLog.d("ICONANIM", "fade-out done, layer already replaced, skip remove");
                             sFadingOut = false;
@@ -557,7 +497,6 @@ public class BlurEnhanceModule extends XposedModule {
             sFadingOut = false;
         }
     }
-
     private void removeIconBlurLayer() {
         try {
             View layer = sIconBlurLayer;
@@ -567,7 +506,6 @@ public class BlurEnhanceModule extends XposedModule {
                 ValueAnimator old = iconAnims.remove(key);
                 if (old != null) { try { old.cancel(); } catch (Throwable ignore) {} }
             }
-
             try { applyIconBlurRadius(layer, 0.0f, false); } catch (Throwable ignore) {}
             sIconAnimStartedSeq = -1L;
             ViewGroup vg = (ViewGroup) layer.getParent();
@@ -578,7 +516,6 @@ public class BlurEnhanceModule extends XposedModule {
             sIconBlurLayer = null;
         }
     }
-
     private void scheduleSwallowReset(final View anchor) {
         try {
             View post = anchor;
@@ -595,7 +532,6 @@ public class BlurEnhanceModule extends XposedModule {
             ModuleLog.e("PAUSE", "scheduleSwallowReset failed", t);
         }
     }
-
     private int installSwallowPauseHook(ClassLoader loader) {
         int n = 0;
         try {
@@ -632,7 +568,6 @@ public class BlurEnhanceModule extends XposedModule {
         }
         return n;
     }
-
     private int hookViewReturningMethod(Class<?> cls, String methodName, String id) {
         int n = 0;
         try {
@@ -664,10 +599,8 @@ public class BlurEnhanceModule extends XposedModule {
         }
         return n;
     }
-
     private int resolveBlurFlags(View view) {
         if (view == null) return 0;
-
         Integer c = flagsCache.get(view);
         if (c != null) return c;
         int flags = isInsideOpenFolder(view)
@@ -676,35 +609,26 @@ public class BlurEnhanceModule extends XposedModule {
         flagsCache.put(view, flags);
         return flags;
     }
-
     private void clearBlurFlagsCache(View view) {
         if (view == null) return;
         flagsCache.remove(view);
     }
-
     private void armBlurForView(View view, String mid) {
         if (view == null) return;
         try {
             ModuleLog.d("LIVE", "armBlurForView id=" + mid);
-
             if (sFadingOut) {
                 sFadingOut = false;
                 ModuleLog.d("ICONANIM", "enter during fade-out, aborted fade-out state");
             }
-
             sShortcutBlurActive = true;
-
             ModuleLog.d("PAUSE", "window OPEN (armBlurForView id=" + mid + ")");
             final int flags = resolveBlurFlags(view);
             ModuleLog.d("LIVE", "flags=" + flags + " (static=" + ((flags & F_STATIC) != 0)
                     + " icon=" + ((flags & F_ICON) != 0) + " wall=" + ((flags & F_WALL) != 0) + ")");
-
             setIconBlurArmed(view, true);
-
             if ((flags & F_STATIC) != 0) clearStaticLayers(view);
-
             final View fv = view;
-
             View iconTarget = fv;
             if ((flags & (F_ICON | F_ICON_ANIM)) != 0) {
                 View layer = ensureIconBlurLayer(fv);
@@ -716,7 +640,6 @@ public class BlurEnhanceModule extends XposedModule {
             }
             final View itv = iconTarget;
             if ((flags & (F_ICON | F_ICON_ANIM)) != 0) {
-
                 final long seq = sPopupSeq;
                 if (sIconAnimStartedSeq != seq) {
                     sIconAnimStartedSeq = seq;
@@ -726,7 +649,6 @@ public class BlurEnhanceModule extends XposedModule {
                     ModuleLog.d("ICONANIM", "same popup round, skip re-arm (seq=" + seq + ")");
                 }
             }
-
             if ((flags & F_WALL) == 0) return;
             fv.postDelayed(new Runnable() {
                 @Override
@@ -758,11 +680,9 @@ public class BlurEnhanceModule extends XposedModule {
             ModuleLog.e("LIVE", "armBlurForView failed", t);
         }
     }
-
     private void applyIconBlurRadius(View view, float radius) {
         applyIconBlurRadius(view, radius, true);
     }
-
     private void dumpOplusApiOnce(Class<?> cls) {
         if (sOplusApiDumped) return;
         String key = cls.getName();
@@ -806,17 +726,14 @@ public class BlurEnhanceModule extends XposedModule {
         }
         sOplusApiDumped = true;
     }
-
     private void applyIconBlurRadius(View view, float radius, boolean useOplus) {
         if (view == null) return;
         try {
             RenderEffect effect = RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.MIRROR);
-
             if (!useOplus) {
                 trySetViewRenderEffect(view, effect);
                 return;
             }
-
             boolean oplusOk = false;
             try {
                 Class<?> cls = resolveOplusEffectCls();
@@ -831,7 +748,6 @@ public class BlurEnhanceModule extends XposedModule {
             } catch (Throwable t) {
                 ModuleLog.d("ICONBLUR", "oplus path failed: " + t);
             }
-
             if (!oplusOk) {
                 String err = trySetViewRenderEffect(view, effect);
                 if (ModuleLog.enabled()) ModuleLog.d("ICONBLUR", "fallback setRenderEffect err=" + err);
@@ -840,7 +756,6 @@ public class BlurEnhanceModule extends XposedModule {
             ModuleLog.e("ICONBLUR", "applyIconBlurRadius failed", t);
         }
     }
-
     private Class<?> resolveOplusEffectCls() {
         if (sOplusEffectResolved) return sOplusEffectCls;
         synchronized (BlurEnhanceModule.class) {
@@ -857,7 +772,6 @@ public class BlurEnhanceModule extends XposedModule {
         }
         return sOplusEffectCls;
     }
-
     private void setIconBlurArmed(View view, boolean value) {
         if (view == null) return;
         synchronized (armed) {
@@ -868,32 +782,27 @@ public class BlurEnhanceModule extends XposedModule {
             }
         }
     }
-
     private boolean isIconBlurArmed(View view) {
         if (view == null) return false;
         synchronized (armed) {
             return armed.containsKey(view);
         }
     }
-
     private boolean isCurrentAnimation(String key, ValueAnimator va) {
         synchronized (iconAnims) {
             return iconAnims.get(key) == va;
         }
     }
-
     private void removeAnimation(String key) {
         synchronized (iconAnims) {
             iconAnims.remove(key);
         }
     }
-
     private void clearStaticLayers(View view) {
         try {
             Class<?> drawableCls = Reflect.loadClass(CLS_DRAWABLE, currentClassLoader());
             boolean wall = false;
             boolean drag = false;
-
             if (drawableCls != null) {
                 Method mw = Reflect.method(view.getClass(), "setWallpaperDrawable", drawableCls);
                 if (mw != null) {
@@ -904,7 +813,6 @@ public class BlurEnhanceModule extends XposedModule {
                     try { md.invoke(view, (Object) null); drag = true; } catch (Throwable ignore) {}
                 }
             }
-
             Field f = Reflect.field(view.getClass(), "mIsBlurUnavailable");
             if (f != null) {
                 try { f.setBoolean(view, true); } catch (Throwable ignore) {}
@@ -915,7 +823,6 @@ public class BlurEnhanceModule extends XposedModule {
             ModuleLog.e("CLEAR", "clearStaticLayers failed", t);
         }
     }
-
     private String trySetViewRenderEffect(View view, RenderEffect effect) {
         try {
             Method m = sSetRenderEffectViewMethod;
@@ -930,7 +837,6 @@ public class BlurEnhanceModule extends XposedModule {
             return String.valueOf(t);
         }
     }
-
     private Object createDepthBlurAnimation(View view, float from, float to, long duration) {
         try {
             Object launcher = getLauncherQuietly(view);
@@ -939,7 +845,6 @@ public class BlurEnhanceModule extends XposedModule {
             if (dc == null) return null;
             Object prop = getStaticFloatProperty(dc, "BLUR");
             if (prop == null) return null;
-
             float cur = from;
             try {
                 Object g = Reflect.call(dc, "getCurrentBlur");
@@ -948,22 +853,17 @@ public class BlurEnhanceModule extends XposedModule {
                     if (v >= 0.0f) cur = v;
                 }
             } catch (Throwable ignore) {}
-
             Class<?> oaCls = Reflect.loadClass(CLS_OBJECT_ANIMATOR, currentClassLoader());
             Class<?> propCls = Reflect.loadClass(CLS_PROPERTY, currentClassLoader());
             if (oaCls == null || propCls == null) return null;
-
             Method ofFloat = Reflect.method(oaCls, "ofFloat", Object.class, propCls, float[].class);
             if (ofFloat == null) return null;
             Object anim = ofFloat.invoke(null, dc, prop, new float[]{cur, to});
             if (anim == null) return null;
-
             Class<?> animCls = Reflect.loadClass(CLS_ANIMATOR, currentClassLoader());
             if (animCls == null) return null;
-
             Method setDur = Reflect.method(animCls, "setDuration", long.class);
             if (setDur != null) setDur.invoke(anim, duration);
-
             Class<?> ipCls = Reflect.loadClass(CLS_TIME_INTERPOLATOR, currentClassLoader());
             Class<?> decCls = Reflect.loadClass(CLS_DECELERATE, currentClassLoader());
             if (ipCls != null && decCls != null) {
@@ -977,7 +877,6 @@ public class BlurEnhanceModule extends XposedModule {
             return null;
         }
     }
-
     private boolean animateDepthBlur(View view, float from, float to, long duration) {
         try {
             Object anim = createDepthBlurAnimation(view, from, to, duration);
@@ -996,7 +895,6 @@ public class BlurEnhanceModule extends XposedModule {
             return false;
         }
     }
-
     private Object createIconBlurAnimator(final View view, final float from, final float to, long duration) {
         if (view == null) return null;
         try {
@@ -1032,7 +930,6 @@ public class BlurEnhanceModule extends XposedModule {
             return null;
         }
     }
-
     private void playIntoAnimatorSet(Object set, Object anim) {
         try {
             Class<?> setCls = Reflect.loadClass(CLS_ANIMATOR_SET, currentClassLoader());
@@ -1043,7 +940,6 @@ public class BlurEnhanceModule extends XposedModule {
         } catch (Throwable t) {
         }
     }
-
     private boolean setDepthBlur(View view, float value) {
         try {
             Object launcher = getLauncherQuietly(view);
@@ -1058,7 +954,6 @@ public class BlurEnhanceModule extends XposedModule {
             return false;
         }
     }
-
     private Object getStaticFloatProperty(Object dc, String name) {
         Field f = Reflect.field(dc.getClass(), name);
         if (f == null) return null;
@@ -1073,7 +968,6 @@ public class BlurEnhanceModule extends XposedModule {
             return null;
         }
     }
-
     private boolean installPostEffectHooks(ClassLoader loader) {
         Class<?> cls;
         try {
@@ -1099,7 +993,6 @@ public class BlurEnhanceModule extends XposedModule {
         ModuleLog.i("READY posteffect installed critical=" + critical);
         return critical > 0;
     }
-
     private int hookBySignature(Class<?> cls, String methodName, String[] wantParams, String tag) {
         Method target = null;
         StringBuilder all = new StringBuilder();
@@ -1157,7 +1050,6 @@ public class BlurEnhanceModule extends XposedModule {
             return 0;
         }
     }
-
     private int findFloatParamIndex(Class<?>[] types) {
         int idx = -1;
         for (int i = 0; i < types.length; i++) {
@@ -1168,7 +1060,6 @@ public class BlurEnhanceModule extends XposedModule {
         }
         return idx;
     }
-
     private boolean isInsideOpenFolder(View view) {
         try {
             ViewGroup dragLayer = ViewUtils.ancestorGroupOfType(view, "DragLayer");
@@ -1194,11 +1085,9 @@ public class BlurEnhanceModule extends XposedModule {
             return false;
         }
     }
-
     private ClassLoader currentClassLoader() {
         return cl;
     }
-
     private void hookRemoteViewsApply(ClassLoader cl) {
         try {
             Method m = RemoteViews.class.getDeclaredMethod("apply", android.content.Context.class, ViewGroup.class);
@@ -1224,7 +1113,6 @@ public class BlurEnhanceModule extends XposedModule {
             ModuleLog.e("MERGE", "RemoteViews.reapply hook fail", t);
         }
     }
-
     private void hookAppWidgetHostView(ClassLoader cl) {
         try {
             Class<?> ahv = Class.forName("android.appwidget.AppWidgetHostView", false, cl);
@@ -1238,14 +1126,12 @@ public class BlurEnhanceModule extends XposedModule {
             ModuleLog.e("MERGE", "AppWidgetHostView hook fail", t);
         }
     }
-
     private static boolean isClockTextId(int id) {
         for (int tid : ClockIds.TEXT_IDS) {
             if (tid == id) return true;
         }
         return false;
     }
-
     private void hookAllSetText(Class<?> tvClass) {
         for (Method mm : tvClass.getDeclaredMethods()) {
             if (!mm.getName().equals("setText")) continue;
@@ -1305,7 +1191,6 @@ public class BlurEnhanceModule extends XposedModule {
             return result;
         }
     }
-
     private static final class AppWidgetHostViewHook implements XposedInterface.Hooker {
         private final ClassLoader cl;
         AppWidgetHostViewHook(ClassLoader c) { this.cl = c; }
@@ -1327,5 +1212,4 @@ public class BlurEnhanceModule extends XposedModule {
             return result;
         }
     }
-
 }

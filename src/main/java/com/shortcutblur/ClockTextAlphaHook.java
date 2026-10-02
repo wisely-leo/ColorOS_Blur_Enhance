@@ -1,28 +1,19 @@
 package com.shortcutblur;
-
 import android.widget.RemoteViews;
-
 import java.lang.reflect.Method;
-
 import io.github.libxposed.api.XposedInterface.Chain;
 import io.github.libxposed.api.XposedInterface.ExceptionMode;
 import io.github.libxposed.api.XposedModule;
-
 public final class ClockTextAlphaHook {
-
     private static final int TARGET_ALPHA = 0x4D;
-
     private static volatile boolean sInstalled = false;
-
     private ClockTextAlphaHook() {}
-
     private static boolean isClockTextId(int id) {
         for (int tid : ClockIds.TEXT_IDS) {
             if (tid == id) return true;
         }
         return false;
     }
-
     public static void install(XposedModule mod, ClassLoader cl) {
         if (sInstalled) return;
         synchronized (ClockTextAlphaHook.class) {
@@ -39,7 +30,6 @@ public final class ClockTextAlphaHook {
             ModuleLog.e("CTCH", "hook fail", t);
         }
     }
-
     private static final class HookColor implements io.github.libxposed.api.XposedInterface.Hooker {
         @Override
         public Object intercept(Chain chain) throws Throwable {
@@ -57,7 +47,6 @@ public final class ClockTextAlphaHook {
                             ModuleLog.d("CTCH", "setTextColor id=0x" + Integer.toHexString(id)
                                 + " color=0x" + Integer.toHexString(color)
                                 + " -> 0x" + Integer.toHexString(newColor));
-
                             Object[] newArgs = new Object[args.size()];
                             for (int i = 0; i < args.size(); i++) newArgs[i] = args.get(i);
                             newArgs[1] = Integer.valueOf(newColor);

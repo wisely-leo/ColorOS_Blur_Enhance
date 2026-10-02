@@ -1,52 +1,36 @@
 package com.shortcutblur;
-
 import android.os.Process;
 import android.os.SystemClock;
-
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
-
 public final class ModuleLog {
-    /** 运行期日志开关：读 FeatureFlags.LOG_ENABLED（默认 false）。 */
     public static boolean enabled() { return FeatureFlags.LOG_ENABLED; }
-
     public static final String TAG = "colorosblurenhance";
-
     private static final long T0 = SystemClock.uptimeMillis();
-
     private static final String[] DIRS = {
             "/storage/emulated/0/Download",
             "/sdcard/Download",
             "/storage/emulated/0/Android/media",
             "/storage/emulated/0"
     };
-
     private static final String FILE = "ColorOSBlurEnhance.log";
-
     private static final String FILE_BLUR = "PostEffectBlur.log";
-
     private static final int UID_BLUR = 10205;
-
     private static File logFile;
-
     private static volatile boolean broken;
-
     private ModuleLog() {}
-
     public static volatile boolean VERBOSE = false;
     public static void dv(String category, String detail) {
         if (!VERBOSE) return;
         d(category, detail);
     }
-
     public static void d(String category, String detail) {
         if (!enabled()) return;
         long t = SystemClock.uptimeMillis() - T0;
         write("D|" + category + "|t=" + t + "|pid=" + Process.myPid() + "|" + detail + "\n");
     }
-
     public static void e(String category, String detail, Throwable t) {
         if (!enabled()) return;
         long ms = SystemClock.uptimeMillis() - T0;
@@ -63,11 +47,9 @@ public final class ModuleLog {
         }
         write("E|" + category + "|t=" + ms + "|pid=" + Process.myPid() + "|" + detail + extra + "\n");
     }
-
     public static void i(String detail) {
         d("INFO", detail);
     }
-
     private static synchronized void write(String s) {
         if (!enabled()) return;
         try {
@@ -88,7 +70,6 @@ public final class ModuleLog {
             android.util.Log.w(TAG, "write failed: " + t);
         }
     }
-
     private static void raw(String s) {
         if (!enabled()) return;
         Writer w = null;
@@ -104,7 +85,6 @@ public final class ModuleLog {
             }
         }
     }
-
     private static String pickFileName() {
         if (!enabled()) return FILE;
         try {
@@ -112,7 +92,6 @@ public final class ModuleLog {
         } catch (Throwable ignored) {}
         return FILE;
     }
-
     private static File open() {
         if (!enabled()) return null;
         for (String d : DIRS) {

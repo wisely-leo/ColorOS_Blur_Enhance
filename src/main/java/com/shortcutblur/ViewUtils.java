@@ -1,18 +1,13 @@
 package com.shortcutblur;
-
 import android.content.Context;
 import android.content.ContextWrapper;
 import android.graphics.Rect;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
-
 public final class ViewUtils {
-
     public static final int MAX_DEPTH = 50;
-
     private ViewUtils() {}
-
     public static View ancestorOfType(View v, String namePart) {
         View cur = v;
         int depth = 0;
@@ -25,7 +20,6 @@ public final class ViewUtils {
         }
         return null;
     }
-
     public static View descendantJustBelow(View v, String namePart) {
         View cur = v;
         View prev = v;
@@ -40,7 +34,6 @@ public final class ViewUtils {
         }
         return prev;
     }
-
     public static ViewGroup ancestorGroupOfType(View v, String namePart) {
         View cur = v;
         int depth = 0;
@@ -55,7 +48,6 @@ public final class ViewUtils {
         }
         return null;
     }
-
     public static Context contextOfType(Context ctx, String className) {
         Context c = ctx;
         int depth = 0;
@@ -71,12 +63,9 @@ public final class ViewUtils {
         }
         return null;
     }
-
     public static View findByViewId(View root, int id) {
         return findByViewId(root, id, 0);
     }
-
-    /** v 是否等于 ancestor，或位于 ancestor 的子树内。 */
     public static boolean isDescendantOrSelf(View ancestor, View v) {
         View cur = v;
         int guard = 0;
@@ -87,7 +76,6 @@ public final class ViewUtils {
         }
         return false;
     }
-
     private static View findByViewId(View root, int id, int depth) {
         if (root == null || depth > MAX_DEPTH) return null;
         if (root.getId() == id) return root;
@@ -101,7 +89,6 @@ public final class ViewUtils {
         }
         return null;
     }
-
     public static String dumpViewChainNames(View view) {
         StringBuilder sb = new StringBuilder();
         try {
@@ -115,7 +102,6 @@ public final class ViewUtils {
         } catch (Throwable ignored) { }
         return sb.toString();
     }
-
     public static String dumpTreeIds(View root, int maxNodes) {
         StringBuilder sb = new StringBuilder();
         try { dumpTreeIds(root, 0, sb, new int[]{0}, maxNodes); } catch (Throwable ignored) {}
@@ -134,7 +120,6 @@ public final class ViewUtils {
             }
         }
     }
-
     public static String dumpChildViewNames(ViewGroup vg) {
         StringBuilder sb = new StringBuilder();
         try {
@@ -144,14 +129,12 @@ public final class ViewUtils {
         } catch (Throwable ignored) { }
         return sb.toString();
     }
-
     public static boolean isReallyVisible(View v) {
         if (v == null) return false;
         try {
             if (!v.isAttachedToWindow()) return false;
             if (!v.isShown()) return false;
             if (v.getWidth() <= 0 || v.getHeight() <= 0) return false;
-
             Rect r = new Rect();
             if (!v.getGlobalVisibleRect(r)) return false;
             if (r.width() < 4 || r.height() < 4) return false;
