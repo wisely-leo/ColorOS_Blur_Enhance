@@ -100,14 +100,16 @@ public class SettingsActivity extends Activity {
             View sampleRow = SoftUi.slider(this, "采样倍率",
                     store.getSampleScale() * 100f, 0, 100, "%",
                     v -> store.setSampleScale(v / 100f));
-            // 功能开关卡片（4 项，与宿主 FeatureFlags 一一对应）
+            // 功能开关卡片（5 项，与宿主 FeatureFlags 一一对应）
             SoftUi.Card cardFunc = SoftUi.card(this,
                     SoftUi.toggle(this, "Shortcut 实时模糊", store.isShortcut(),
                             v -> store.setShortcut(v)),
                     SoftUi.toggle(this, "最近任务模糊增强", store.isRecents(),
                             v -> store.setRecents(v)),
                     SoftUi.toggle(this, "小组件模糊（含时钟）", store.isWidget(),
-                            v -> store.setWidget(v)));
+                            v -> store.setWidget(v)),
+                    SoftUi.toggle(this, "下拉搜索实时模糊", store.isQsProbe(),
+                            v -> store.setQsProbe(v)));
             // 后处理（父）+ 采样倍率（子，折叠）：关掉后处理则滑块收起、不参与
             View[] pePair = SoftUi.toggleWithDependents(this, "posteffect 模糊采样率",
                     store.isPostEffect(), v -> store.setPostEffect(v), sampleRow);
@@ -122,10 +124,8 @@ public class SettingsActivity extends Activity {
                 clearRowRef[0] = clearRow;              // 供 lambda 回调引用
                 otherRows.add(clearRow);
             }
-            otherRows.add(SoftUi.toggle(this, "下拉搜索实时模糊", store.isQsProbe(),
-                    v -> store.setQsProbe(v)));
             otherRows.add(SoftUi.toggle(this, "日志开关", store.isLog(),
-                    v -> store.setLog(v)));
+                    v -> store.setLog(v), 0f, false));   // ★ 日志行：仅开关本体可点
             SoftUi.Card cardOther = SoftUi.card(this,
                     otherRows.toArray(new View[otherRows.size()]));
 
@@ -146,51 +146,31 @@ public class SettingsActivity extends Activity {
             java.util.List<String> pkgs = store.scopePackages();
             java.util.List<View> scopeRows = new java.util.ArrayList<>();
             for (final String pkg : pkgs) {
+                final String appLabel = store.appLabel(pkg);
                 scopeRows.add(SoftUi.actionArrowBlock(this,
-                        store.appLabel(pkg),               // friendly app name (line 1)
+                        appLabel,                           // friendly app name (line 1)
                         pkg,                               // package name (line 2, wrappable)
                         () -> {
-                            lg("restart scope: " + pkg);
-                            new Thread(() -> {
-                                final String r;
-                                if (Adb.status() != Adb.OK) {
-                                    r = "!尚未授权 ADB";
-                                } else {
-                                    java.util.List<String> one =
-                                            new java.util.ArrayList<>();
-                                    one.add(pkg);
-                                    r = Adb.restartScope(SettingsActivity.this, one);
-                                }
-                                runOnUiThread(() -> {
-                                    android.widget.Toast.makeText(SettingsActivity.this,
-                                            pkg + " -> " + (r.startsWith("!")
-                                                    ? "失败" : "已重启"),
-                                            android.widget.Toast.LENGTH_SHORT).show();
-                                    lg("restart scope result: " + r);
-                                });
-                            }, "adb-scope-one").start();
+                            lg("restart scope request: " + pkg);
+                            // ★ 确认弹窗
+                            SoftUi.confirm(shell,
+                                    "重启作用域",
+                                    "确定重启作用域 " + pkg + " 吗",
+                                    "确定", "取消",
+                                    () -> doRestartOne(pkg));
                         }));
             }
             // bottom: restart all
             scopeRows.add(SoftUi.actionArrowBlock(this, "重启全部",
                     pkgs.size() + " 个应用",
                     () -> {
-                        lg("restart ALL scope: " + pkgs);
-                        new Thread(() -> {
-                            final String r;
-                            if (Adb.status() != Adb.OK) {
-                                r = "!尚未授权 ADB";
-                            } else {
-                                r = Adb.restartScope(SettingsActivity.this, pkgs);
-                            }
-                            runOnUiThread(() -> {
-                                android.widget.Toast.makeText(SettingsActivity.this,
-                                        "重启全部 -> " + (r.startsWith("!")
-                                                ? "失败（见日志）" : "已重启"),
-                                        android.widget.Toast.LENGTH_SHORT).show();
-                                lg("restart ALL result: " + r);
-                            });
-                        }, "adb-scope-all").start();
+                        lg("restart ALL scope request: " + pkgs);
+                        // ★ 确认弹窗
+                        SoftUi.confirm(shell,
+                                "重启作用域",
+                                "确定重启作用域全部 " + pkgs.size() + " 个应用吗",
+                                "确定", "取消",
+                                () -> doRestartAll(pkgs));
                     }));
             SoftUi.Card cardScope = SoftUi.card(this,
                     scopeRows.toArray(new View[scopeRows.size()]));
@@ -378,6 +358,44 @@ public class SettingsActivity extends Activity {
             }
         });
         va.start();
+    }
+
+    /** 重启单个作用域应用（确认后真正执行）。 */
+    private void doRestartOne(final String pkg) {
+        new Thread(() -> {
+            final String r;
+            if (Adb.status() != Adb.OK) {
+                r = "!尚未授权 ADB";
+            } else {
+                java.util.List<String> one = new java.util.ArrayList<>();
+                one.add(pkg);
+                r = Adb.restartScope(SettingsActivity.this, one);
+            }
+            runOnUiThread(() -> {
+                android.widget.Toast.makeText(SettingsActivity.this,
+                        pkg + " -> " + (r.startsWith("!") ? "失败" : "已重启"),
+                        android.widget.Toast.LENGTH_SHORT).show();
+                lg("restart scope result: " + r);
+            });
+        }, "adb-scope-one").start();
+    }
+
+    /** 重启全部作用域应用（确认后真正执行）。 */
+    private void doRestartAll(final java.util.List<String> pkgs) {
+        new Thread(() -> {
+            final String r;
+            if (Adb.status() != Adb.OK) {
+                r = "!尚未授权 ADB";
+            } else {
+                r = Adb.restartScope(SettingsActivity.this, pkgs);
+            }
+            runOnUiThread(() -> {
+                android.widget.Toast.makeText(SettingsActivity.this,
+                        "重启全部 -> " + (r.startsWith("!") ? "失败（见日志）" : "已重启"),
+                        android.widget.Toast.LENGTH_SHORT).show();
+                lg("restart ALL result: " + r);
+            });
+        }, "adb-scope-all").start();
     }
 
     /** 清除自定义背景图（恢复纯色），然后重建界面。 */

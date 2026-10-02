@@ -64,7 +64,7 @@ public final class SoftUi {
     public static int KNOB           = 0xFFFFFFFF;
 
     // 尺寸（dp）
-    public static float RADIUS      = 12f;   // 卡片圆角
+    public static float RADIUS      = 22f;   // 卡片圆角（加大）
     public static float ROW_H       = 48f;   // 行高
     public static float PAD         = 16f;   // 卡片内边距
     public static float GAP         = 10f;   // 卡片间距
@@ -175,12 +175,12 @@ public final class SoftUi {
         return d;
     }
 
-    // ============================================================
+    // ------------------------------------------------------------
     //  ③ 基础控件区（Switch / Slider / Card / Row —— 原子 UI 零件）
     //     本区【只做 UI】，不含模糊算法；需要毛玻璃时调用下面的 ④ 能力区。
     // ============================================================
 
-    /** 开关：自绘，无图片 */
+    /** 开关：自绘，无图片。支持平滑切换动画 + 跟手左右拖动。 */
     public static class Switch extends View {
         public interface OnChange { void onChange(boolean value); }
         /** 开关回调（供"带附属行"的 toggle 使用，同时可驱动外部状态）。 */
@@ -189,25 +189,74 @@ public final class SoftUi {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF rect = new RectF();
         private boolean checked;
-        private float anim = 0f; // 0..1 动画位
+        private float anim = 0f; // 0..1 动画位（0=关，1=开）
         private OnChange cb;
+
+        /** 切换动画器（点击 / setChecked 时平滑过渡）。 */
+        private ValueAnimator animator;
+        /** 拖动状态。 */
+        private boolean dragging = false;
+        private float downX = 0f;
+        /** 触摸拖动阈值（px）。 */
+        private float touchSlop;
 
         public Switch(Context c) {
             super(c);
             setClickable(true);
+            touchSlop = android.view.ViewConfiguration.get(c).getScaledTouchSlop();
         }
 
+        /** 外部设置状态（带动画）。 */
         public void setChecked(boolean v) {
             if (checked == v) return;
             checked = v;
+            animateTo(v ? 1f : 0f);
+            if (cb != null) cb.onChange(checked);   // 任何来源的变化都通知（状态驱动）
+        }
+
+        /**
+         * 初始化状态：即时生效、不播放动画、不回调。
+         * 用于界面构建时设定初值，避免重建/切页时整屏开关一起做切换动画。
+         */
+        public void setCheckedImmediate(boolean v) {
+            if (animator != null) { animator.cancel(); animator = null; }
+            checked = v;
             anim = v ? 1f : 0f;
             invalidate();
-            if (cb != null) cb.onChange(checked);   // 任何来源的变化都通知（状态驱动）
         }
 
         public boolean isChecked() { return checked; }
 
         public Switch setOnChange(OnChange c) { this.cb = c; return this; }
+
+        /** 平滑动画到目标位置（不触发回调）。 */
+        private void animateTo(float target) {
+            if (animator != null) animator.cancel();
+            animator = ValueAnimator.ofFloat(anim, target);
+            animator.setDuration(180L);
+            animator.addUpdateListener(a -> {
+                anim = (float) a.getAnimatedValue();
+                invalidate();
+            });
+            animator.start();
+        }
+
+        /** 立即吸附到目标（拖动松手用，避免与动画器冲突）。 */
+        private void snapTo(float target) {
+            if (animator != null) { animator.cancel(); animator = null; }
+            anim = target;
+            invalidate();
+        }
+
+        /** 由 anim 位置推导最终状态并通知（若变化）。 */
+        private void commitFromAnim() {
+            boolean target = anim >= 0.5f;
+            snapTo(target ? 1f : 0f);
+            if (target != checked) {
+                checked = target;
+                if (cb != null) cb.onChange(checked);
+            }
+        }
 
         @Override protected void onMeasure(int w, int h) {
             setMeasuredDimension(dp(getContext(), SWITCH_W), dp(getContext(), SWITCH_H));
@@ -233,12 +282,66 @@ public final class SoftUi {
             cv.drawCircle(cx, cy, kr, paint);
         }
 
+        /** 滑块中心在 anim=0 时的 X（左端最小中心位）。 */
+        private float knobMinX() {
+            float h = getHeight();
+            float kr = h / 2f - dp(getContext(), KNOB_PAD);
+            return dp(getContext(), KNOB_PAD) + kr;
+        }
+
+        /** 滑块中心可变行程（用于把手指 X 映射成 anim）。 */
+        private float knobTravel() {
+            float w = getWidth(), h = getHeight();
+            float r = h / 2f;
+            float pad = dp(getContext(), KNOB_PAD);
+            float kr = r - pad;
+            return w - 2 * (pad + kr);
+        }
+
         @Override public boolean onTouchEvent(MotionEvent e) {
-            if (e.getAction() == MotionEvent.ACTION_UP) {
-                checked = !checked;
-                anim = checked ? 1f : 0f;
-                invalidate();
-                if (cb != null) cb.onChange(checked);
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN: {
+                    if (animator != null) { animator.cancel(); animator = null; }
+                    dragging = false;
+                    downX = e.getX();
+                    // 请求父容器（Row）不要拦截本次手势，保证拖动连续
+                    if (getParent() != null) {
+                        getParent().requestDisallowInterceptTouchEvent(true);
+                    }
+                    return true;
+                }
+                case MotionEvent.ACTION_MOVE: {
+                    float dx = e.getX() - downX;
+                    if (!dragging && Math.abs(dx) > touchSlop) {
+                        dragging = true;               // 进入拖动模式
+                    }
+                    if (dragging) {
+                        float travel = knobTravel();
+                        if (travel > 0f) {
+                            // 把「手指 X 相对轨道起点」映射为 anim（跟手）
+                            float raw = (e.getX() - knobMinX()) / travel;
+                            anim = Math.max(0f, Math.min(1f, raw));
+                            invalidate();
+                        }
+                    }
+                    return true;
+                }
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL: {
+                    if (getParent() != null) {
+                        getParent().requestDisallowInterceptTouchEvent(false);
+                    }
+                    if (dragging) {
+                        commitFromAnim();              // 拖动松手：吸附 + 通知
+                    } else {
+                        // 未拖动（轻点）：直接切换（带平滑动画）
+                        checked = !checked;
+                        animateTo(checked ? 1f : 0f);
+                        if (cb != null) cb.onChange(checked);
+                    }
+                    dragging = false;
+                    return true;
+                }
             }
             return true;
         }
@@ -357,7 +460,7 @@ public final class SoftUi {
         }
     }
 
-    /** 卡片：白底圆角容器 */
+/** 卡片：白底圆角容器 */
     public static class Card extends android.widget.FrameLayout {
         private final LinearLayout inner;   // 真正放内容
         private StaticGlass glass;
@@ -365,6 +468,7 @@ public final class SoftUi {
         public Card(Context c) {
             super(c);
             setBackground(roundRect(CARD_FILL, RADIUS, c));
+
             inner = new LinearLayout(c);
             inner.setOrientation(LinearLayout.VERTICAL);
             addView(inner, new android.widget.FrameLayout.LayoutParams(
@@ -427,6 +531,18 @@ public final class SoftUi {
                 d.setLayoutParams(lp);
                 addView(d);
             }
+        }
+
+        /**
+         * 让整行可点击以切换指定 Switch（点行任意处 = 切换该开关）。
+         * 不改动 Switch 自身的 onChange，仅通过 setChecked 触发已有回调。
+         */
+        public Row setRowClickSwitch(final Switch sw) {
+            if (sw == null) return this;
+            setClickable(true);
+            setFocusable(true);
+            setOnClickListener(v -> sw.setChecked(!sw.isChecked()));
+            return this;
         }
 
         /** 把整行做成可点击开关（点行任意处切换右侧 Switch）。 */
@@ -1190,15 +1306,13 @@ public final class SoftUi {
      */
     public static void applyFold(final View holder, boolean visible, boolean animate) {
         if (holder == null) return;
-        holder.animate().cancel();
-
+        cancelFoldAnim(holder);        // ★ 取消上一次未完成的折叠动画（避免多个动画竞争）
         final ViewGroup.LayoutParams lp = holder.getLayoutParams();
         if (lp == null) {
             // 无布局参数，退化为纯可见性
             holder.setVisibility(visible ? View.VISIBLE : View.GONE);
             return;
         }
-
         if (!animate) {
             lp.height = visible ? ViewGroup.LayoutParams.WRAP_CONTENT : 0;
             holder.setLayoutParams(lp);
@@ -1206,13 +1320,12 @@ public final class SoftUi {
             holder.setAlpha(1f);
             return;
         }
-
         final int targetH = measureContentHeight(holder);   // 内容目标高
-
         if (visible) {
             // 展开：0 -> targetH，然后交回 WRAP_CONTENT
             holder.setVisibility(View.VISIBLE);
-            ValueAnimator va = ValueAnimator.ofInt(0, targetH);
+            final int fromH = Math.max(0, holder.getHeight());
+            ValueAnimator va = ValueAnimator.ofInt(fromH, targetH);
             va.setDuration(200);
             va.setInterpolator(new android.view.animation.DecelerateInterpolator());
             va.addUpdateListener(a -> {
@@ -1225,6 +1338,7 @@ public final class SoftUi {
                     holder.setLayoutParams(lp);
                 }
             });
+            holder.setTag(FOLD_ANIM_TAG, va);
             va.start();
         } else {
             // 收起：当前高 -> 0，然后 GONE
@@ -1243,8 +1357,272 @@ public final class SoftUi {
                     holder.setVisibility(View.GONE);
                 }
             });
+            holder.setTag(FOLD_ANIM_TAG, va);
             va.start();
         }
+    }
+
+    /** 折叠动画 Tag（存放当前正在跑的 ValueAnimator，供快速切换时取消）。 */
+    private static final int FOLD_ANIM_TAG = "softui_fold_anim".hashCode();
+
+    // ==================== ⑥ 自绘确认弹窗 ====================
+
+    /** 确认弹窗回调。 */
+    public interface ConfirmCb {
+        void onConfirm();
+    }
+
+    /**
+     * 自绘确认弹窗（**底部弹出** + **毛玻璃卡片**，与顶栏/底栏同一套模糊实现）。
+     *
+     * @param anchor     挂载锚点（推荐传页面根 FrameLayout，如 scrollingScreen 的 shell）
+     * @param title      标题（可为 null）
+     * @param message    正文
+     * @param okText     确定按钮文字（null = “确定”）
+     * @param cancelText 取消按钮文字（null = “取消”）
+     * @param onConfirm  点“确定”后回调（在 UI 线程）
+     */
+    public static void confirm(View anchor, String title, String message,
+                               String okText, String cancelText,
+                               final ConfirmCb onConfirm) {
+        try {
+            final ViewGroup host = resolveHost(anchor);
+            if (host == null) {
+                if (onConfirm != null) onConfirm.onConfirm();
+                return;
+            }
+            final Context ctx = host.getContext();
+
+            // 模糊采样源：宿主里的滚动容器（与顶栏/底栏一致）
+            final android.widget.ScrollView sample = scrollerOf(host);
+
+            // —— 遮罩层（全屏，压暗主界面）——
+            final android.widget.FrameLayout overlay = new android.widget.FrameLayout(ctx);
+            overlay.setBackgroundColor(0x4D000000);         // 30% 黑（压暗一点，不刺眼）
+            overlay.setClickable(true);
+            overlay.setFocusable(true);
+
+            // —— 面板（FrameLayout：底层放玻璃，上层放内容）——
+            final android.widget.FrameLayout panel = new android.widget.FrameLayout(ctx);
+            panel.setClickable(true);                       // 拦截点击，防穿透
+            float corner = 25f;                      // 弹窗圆角（较大，更圆润）
+            // 圆角裁剪，让玻璃层跟着圆角（与 GlassView 一致）
+            panel.setClipToOutline(true);
+            final float cornerFinal = corner;
+            panel.setOutlineProvider(new android.view.ViewOutlineProvider() {
+                @Override public void getOutline(View v, android.graphics.Outline o) {
+                    int w = v.getWidth(), h = v.getHeight();
+                    if (w <= 0 || h <= 0) { o.setEmpty(); return; }
+                    o.setRoundRect(0, 0, w, h, dp(v.getContext(), cornerFinal));
+                }
+            });
+
+            // 内容容器（叠在玻璃之上）
+            LinearLayout inner = new LinearLayout(ctx);
+            inner.setOrientation(LinearLayout.VERTICAL);
+            int pad = dp(ctx, PAD + 6f);
+            inner.setPadding(pad, pad, pad, pad);
+
+            // 标题（居中）
+            if (title != null && title.length() > 0) {
+                TextView tvT = text(ctx, title, BODY_SIZE + 2f, TEXT_PRIMARY);
+                tvT.setTypeface(tvT.getTypeface(), android.graphics.Typeface.BOLD);
+                tvT.setGravity(Gravity.CENTER);
+                LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT);
+                tlp.bottomMargin = dp(ctx, 12f);
+                inner.addView(tvT, tlp);
+            }
+
+            // 正文（居中）
+            if (message != null && message.length() > 0) {
+                TextView tvM = text(ctx, message, SUB_SIZE + 2f, TEXT_SECONDARY);
+                tvM.setGravity(Gravity.CENTER);
+                tvM.setLineSpacing(dp(ctx, 5f), 1f);
+                LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT);
+                mlp.bottomMargin = dp(ctx, 16f);
+                inner.addView(tvM, mlp);
+            }
+
+            // —— 按钮行（取消 | 确定），等宽撑满 ——
+            LinearLayout btnRow = new LinearLayout(ctx);
+            btnRow.setOrientation(LinearLayout.HORIZONTAL);
+            btnRow.setGravity(Gravity.BOTTOM);
+
+            final String cancelLabel = (cancelText == null ? "取消" : cancelText);
+            final String okLabel = (okText == null ? "确定" : okText);
+
+            // 收场动画：面板下滑 + 遮罩淡出，结束后移除
+            final Runnable[] dismiss = new Runnable[1];
+            dismiss[0] = () -> {
+                if (overlay.getParent() == null) return;
+                panel.animate().translationY(dp(ctx, 80f)).setDuration(200)
+                        .setInterpolator(new android.view.animation.AccelerateInterpolator())
+                        .start();
+                overlay.animate().alpha(0f).setDuration(200)
+                        .setListener(new android.animation.AnimatorListenerAdapter() {
+                            @Override public void onAnimationEnd(android.animation.Animator a) {
+                                host.removeView(overlay);
+                            }
+                        }).start();
+            };
+
+            TextView btnCancel = dialogButton(ctx, cancelLabel, TEXT_SECONDARY, false, true);
+            btnCancel.setOnClickListener(v -> dismiss[0].run());
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                    0, dp(ctx, 46f), 1f);   // 等宽
+            clp.rightMargin = dp(ctx, 8f);
+            btnRow.addView(btnCancel, clp);
+
+            TextView btnOk = dialogButton(ctx, okLabel, ACCENT, true, true);
+            btnOk.setOnClickListener(v -> {
+                dismiss[0].run();
+                if (onConfirm != null) onConfirm.onConfirm();
+            });
+            LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(
+                    0, dp(ctx, 46f), 1f);   // 等宽
+            olp.leftMargin = dp(ctx, 8f);
+            btnRow.addView(btnOk, olp);
+
+            inner.addView(btnRow, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    0,
+                    1f));      // 撑满剩余高度
+
+            // 内容铺满面板（高度撑满，内部自动分布）
+            panel.addView(inner, new android.widget.FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT));
+
+            // 面板放到底部（bottom sheet）：固定高度 = 屏高 1/4，底部留间距
+            int screenH = ctx.getResources().getDisplayMetrics().heightPixels;
+            int panelH = Math.round(screenH * 0.25f);           // 占屏高 1/4
+            android.widget.FrameLayout.LayoutParams plp =
+                    new android.widget.FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            panelH);
+            plp.gravity = Gravity.BOTTOM;
+            plp.leftMargin = dp(ctx, 12f);
+            plp.rightMargin = dp(ctx, 12f);
+            plp.bottomMargin = dp(ctx, 40f);                    // 与屏幕底拉开间距
+            overlay.addView(panel, plp);
+
+            // 点遮罩空白处取消
+            overlay.setOnClickListener(v -> dismiss[0].run());
+
+            // 剪掉底部窗口 inset（避免被手势条遮挡）
+            host.addView(overlay, new android.view.ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT));
+
+            // —— 毛玻璃：内容装好后，把玻璃层插到面板最底（与顶栏同一套）——
+            if (sample != null) {
+                try {
+                    LiveGlass g = new LiveGlass(ctx, sample, BLUR_RADIUS, GLASS_TINT, cornerFinal);
+                    g.setClickable(false);
+                    panel.addView(g, 0, new android.widget.FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT));
+                    g.start();
+                } catch (Throwable t2) {
+                    com.shortcutblur.ModuleLog.e("SoftUi", "confirm glass failed", t2);
+                    // 退化：纯白圆角底
+                    panel.setBackground(roundRect(CARD_FILL, cornerFinal, ctx));
+                }
+            } else {
+                // 无采样源（如未设壁纸）：半透明白底，仍有圆角
+                panel.setBackground(roundRect(0xF2FFFFFF, cornerFinal, ctx));
+            }
+
+            // 进入动画：遮罩淡入 + 面板自底滑入
+            overlay.setAlpha(0f);
+            overlay.animate().alpha(1f).setDuration(180).start();
+            panel.setTranslationY(dp(ctx, 80f));
+            panel.animate().translationY(0f).setDuration(240)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                    .start();
+        } catch (Throwable t) {
+            com.shortcutblur.ModuleLog.e("SoftUi", "confirm dialog failed", t);
+            if (onConfirm != null) onConfirm.onConfirm();
+        }
+    }
+
+    /** 解析弹窗宿主：优先用 anchor 自身（若是 ViewGroup），否则向上找 DecorView。 */
+    private static ViewGroup resolveHost(View anchor) {
+        if (anchor instanceof ViewGroup) return (ViewGroup) anchor;
+        if (anchor != null) {
+            android.view.ViewParent p = anchor.getParent();
+            while (p != null) {
+                if (p instanceof ViewGroup) return (ViewGroup) p;
+                p = p.getParent();
+            }
+        }
+        return null;
+    }
+/**
+     * 弹窗按钮（自绘胶囊按钮：圆角底 + 文字 + 按压态）。
+     *
+     * @param filled  true = 实心强调色底 + 白字；false = 浅灰底 + 彩色字
+     * @param stretch true = 等宽撑满模式（水平 padding 收紧，交给 weight 分配宽度）
+     */
+    private static TextView dialogButton(Context c, String label, int color,
+                                         boolean filled, boolean stretch) {
+        TextView t = text(c, label, BODY_SIZE, filled ? 0xFFFFFFFF : color);
+        t.setGravity(Gravity.CENTER);
+        final float radius = dp(c, 24f);                 // 胶囊圆角（略大，配合 46dp 高）
+        int ph = stretch ? dp(c, 8f) : dp(c, 22f), pv = dp(c, 10f);
+        t.setPadding(ph, pv, ph, pv);
+
+        final int baseColor = filled ? ACCENT : 0x14000000;   // 实心强调 / 浅灰
+        final int pressColor = filled ? darken(ACCENT, 0.85f) : 0x28000000;
+
+        final android.graphics.drawable.GradientDrawable bg =
+                new android.graphics.drawable.GradientDrawable();
+        bg.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
+        bg.setCornerRadius(radius);
+        bg.setColor(baseColor);
+        t.setBackground(bg);
+
+
+        t.setOnTouchListener((v, e) -> {
+            switch (e.getActionMasked()) {
+                case android.view.MotionEvent.ACTION_DOWN:
+                    bg.setColor(pressColor);
+                    v.invalidate();
+                    break;
+                case android.view.MotionEvent.ACTION_UP:
+                case android.view.MotionEvent.ACTION_CANCEL:
+                    bg.setColor(baseColor);
+                    v.invalidate();
+                    break;
+            }
+            return false;   // 不吞事件，让点击照常触发
+        });
+        return t;
+    }
+
+    /** 颜色变暗（k<1 变暗）。 */
+    private static int darken(int color, float k) {
+        int a = (color >>> 24) & 0xFF;
+        int r = (int) (((color >> 16) & 0xFF) * k);
+        int g = (int) (((color >> 8) & 0xFF) * k);
+        int b = (int) ((color & 0xFF) * k);
+        return (a << 24) | (clamp8(r) << 16) | (clamp8(g) << 8) | clamp8(b);
+    }
+    private static int clamp8(int v) { return v < 0 ? 0 : (v > 255 ? 255 : v); }
+
+    /** 取消 holder 上正在跑的折叠动画（若存在）。 */
+    private static void cancelFoldAnim(View holder) {
+        try {
+            Object t = holder.getTag(FOLD_ANIM_TAG);
+            if (t instanceof ValueAnimator) {
+                ((ValueAnimator) t).cancel();
+            }
+            holder.setTag(FOLD_ANIM_TAG, null);
+        } catch (Throwable ignored) {}
     }
 
     /** 测量一个 View 在 WRAP_CONTENT 下的内容高度。 */
@@ -1268,14 +1646,24 @@ public final class SoftUi {
         }
     }
 
-    /** toggle 带子项缩进（extraDp > 0 时标题右移，表示层次）。 */
+    /** toggle 带子项缩进（extraDp > 0 时标题右移，表示层次）。整行可点。 */
     public static Row toggle(Context c, String title, boolean checked,
                              Switch.OnChange cb, float extraDp) {
+        return toggle(c, title, checked, cb, extraDp, true);
+    }
+
+    /**
+     * toggle 全参重载。
+     * @param rowClickable true = 点击整行任意处可切换开关（默认）；false = 仅开关本体可点（如日志行）。
+     */
+    public static Row toggle(Context c, String title, boolean checked,
+                             Switch.OnChange cb, float extraDp, boolean rowClickable) {
         Switch sw = new Switch(c);
-        sw.setChecked(checked);
+        sw.setCheckedImmediate(checked);   // ★ 初始化不播动画（避免重建时整屏开关一起动）
         if (cb != null) sw.setOnChange(cb);
         Row r = new Row(c, title, sw, false);
         if (extraDp > 0f) r.indent(c, extraDp);
+        if (rowClickable) r.setRowClickSwitch(sw);   // ★ 整行可点切换（不覆盖 onChange）
         return r;
     }
 
