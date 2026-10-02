@@ -76,6 +76,18 @@ public final class ViewUtils {
         return findByViewId(root, id, 0);
     }
 
+    /** v 是否等于 ancestor，或位于 ancestor 的子树内。 */
+    public static boolean isDescendantOrSelf(View ancestor, View v) {
+        View cur = v;
+        int guard = 0;
+        while (cur != null && guard++ < MAX_DEPTH) {
+            if (cur == ancestor) return true;
+            ViewParent p = cur.getParent();
+            cur = (p instanceof View) ? (View) p : null;
+        }
+        return false;
+    }
+
     private static View findByViewId(View root, int id, int depth) {
         if (root == null || depth > MAX_DEPTH) return null;
         if (root.getId() == id) return root;
@@ -102,6 +114,25 @@ public final class ViewUtils {
             }
         } catch (Throwable ignored) { }
         return sb.toString();
+    }
+
+    public static String dumpTreeIds(View root, int maxNodes) {
+        StringBuilder sb = new StringBuilder();
+        try { dumpTreeIds(root, 0, sb, new int[]{0}, maxNodes); } catch (Throwable ignored) {}
+        return sb.toString();
+    }
+    private static void dumpTreeIds(View v, int depth, StringBuilder sb, int[] count, int maxNodes) {
+        if (v == null || count[0] >= maxNodes || depth > MAX_DEPTH) return;
+        count[0]++;
+        sb.append(v.getClass().getSimpleName())
+          .append("{").append(Integer.toHexString(v.getId()))
+          .append(",").append(v.getWidth()).append("x").append(v.getHeight()).append("} ");
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                dumpTreeIds(g.getChildAt(i), depth + 1, sb, count, maxNodes);
+            }
+        }
     }
 
     public static String dumpChildViewNames(ViewGroup vg) {
