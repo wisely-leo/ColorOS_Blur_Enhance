@@ -51,12 +51,165 @@ public final class SoftUi {
     public static int   HEADER_TINT   = 0x33FFFFFF;
     public static int   HEADER_LINE_COLOR = 0x1F8E8E93;
     public static float HEADER_LINE_H     = 1f;
+
+    public static int   PRESS_FILL        = 0x14000000;
+    public static int   PRESS_FILL_STRONG = 0x1F000000;
+    public static float PRESS_RADIUS      = 22f;
     public static float FOOTER_H   = 64f;
     public static float TAB_SIZE   = 15f;
     public static int   TAB_SEL    = 0xFF007AFF;
+
+    public static int   DIALOG_FILL = 0xF2FFFFFF;
+
+    public static int   SCRIM       = 0x4D000000;
+
+    public static int   BTN_SUBTLE      = 0x14000000;
+    public static int   BTN_SUBTLE_PRESS = 0x28000000;
+
+    public static boolean DARK = false;
+
+    public static void initTheme(Context c) {
+        initTheme(c, 0);
+    }
+
+    public static void initTheme(Context c, int mode) {
+        if (mode == 1) { applyTheme(false); return; }
+        if (mode == 2) { applyTheme(true); return; }
+        int sys = c.getResources().getConfiguration().uiMode
+                & android.content.res.Configuration.UI_MODE_NIGHT_MASK;
+        applyTheme(sys == android.content.res.Configuration.UI_MODE_NIGHT_YES);
+    }
+
+    public static boolean resolveDark(Context c, int mode) {
+        if (mode == 1) return false;
+        if (mode == 2) return true;
+        int sys = c.getResources().getConfiguration().uiMode
+                & android.content.res.Configuration.UI_MODE_NIGHT_MASK;
+        return sys == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+    }
+
+    public static void applyTheme(boolean dark) {
+        DARK = dark;
+        if (dark) {
+            CANVAS         = 0xFF000000;
+            SURFACE        = 0xFF1C1C1E;
+            CARD_FILL      = SURFACE;
+            ACCENT         = 0xFF0A84FF;
+            TEXT_PRIMARY   = 0xFFE6E6EB;
+            TEXT_SECONDARY = 0x99A8A8AE;
+            DIVIDER        = 0x5C545458;
+            SWITCH_OFF     = 0xFF39393D;
+            TRACK          = 0xFF39393D;
+            KNOB           = 0xFFFFFFFF;
+            GLASS_TINT     = 0x33000000;
+            GLASS_EDGE     = 0x33FFFFFF;
+            HEADER_TINT    = 0x33000000;
+            HEADER_LINE_COLOR = 0x1FFFFFFF;
+            PRESS_FILL        = 0x1AFFFFFF;
+            PRESS_FILL_STRONG = 0x2EFFFFFF;
+            TAB_SEL        = 0xFF0A84FF;
+            DIALOG_FILL    = 0xF21C1C1E;
+            SCRIM          = 0x66000000;
+            BTN_SUBTLE     = 0x1AFFFFFF;
+            BTN_SUBTLE_PRESS = 0x33FFFFFF;
+        } else {
+            CANVAS         = 0xFFF2F2F7;
+            SURFACE        = 0xFFFFFFFF;
+            CARD_FILL      = SURFACE;
+            ACCENT         = 0xFF007AFF;
+            TEXT_PRIMARY   = 0xFF000000;
+            TEXT_SECONDARY = 0x993C3C43;
+            DIVIDER        = 0x5C3C3C43;
+            SWITCH_OFF     = 0xFFE9E9EA;
+            TRACK          = 0xFFE9E9EA;
+            KNOB           = 0xFFFFFFFF;
+            GLASS_TINT     = 0x33FFFFFF;
+            GLASS_EDGE     = 0x33FFFFFF;
+            HEADER_TINT    = 0x33FFFFFF;
+            HEADER_LINE_COLOR = 0x1F8E8E93;
+            PRESS_FILL        = 0x14000000;
+            PRESS_FILL_STRONG = 0x1F000000;
+            TAB_SEL        = 0xFF007AFF;
+            DIALOG_FILL    = 0xF2FFFFFF;
+            SCRIM          = 0x4D000000;
+            BTN_SUBTLE     = 0x14000000;
+            BTN_SUBTLE_PRESS = 0x28000000;
+        }
+    }
     public static int dp(Context c, float v) {
         return Math.round(TypedValue.applyDimension(
                 TypedValue.COMPLEX_UNIT_DIP, v, c.getResources().getDisplayMetrics()));
+    }
+
+    public static void pressFeedback(View v) {
+        pressFeedback(v, PRESS_FILL, PRESS_RADIUS, true, true);
+    }
+
+    public static void pressFeedback(View v, int fillColor, float radiusDp,
+                                     boolean roundTop, boolean roundBottom) {
+        if (v == null) return;
+
+        final Context c = v.getContext();
+        final int ex = dp(c, PAD);
+        final int topEx = roundTop ? dp(c, PAD / 2f) : 0;
+        final int botEx = roundBottom ? dp(c, PAD / 2f) : 0;
+        final float rt = roundTop ? radiusDp : 0f;
+        final float rb = roundBottom ? radiusDp : 0f;
+        android.graphics.drawable.StateListDrawable sl =
+                new android.graphics.drawable.StateListDrawable();
+        sl.addState(new int[]{android.R.attr.state_pressed},
+                inset(pressShape(c, fillColor, rt, rb), -ex, -topEx, -ex, -botEx));
+        sl.addState(new int[]{android.R.attr.state_focused},
+                inset(pressShape(c, fillColor, rt, rb), -ex, -topEx, -ex, -botEx));
+        sl.addState(new int[]{},
+                inset(pressShape(c, 0x00000000, rt, rb), -ex, -topEx, -ex, -botEx));
+        v.setBackground(sl);
+        v.setClickable(true);
+        v.setFocusable(true);
+
+try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable ignored) {}
+    }
+
+    private static android.graphics.drawable.Drawable inset(
+            android.graphics.drawable.Drawable d, int l, int t, int r, int b) {
+        return new android.graphics.drawable.InsetDrawable(d, l, t, r, b);
+    }
+
+    private static void expandHorizontal(View v) {
+        ViewGroup.LayoutParams lp = v.getLayoutParams();
+        LinearLayout.LayoutParams llp;
+        if (lp instanceof LinearLayout.LayoutParams) {
+            llp = (LinearLayout.LayoutParams) lp;
+        } else if (lp == null) {
+            llp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+        } else {
+            return;
+        }
+        int pad = dp(v.getContext(), PAD);
+        if (llp.leftMargin == -pad && llp.rightMargin == -pad) return;
+        llp.leftMargin = -pad;
+        llp.rightMargin = -pad;
+        v.setLayoutParams(llp);
+        v.setPadding(v.getPaddingLeft() + pad, v.getPaddingTop(),
+                v.getPaddingRight() + pad, v.getPaddingBottom());
+    }
+
+    private static android.graphics.drawable.GradientDrawable pressShape(
+            Context c, int color, float rTopDp, float rBottomDp) {
+        android.graphics.drawable.GradientDrawable g =
+                new android.graphics.drawable.GradientDrawable();
+        g.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
+        g.setColor(color);
+        int rt = dp(c, rTopDp), rb = dp(c, rBottomDp);
+        g.setCornerRadii(new float[]{
+                rt, rt,
+                rt, rt,
+                rb, rb,
+                rb, rb
+        });
+        return g;
     }
     public static int statusBarH(Context c) {
         try {
@@ -118,6 +271,8 @@ public final class SoftUi {
         private boolean dragging = false;
         private float downX = 0f;
         private float touchSlop;
+        private float pressScale = 1f;
+        private ValueAnimator scaleAnimator;
         public Switch(Context c) {
             super(c);
             setClickable(true);
@@ -137,6 +292,21 @@ public final class SoftUi {
         }
         public boolean isChecked() { return checked; }
         public Switch setOnChange(OnChange c) { this.cb = c; return this; }
+
+        private void animatePress(boolean down) {
+            final float target = down ? 1.12f : 1.0f;
+            if (scaleAnimator != null) scaleAnimator.cancel();
+            scaleAnimator = ValueAnimator.ofFloat(pressScale, target);
+            scaleAnimator.setDuration(down ? 130L : 180L);
+            scaleAnimator.setInterpolator(down
+                    ? new android.view.animation.DecelerateInterpolator()
+                    : new android.view.animation.OvershootInterpolator(1.6f));
+            scaleAnimator.addUpdateListener(a -> {
+                pressScale = (Float) a.getAnimatedValue();
+                invalidate();
+            });
+            scaleAnimator.start();
+        }
         private void animateTo(float target) {
             if (animator != null) animator.cancel();
             animator = ValueAnimator.ofFloat(anim, target);
@@ -176,7 +346,7 @@ public final class SoftUi {
             float cx = pad + kr + (w - 2 * (pad + kr)) * anim;
             float cy = h / 2f;
             paint.setColor(KNOB);
-            cv.drawCircle(cx, cy, kr, paint);
+            cv.drawCircle(cx, cy, kr * pressScale, paint);
         }
         private float knobMinX() {
             float h = getHeight();
@@ -199,6 +369,7 @@ public final class SoftUi {
                     if (getParent() != null) {
                         getParent().requestDisallowInterceptTouchEvent(true);
                     }
+                    animatePress(true);
                     return true;
                 }
                 case MotionEvent.ACTION_MOVE: {
@@ -228,6 +399,7 @@ public final class SoftUi {
                         animateTo(checked ? 1f : 0f);
                         if (cb != null) cb.onChange(checked);
                     }
+                    animatePress(false);
                     dragging = false;
                     return true;
                 }
@@ -244,6 +416,8 @@ public final class SoftUi {
         private final RectF track = new RectF();
         private float min, max, value;
         private OnChange cb;
+        private float pressScale = 0.82f;
+        private ValueAnimator scaleAnimator;
         public Slider(Context c, float value, float min, float max) {
             super(c);
             this.min = min; this.max = max; this.value = value;
@@ -256,15 +430,31 @@ public final class SoftUi {
         }
         public float getValue() { return value; }
         public Slider setOnChange(OnChange c) { this.cb = c; return this; }
+
+        private void animatePress(boolean active) {
+            final float target = active ? 1.12f : 0.82f;
+            if (scaleAnimator != null) scaleAnimator.cancel();
+            scaleAnimator = ValueAnimator.ofFloat(pressScale, target);
+            scaleAnimator.setDuration(active ? 130L : 200L);
+            scaleAnimator.setInterpolator(active
+                    ? new android.view.animation.DecelerateInterpolator()
+                    : new android.view.animation.OvershootInterpolator(1.4f));
+            scaleAnimator.addUpdateListener(a -> {
+                pressScale = (Float) a.getAnimatedValue();
+                invalidate();
+            });
+            scaleAnimator.start();
+        }
         @Override protected void onMeasure(int w, int h) {
             setMeasuredDimension(dp(getContext(), SLIDER_W), dp(getContext(), SWITCH_H));
         }
         @Override protected void onDraw(Canvas cv) {
             float w = getWidth(), h = getHeight();
             float trackH = dp(getContext(), TRACK_H);
-            float th = dp(getContext(), THUMB_R);
+            float maxTh = dp(getContext(), THUMB_R) * 1.12f;
+            float th = dp(getContext(), THUMB_R) * pressScale;
             float cy = h / 2f;
-            float left = th, right = w - th;
+            float left = maxTh, right = w - maxTh;
             float frac = (max > min) ? (value - min) / (max - min) : 0f;
             paint.setColor(TRACK);
             track.set(left, cy - trackH / 2f, right, cy + trackH / 2f);
@@ -287,6 +477,7 @@ public final class SoftUi {
                     downX = e.getX(); downY = e.getY();
                     dragging = false;
                     if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(true);
+                    animatePress(true);
                     return true;
                 case MotionEvent.ACTION_MOVE: {
                     if (!dragging) {
@@ -296,6 +487,7 @@ public final class SoftUi {
                         if (dy > dx) {
                             if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(false);
                             dragging = false;
+                            animatePress(false);
                             return false;
                         }
                         dragging = true;
@@ -311,12 +503,13 @@ public final class SoftUi {
                         if (cb != null) cb.onChange(value);
                     }
                     dragging = false;
+                    animatePress(false);
                     return true;
             }
             return true;
         }
         private void applyX(float x) {
-            float th = dp(getContext(), THUMB_R);
+            float th = dp(getContext(), THUMB_R) * 1.12f;
             float left = th, right = getWidth() - th;
             float frac = (right > left) ? (x - left) / (right - left) : 0f;
             frac = Math.max(0f, Math.min(1f, frac));
@@ -331,12 +524,58 @@ public final class SoftUi {
         public Card(Context c) {
             super(c);
             setBackground(roundRect(CARD_FILL, RADIUS, c));
+
+            setClipToOutline(true);
             inner = new LinearLayout(c);
             inner.setOrientation(LinearLayout.VERTICAL);
             addView(inner, new android.widget.FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT));
-            inner.setPadding(dp(c, PAD), dp(c, PAD / 2), dp(c, PAD), dp(c, PAD / 2));
+            inner.setPadding(dp(c, PAD), dp(c, PAD / 2f), dp(c, PAD), dp(c, PAD / 2f));
+
+            inner.setClipToPadding(false);
+        }
+
+        private static final int TAG_PRESS = "softui_press".hashCode();
+        private static final int TAG_BASE_PAD = "softui_base_pad".hashCode();
+
+        public void applyEdgeInsets(float insetDp) {
+            final int n = inner.getChildCount();
+            for (int i = 0; i < n; i++) {
+                View ch = inner.getChildAt(i);
+                Object tag = ch.getTag(TAG_PRESS);
+                if (!(tag instanceof Boolean) || !((Boolean) tag)) continue;
+                boolean t = (i == 0), b = (i == n - 1);
+                String pos = (t && b) ? "single" : (t ? "first" : (b ? "last" : "mid"));
+                applyPressShape(ch, pos);
+
+                View p = (ch instanceof ViewGroup) ? ch : null;
+                if (p != null) {
+                    ((ViewGroup) p).setClipChildren(false);
+                    ((ViewGroup) p).setClipToPadding(false);
+                }
+                android.view.ViewParent vp = ch.getParent();
+                while (vp instanceof ViewGroup && vp != inner) {
+                    ((ViewGroup) vp).setClipChildren(false);
+                    ((ViewGroup) vp).setClipToPadding(false);
+                    vp = ((View) vp).getParent();
+                }
+            }
+            inner.setClipChildren(false);
+        }
+
+        static void applyPressShape(View v, String pos) {
+            int fill = SoftUi.PRESS_FILL;
+            float r = SoftUi.PRESS_RADIUS;
+            boolean rt, rb;
+            switch (pos) {
+                case "single": rt = true;  rb = true;  break;
+                case "first":  rt = true;  rb = false; break;
+                case "last":   rt = false; rb = true;  break;
+                default:       rt = false; rb = false; break;
+            }
+            SoftUi.pressFeedback(v, fill, r, rt, rb);
+            v.setTag(TAG_PRESS, Boolean.TRUE);
         }
         @Override public void addView(View child, int index, ViewGroup.LayoutParams params) {
             if (inner != null && child != inner) { inner.addView(child, params); return; }
@@ -384,8 +623,14 @@ public final class SoftUi {
             if (sw == null) return this;
             setClickable(true);
             setFocusable(true);
+            pressFeedback(this);
             setOnClickListener(v -> sw.setChecked(!sw.isChecked()));
             return this;
+        }
+
+        public Switch switchView() {
+            View v = findSwitch(this);
+            return (v instanceof Switch) ? (Switch) v : null;
         }
         public Row setOnToggle(final Switch.OnToggle cb) {
             final View right = findSwitch(this);
@@ -396,6 +641,7 @@ public final class SoftUi {
             }
             setClickable(true);
             setFocusable(true);
+            pressFeedback(this);
             setOnClickListener(v -> {
                 if (right instanceof Switch) {
                     Switch sw = (Switch) right;
@@ -621,6 +867,20 @@ public final class SoftUi {
             painter.invalidate();
         }
         void onTick() { doTick(); }
+
+        public void pulse(final int durationMs) {
+            final long end = android.os.SystemClock.uptimeMillis() + Math.max(0, durationMs);
+            final Runnable r = new Runnable() {
+                @Override public void run() {
+                    if (!isAttachedToWindow()) return;
+                    doTick();
+                    if (android.os.SystemClock.uptimeMillis() < end) {
+                        postOnAnimation(this);
+                    }
+                }
+            };
+            postOnAnimation(r);
+        }
         abstract void drawSource(Canvas cv);
         static final class Painter extends View {
             private final GlassView owner;
@@ -862,9 +1122,23 @@ public final class SoftUi {
     }
     public static Card card(Context c, View... children) {
         Card card = new Card(c);
-        for (View v : children) card.addView(v, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT));
+        for (View v : children) {
+
+            int lm = 0, rm = 0;
+            ViewGroup.LayoutParams old = v.getLayoutParams();
+            if (old instanceof LinearLayout.LayoutParams) {
+                lm = ((LinearLayout.LayoutParams) old).leftMargin;
+                rm = ((LinearLayout.LayoutParams) old).rightMargin;
+            }
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.leftMargin = lm;
+            lp.rightMargin = rm;
+            card.addView(v, lp);
+        }
+
+        card.applyEdgeInsets(-1f);
         return card;
     }
     public static View toggle(Context c, String title, boolean checked,
@@ -897,17 +1171,29 @@ public final class SoftUi {
             return;
         }
         if (!animate) {
-            lp.height = visible ? ViewGroup.LayoutParams.WRAP_CONTENT : 0;
+
+            lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
             holder.setLayoutParams(lp);
             holder.setVisibility(visible ? View.VISIBLE : View.GONE);
             holder.setAlpha(1f);
+            reapplyEdgeInsets(holder);
             return;
         }
         final int targetH = measureContentHeight(holder);
         if (visible) {
+
             holder.setVisibility(View.VISIBLE);
+            reapplyEdgeInsets(holder);
+            holder.measure(
+                    android.view.View.MeasureSpec.makeMeasureSpec(
+                            holder.getWidth() > 0 ? holder.getWidth()
+                                    : android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                            android.view.View.MeasureSpec.AT_MOST),
+                    android.view.View.MeasureSpec.makeMeasureSpec(0,
+                            android.view.View.MeasureSpec.UNSPECIFIED));
+            final int fullH = Math.max(measureContentHeight(holder), holder.getMeasuredHeight());
             final int fromH = Math.max(0, holder.getHeight());
-            ValueAnimator va = ValueAnimator.ofInt(fromH, targetH);
+            ValueAnimator va = ValueAnimator.ofInt(fromH, fullH);
             va.setDuration(200);
             va.setInterpolator(new android.view.animation.DecelerateInterpolator());
             va.addUpdateListener(a -> {
@@ -916,6 +1202,7 @@ public final class SoftUi {
             });
             va.addListener(new android.animation.AnimatorListenerAdapter() {
                 @Override public void onAnimationEnd(android.animation.Animator a) {
+
                     lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
                     holder.setLayoutParams(lp);
                 }
@@ -923,6 +1210,8 @@ public final class SoftUi {
             holder.setTag(FOLD_ANIM_TAG, va);
             va.start();
         } else {
+
+            reapplyEdgeInsets(holder);
             int fromH = holder.getHeight() > 0 ? holder.getHeight() : measureContentHeight(holder);
             ValueAnimator va = ValueAnimator.ofInt(fromH, 0);
             va.setDuration(180);
@@ -933,7 +1222,8 @@ public final class SoftUi {
             });
             va.addListener(new android.animation.AnimatorListenerAdapter() {
                 @Override public void onAnimationEnd(android.animation.Animator a) {
-                    lp.height = 0;
+
+                    lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
                     holder.setLayoutParams(lp);
                     holder.setVisibility(View.GONE);
                 }
@@ -943,12 +1233,207 @@ public final class SoftUi {
         }
     }
     private static final int FOLD_ANIM_TAG = "softui_fold_anim".hashCode();
+
+    private static void reapplyEdgeInsets(View v) {
+        try {
+            android.view.ViewParent p = v == null ? null : v.getParent();
+            while (p instanceof android.view.View) {
+                if (p instanceof Card) { ((Card) p).applyEdgeInsets(-1f); return; }
+                p = ((android.view.View) p).getParent();
+            }
+        } catch (Throwable ignored) {}
+    }
     public interface ConfirmCb {
         void onConfirm();
+    }
+
+    public static void infoDialog(View anchor, String title, String message, String closeText) {
+        try {
+            final ViewGroup host = resolveHost(anchor);
+            if (host == null) return;
+            final Context ctx = host.getContext();
+            final android.widget.ScrollView sample = scrollerOf(host);
+            final android.widget.FrameLayout overlay = new android.widget.FrameLayout(ctx);
+            overlay.setBackgroundColor(SCRIM);
+            overlay.setClickable(true);
+            overlay.setFocusable(true);
+            final android.widget.FrameLayout panel = new android.widget.FrameLayout(ctx);
+            panel.setClickable(true);
+            float corner = 28f;
+            panel.setClipToOutline(true);
+            final float cornerFinal = corner;
+
+            final Runnable[] adjustPanelHeight = new Runnable[1];
+
+            final LiveGlass[] glassRef = new LiveGlass[1];
+            adjustPanelHeight[0] = () -> {
+                try {
+                    int w = panel.getWidth();
+                    if (w <= 0) w = ctx.getResources().getDisplayMetrics().widthPixels - dp(ctx, 24f);
+                    panel.measure(
+                            View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+                            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+                    int targetH = panel.getMeasuredHeight();
+                    android.widget.FrameLayout.LayoutParams p2 =
+                            (android.widget.FrameLayout.LayoutParams) panel.getLayoutParams();
+                    if (p2 != null) {
+                        p2.height = targetH;
+                        panel.setLayoutParams(p2);
+                    }
+                } catch (Throwable ignored) {}
+            };
+            panel.setOutlineProvider(new android.view.ViewOutlineProvider() {
+                @Override public void getOutline(View v, android.graphics.Outline o) {
+                    int w = v.getWidth(), h = v.getHeight();
+                    if (w <= 0 || h <= 0) { o.setEmpty(); return; }
+                    o.setRoundRect(0, 0, w, h, dp(v.getContext(), cornerFinal));
+                }
+            });
+            LinearLayout inner = new LinearLayout(ctx);
+            inner.setOrientation(LinearLayout.VERTICAL);
+            int pad = dp(ctx, PAD + 6f);
+            inner.setPadding(pad, pad, pad, pad);
+            if (title != null && title.length() > 0) {
+                TextView tvT = text(ctx, title, BODY_SIZE + 2f, TEXT_PRIMARY);
+                tvT.setTypeface(tvT.getTypeface(), android.graphics.Typeface.BOLD);
+                tvT.setGravity(Gravity.CENTER);
+                LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT);
+                tlp.bottomMargin = dp(ctx, 12f);
+                inner.addView(tvT, tlp);
+            }
+            final Runnable[] dismiss = new Runnable[1];
+            final android.widget.ScrollView msgScroll;
+            if (message != null && message.length() > 0) {
+                TextView tvM = text(ctx, message, SUB_SIZE + 2f, TEXT_SECONDARY);
+                tvM.setGravity(Gravity.START);
+                tvM.setLineSpacing(dp(ctx, 5f), 1f);
+                msgScroll = new android.widget.ScrollView(ctx);
+
+                msgScroll.setVerticalFadingEdgeEnabled(true);
+                msgScroll.setFadingEdgeLength(dp(ctx, 20f));
+                msgScroll.setVerticalScrollBarEnabled(false);
+                msgScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+                msgScroll.addView(tvM, new android.widget.FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT));
+                LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT);
+                mlp.bottomMargin = dp(ctx, 16f);
+                inner.addView(msgScroll, mlp);
+                final int maxMsgH = Math.round(ctx.getResources()
+                        .getDisplayMetrics().heightPixels * 0.55f);
+
+                tvM.post(new Runnable() {
+                    @Override public void run() {
+                        try {
+                            int h = tvM.getHeight();
+                            if (h <= 0) h = tvM.getMeasuredHeight();
+                            if (h > maxMsgH) {
+                                android.view.ViewGroup.LayoutParams lp = msgScroll.getLayoutParams();
+                                lp.height = maxMsgH;
+                                msgScroll.setLayoutParams(lp);
+                            }
+                            adjustPanelHeight[0].run();
+                        } catch (Throwable ignored) {}
+                    }
+                });
+            } else {
+                msgScroll = null;
+            }
+            LinearLayout btnRow = new LinearLayout(ctx);
+            btnRow.setOrientation(LinearLayout.HORIZONTAL);
+            final String closeLabel = (closeText == null ? "关闭" : closeText);
+            TextView btnClose = dialogButton(ctx, closeLabel, ACCENT, true, true);
+            LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(ctx, 46f));
+            btnRow.addView(btnClose, blp);
+            LinearLayout.LayoutParams brlp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+            brlp.topMargin = dp(ctx, 12f);
+            inner.addView(btnRow, brlp);
+            panel.addView(inner, new android.widget.FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT));
+            android.widget.FrameLayout.LayoutParams plp =
+                    new android.widget.FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT);
+            plp.gravity = Gravity.BOTTOM;
+            plp.leftMargin = dp(ctx, 12f);
+            plp.rightMargin = dp(ctx, 12f);
+            plp.bottomMargin = dp(ctx, 40f);
+            overlay.addView(panel, plp);
+
+            panel.post(new Runnable() {
+                @Override public void run() {
+                    adjustPanelHeight[0].run();
+                    if (sample != null) {
+                        try {
+                            LiveGlass g = new LiveGlass(ctx, sample, BLUR_RADIUS, GLASS_TINT, cornerFinal);
+                            g.setClickable(false);
+                            glassRef[0] = g;
+                            panel.addView(g, 0, new android.widget.FrameLayout.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT));
+                            g.start();
+                        } catch (Throwable t2) {
+                            com.shortcutblur.ModuleLog.e("SoftUi", "infoDialog glass failed", t2);
+                            panel.setBackground(roundRect(CARD_FILL, cornerFinal, ctx));
+                        }
+                    } else {
+                        panel.setBackground(roundRect(DIALOG_FILL, cornerFinal, ctx));
+                    }
+                }
+            });
+            dismiss[0] = () -> {
+                if (overlay.getParent() == null) return;
+
+                final LiveGlass dg = glassRef[0];
+                panel.animate().translationY(dp(ctx, 80f)).setDuration(200)
+                        .setInterpolator(new android.view.animation.AccelerateInterpolator())
+                        .setUpdateListener(a -> { if (dg != null) dg.doTick(); })
+                        .start();
+                overlay.animate().alpha(0f).setDuration(200)
+                        .setListener(new android.animation.AnimatorListenerAdapter() {
+                            @Override public void onAnimationEnd(android.animation.Animator a) {
+                                host.removeView(overlay);
+                            }
+                        }).start();
+            };
+            btnClose.setOnClickListener(v -> dismiss[0].run());
+            overlay.setOnClickListener(v -> dismiss[0].run());
+            host.addView(overlay, new android.view.ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT));
+            overlay.setAlpha(0f);
+            overlay.animate().alpha(1f).setDuration(180).start();
+            panel.setTranslationY(dp(ctx, 80f));
+
+            final android.animation.ValueAnimator enter = android.animation.ValueAnimator.ofFloat(dp(ctx, 80f), 0f);
+            enter.setDuration(240);
+            enter.setInterpolator(new android.view.animation.DecelerateInterpolator());
+            enter.addUpdateListener(a -> {
+                panel.setTranslationY((Float) a.getAnimatedValue());
+                LiveGlass g = glassRef[0];
+                if (g != null) g.doTick();
+            });
+            enter.start();
+        } catch (Throwable t) {
+            com.shortcutblur.ModuleLog.e("SoftUi", "infoDialog failed", t);
+        }
     }
     public static void confirm(View anchor, String title, String message,
                                String okText, String cancelText,
                                final ConfirmCb onConfirm) {
+        confirm(anchor, title, message, okText, cancelText, onConfirm, null);
+    }
+    public static void confirm(View anchor, String title, String message,
+                               String okText, String cancelText,
+                               final ConfirmCb onConfirm, final ConfirmCb onCancel) {
         try {
             final ViewGroup host = resolveHost(anchor);
             if (host == null) {
@@ -958,14 +1443,34 @@ public final class SoftUi {
             final Context ctx = host.getContext();
             final android.widget.ScrollView sample = scrollerOf(host);
             final android.widget.FrameLayout overlay = new android.widget.FrameLayout(ctx);
-            overlay.setBackgroundColor(0x4D000000);
+            overlay.setBackgroundColor(SCRIM);
             overlay.setClickable(true);
             overlay.setFocusable(true);
             final android.widget.FrameLayout panel = new android.widget.FrameLayout(ctx);
             panel.setClickable(true);
-            float corner = 25f;
+            float corner = 28f;
             panel.setClipToOutline(true);
             final float cornerFinal = corner;
+
+            final Runnable[] adjustPanelHeight = new Runnable[1];
+
+            final LiveGlass[] glassRef = new LiveGlass[1];
+            adjustPanelHeight[0] = () -> {
+                try {
+                    int w = panel.getWidth();
+                    if (w <= 0) w = ctx.getResources().getDisplayMetrics().widthPixels - dp(ctx, 24f);
+                    panel.measure(
+                            View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+                            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+                    int targetH = panel.getMeasuredHeight();
+                    android.widget.FrameLayout.LayoutParams p2 =
+                            (android.widget.FrameLayout.LayoutParams) panel.getLayoutParams();
+                    if (p2 != null) {
+                        p2.height = targetH;
+                        panel.setLayoutParams(p2);
+                    }
+                } catch (Throwable ignored) {}
+            };
             panel.setOutlineProvider(new android.view.ViewOutlineProvider() {
                 @Override public void getOutline(View v, android.graphics.Outline o) {
                     int w = v.getWidth(), h = v.getHeight();
@@ -991,11 +1496,38 @@ public final class SoftUi {
                 TextView tvM = text(ctx, message, SUB_SIZE + 2f, TEXT_SECONDARY);
                 tvM.setGravity(Gravity.CENTER);
                 tvM.setLineSpacing(dp(ctx, 5f), 1f);
+
+                final android.widget.ScrollView msgScroll = new android.widget.ScrollView(ctx);
+
+                msgScroll.setVerticalFadingEdgeEnabled(true);
+                msgScroll.setFadingEdgeLength(dp(ctx, 20f));
+                msgScroll.setVerticalScrollBarEnabled(false);
+                msgScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+                msgScroll.addView(tvM, new android.widget.FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT));
                 LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT);
                 mlp.bottomMargin = dp(ctx, 16f);
-                inner.addView(tvM, mlp);
+                inner.addView(msgScroll, mlp);
+
+                final int maxMsgH = Math.round(ctx.getResources()
+                        .getDisplayMetrics().heightPixels * 0.55f);
+                tvM.post(new Runnable() {
+                    @Override public void run() {
+                        try {
+                            int h = tvM.getHeight();
+                            if (h <= 0) h = tvM.getMeasuredHeight();
+                            if (h > maxMsgH) {
+                                android.view.ViewGroup.LayoutParams lp = msgScroll.getLayoutParams();
+                                lp.height = maxMsgH;
+                                msgScroll.setLayoutParams(lp);
+                            }
+                            adjustPanelHeight[0].run();
+                        } catch (Throwable ignored) {}
+                    }
+                });
             }
             LinearLayout btnRow = new LinearLayout(ctx);
             btnRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -1003,10 +1535,17 @@ public final class SoftUi {
             final String cancelLabel = (cancelText == null ? "取消" : cancelText);
             final String okLabel = (okText == null ? "确定" : okText);
             final Runnable[] dismiss = new Runnable[1];
+            final Runnable invokeCancel = () -> {
+                if (onCancel != null) {
+                    try { onCancel.onConfirm(); } catch (Throwable ignored) {}
+                }
+            };
             dismiss[0] = () -> {
                 if (overlay.getParent() == null) return;
+                final LiveGlass dg = glassRef[0];
                 panel.animate().translationY(dp(ctx, 80f)).setDuration(200)
                         .setInterpolator(new android.view.animation.AccelerateInterpolator())
+                        .setUpdateListener(a -> { if (dg != null) dg.doTick(); })
                         .start();
                 overlay.animate().alpha(0f).setDuration(200)
                         .setListener(new android.animation.AnimatorListenerAdapter() {
@@ -1016,7 +1555,7 @@ public final class SoftUi {
                         }).start();
             };
             TextView btnCancel = dialogButton(ctx, cancelLabel, TEXT_SECONDARY, false, true);
-            btnCancel.setOnClickListener(v -> dismiss[0].run());
+            btnCancel.setOnClickListener(v -> { dismiss[0].run(); invokeCancel.run(); });
             LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
                     0, dp(ctx, 46f), 1f);
             clp.rightMargin = dp(ctx, 8f);
@@ -1030,49 +1569,66 @@ public final class SoftUi {
                     0, dp(ctx, 46f), 1f);
             olp.leftMargin = dp(ctx, 8f);
             btnRow.addView(btnOk, olp);
-            inner.addView(btnRow, new LinearLayout.LayoutParams(
+
+            LinearLayout.LayoutParams brlp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
-                    0,
-                    1f));
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+            brlp.topMargin = dp(ctx, 12f);
+            inner.addView(btnRow, brlp);
             panel.addView(inner, new android.widget.FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT));
-            int screenH = ctx.getResources().getDisplayMetrics().heightPixels;
-            int panelH = Math.round(screenH * 0.25f);
+                    ViewGroup.LayoutParams.WRAP_CONTENT));
+
             android.widget.FrameLayout.LayoutParams plp =
                     new android.widget.FrameLayout.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
-                            panelH);
+                            ViewGroup.LayoutParams.WRAP_CONTENT);
             plp.gravity = Gravity.BOTTOM;
             plp.leftMargin = dp(ctx, 12f);
             plp.rightMargin = dp(ctx, 12f);
             plp.bottomMargin = dp(ctx, 40f);
             overlay.addView(panel, plp);
-            overlay.setOnClickListener(v -> dismiss[0].run());
+
+            final float cornerForGlass = cornerFinal;
+            panel.post(new Runnable() {
+                @Override public void run() {
+                    adjustPanelHeight[0].run();
+
+                    if (sample != null) {
+                        try {
+                            LiveGlass g = new LiveGlass(ctx, sample, BLUR_RADIUS, GLASS_TINT, cornerForGlass);
+                            g.setClickable(false);
+                            glassRef[0] = g;
+                            panel.addView(g, 0, new android.widget.FrameLayout.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT));
+                            g.start();
+                        } catch (Throwable t2) {
+                            com.shortcutblur.ModuleLog.e("SoftUi", "confirm glass failed", t2);
+                            panel.setBackground(roundRect(CARD_FILL, cornerForGlass, ctx));
+                        }
+                    } else {
+                        panel.setBackground(roundRect(DIALOG_FILL, cornerForGlass, ctx));
+                    }
+                }
+            });
+            overlay.setOnClickListener(v -> { dismiss[0].run(); invokeCancel.run(); });
             host.addView(overlay, new android.view.ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT));
-            if (sample != null) {
-                try {
-                    LiveGlass g = new LiveGlass(ctx, sample, BLUR_RADIUS, GLASS_TINT, cornerFinal);
-                    g.setClickable(false);
-                    panel.addView(g, 0, new android.widget.FrameLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT));
-                    g.start();
-                } catch (Throwable t2) {
-                    com.shortcutblur.ModuleLog.e("SoftUi", "confirm glass failed", t2);
-                    panel.setBackground(roundRect(CARD_FILL, cornerFinal, ctx));
-                }
-            } else {
-                panel.setBackground(roundRect(0xF2FFFFFF, cornerFinal, ctx));
-            }
             overlay.setAlpha(0f);
             overlay.animate().alpha(1f).setDuration(180).start();
             panel.setTranslationY(dp(ctx, 80f));
-            panel.animate().translationY(0f).setDuration(240)
-                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
-                    .start();
+
+            final android.animation.ValueAnimator enter = android.animation.ValueAnimator.ofFloat(dp(ctx, 80f), 0f);
+            enter.setDuration(240);
+            enter.setInterpolator(new android.view.animation.DecelerateInterpolator());
+            enter.addUpdateListener(a -> {
+                panel.setTranslationY((Float) a.getAnimatedValue());
+                LiveGlass g = glassRef[0];
+                if (g != null) g.doTick();
+            });
+            enter.start();
         } catch (Throwable t) {
             com.shortcutblur.ModuleLog.e("SoftUi", "confirm dialog failed", t);
             if (onConfirm != null) onConfirm.onConfirm();
@@ -1089,6 +1645,208 @@ public final class SoftUi {
         }
         return null;
     }
+
+    public static View segmentRow(Context c, String title, final String[] labels,
+                                  int selected, final IntCb cb) {
+        final SegmentedView seg = new SegmentedView(c, labels, selected, cb);
+        LinearLayout line = new LinearLayout(c);
+        line.setOrientation(LinearLayout.HORIZONTAL);
+        line.setGravity(Gravity.CENTER_VERTICAL);
+        line.setMinimumHeight(dp(c, ROW_H));
+        if (title != null && title.length() > 0) {
+            TextView tv = text(c, title, BODY_SIZE, TEXT_PRIMARY);
+            line.addView(tv, new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        } else {
+            line.addView(new View(c), new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        }
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                dp(c, 192f), dp(c, 32f));
+        line.setClipChildren(false);
+        line.setClipToPadding(false);
+        line.addView(seg, slp);
+
+        line.post(() -> {
+            android.view.ViewParent p = line.getParent();
+            while (p instanceof android.view.ViewGroup) {
+                android.view.ViewGroup g = (android.view.ViewGroup) p;
+                g.setClipChildren(false);
+                g.setClipToPadding(false);
+                p = g.getParent();
+            }
+        });
+        return line;
+    }
+
+    public interface IntCb { void run(int index); }
+
+    public static class SegmentedView extends View {
+        private final String[] labels;
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF rect = new RectF();
+        private final android.graphics.RectF thumb = new RectF();
+        private final Paint tp = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final android.text.TextPaint txp = new android.text.TextPaint(Paint.ANTI_ALIAS_FLAG);
+        private int selected;
+        private float anim;
+        private ValueAnimator animator;
+        private float pressScale = 1f;
+        private ValueAnimator scaleAnimator;
+        private final IntCb cb;
+        public SegmentedView(Context c, String[] labels, int selected, IntCb cb) {
+            super(c);
+            this.labels = labels;
+            this.selected = Math.max(0, Math.min(labels.length - 1, selected));
+            this.anim = this.selected;
+            this.cb = cb;
+            setClickable(true);
+        }
+        @Override protected void onMeasure(int w, int h) {
+            setMeasuredDimension(getLayoutParams() != null && getLayoutParams().width > 0
+                    ? getLayoutParams().width : dp(getContext(), 192f),
+                    getLayoutParams() != null && getLayoutParams().height > 0
+                            ? getLayoutParams().height : dp(getContext(), 32f));
+        }
+        private void select(int idx, boolean notify) {
+            if (idx < 0 || idx >= labels.length) return;
+            if (idx == selected) return;
+            if (animator != null) animator.cancel();
+            final int target = idx;
+            animator = ValueAnimator.ofFloat(anim, idx);
+            animator.setDuration(220L);
+            animator.setInterpolator(new android.view.animation.DecelerateInterpolator());
+            animator.addUpdateListener(a -> { anim = (Float) a.getAnimatedValue(); invalidate(); });
+            animator.addListener(new android.animation.AnimatorListenerAdapter() {
+                @Override public void onAnimationEnd(android.animation.Animator a) {
+                    anim = target;
+                    invalidate();
+
+                    if (notify && cb != null) cb.run(target);
+                }
+            });
+            animator.start();
+            selected = idx;
+        }
+        public int selectedIndex() { return selected; }
+
+        private void animatePress(boolean down) {
+            final float target = down ? 1.12f : 1.0f;
+            if (scaleAnimator != null) scaleAnimator.cancel();
+            scaleAnimator = ValueAnimator.ofFloat(pressScale, target);
+            scaleAnimator.setDuration(down ? 130L : 180L);
+            scaleAnimator.setInterpolator(down
+                    ? new android.view.animation.DecelerateInterpolator()
+                    : new android.view.animation.OvershootInterpolator(1.6f));
+            scaleAnimator.addUpdateListener(a -> {
+                pressScale = (Float) a.getAnimatedValue();
+                invalidate();
+            });
+            scaleAnimator.start();
+        }
+        @Override public boolean onTouchEvent(android.view.MotionEvent e) {
+            float segW = getWidth() / (float) labels.length;
+            switch (e.getActionMasked()) {
+                case android.view.MotionEvent.ACTION_DOWN:
+
+                    if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(true);
+                    dragging = true;
+                    downX = e.getX();
+                    moved = false;
+                    animatePress(true);
+
+                    return true;
+                case android.view.MotionEvent.ACTION_MOVE:
+                    if (dragging) {
+                        if (Math.abs(e.getX() - downX) > dp(getContext(), 4f)) moved = true;
+                        if (moved) snapToIndex(e.getX(), segW, false);
+                    }
+                    return true;
+                case android.view.MotionEvent.ACTION_UP:
+                case android.view.MotionEvent.ACTION_CANCEL:
+                    if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(false);
+                    if (dragging) {
+                        dragging = false;
+                        final int idx = indexAt(e.getX(), segW);
+                        commitTo(idx);
+                    }
+                    animatePress(false);
+                    performClick();
+                    return true;
+            }
+            return true;
+        }
+        private boolean dragging = false;
+        private float downX = 0f;
+        private boolean moved = false;
+
+        private void snapToIndex(float x, float segW, boolean notify) {
+            if (animator != null) { animator.cancel(); animator = null; }
+            float t = Math.max(0f, Math.min(labels.length - 1, x / segW));
+            anim = t;
+            invalidate();
+        }
+        private int indexAt(float x, float segW) {
+            return Math.max(0, Math.min(labels.length - 1, (int) (x / segW)));
+        }
+
+        private void commitTo(final int idx) {
+            final int clamped = Math.max(0, Math.min(labels.length - 1, idx));
+            final boolean changed = (clamped != selected);
+            selected = clamped;
+            if (animator != null) animator.cancel();
+            animator = ValueAnimator.ofFloat(anim, selected);
+            animator.setDuration(180L);
+            animator.setInterpolator(new android.view.animation.DecelerateInterpolator());
+            animator.addUpdateListener(a -> { anim = (Float) a.getAnimatedValue(); invalidate(); });
+            animator.addListener(new android.animation.AnimatorListenerAdapter() {
+                @Override public void onAnimationEnd(android.animation.Animator a) {
+                    anim = selected;
+                    invalidate();
+                    if (changed && cb != null) cb.run(selected);
+                }
+            });
+            animator.start();
+        }
+        @Override public boolean performClick() { super.performClick(); return true; }
+        @Override protected void onDraw(Canvas cv) {
+            float w = getWidth(), h = getHeight();
+            float r = h / 2f;
+
+            paint.setColor(DARK ? 0x66000000 : 0x16000000);
+            rect.set(0, 0, w, h);
+            cv.drawRoundRect(rect, r, r, paint);
+
+            float segW = w / labels.length;
+            float pad = dp(getContext(), 2f);
+            float left = pad + segW * anim;
+            thumb.set(left, pad, left + (segW - pad * 2), h - pad);
+
+            if (pressScale != 1f) {
+                float cxT = thumb.centerX(), cyT = thumb.centerY();
+                float hw = thumb.width() / 2f * pressScale;
+                float hh = thumb.height() / 2f * pressScale;
+                thumb.set(cxT - hw, cyT - hh, cxT + hw, cyT + hh);
+            }
+            tp.setColor(DARK ? 0xFF636366 : 0xFFFFFFFF);
+            tp.setShadowLayer(dp(getContext(), 3f), 0f, dp(getContext(), 1f),
+                    DARK ? 0x40000000 : 0x22000000);
+            cv.drawRoundRect(thumb, thumb.height() / 2f, thumb.height() / 2f, tp);
+            tp.clearShadowLayer();
+
+            txp.setTextSize(dp(getContext(), 13.5f));
+            txp.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            txp.setTextAlign(Paint.Align.CENTER);
+            float baseline = h / 2f - (txp.descent() + txp.ascent()) / 2f;
+            for (int i = 0; i < labels.length; i++) {
+                float cx = segW * i + segW / 2f;
+
+                boolean on = Math.abs(anim - i) < 0.5f;
+                txp.setColor(on ? (DARK ? 0xFFFFFFFF : 0xFF000000) : TEXT_SECONDARY);
+                cv.drawText(labels[i], cx, baseline, txp);
+            }
+        }
+    }
     private static TextView dialogButton(Context c, String label, int color,
                                          boolean filled, boolean stretch) {
         TextView t = text(c, label, BODY_SIZE, filled ? 0xFFFFFFFF : color);
@@ -1096,8 +1854,8 @@ public final class SoftUi {
         final float radius = dp(c, 24f);
         int ph = stretch ? dp(c, 8f) : dp(c, 22f), pv = dp(c, 10f);
         t.setPadding(ph, pv, ph, pv);
-        final int baseColor = filled ? ACCENT : 0x14000000;
-        final int pressColor = filled ? darken(ACCENT, 0.85f) : 0x28000000;
+        final int baseColor = filled ? ACCENT : BTN_SUBTLE;
+        final int pressColor = filled ? darken(ACCENT, 0.85f) : BTN_SUBTLE_PRESS;
         final android.graphics.drawable.GradientDrawable bg =
                 new android.graphics.drawable.GradientDrawable();
         bg.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
@@ -1168,6 +1926,16 @@ public final class SoftUi {
         Row r = new Row(c, title, sw, false);
         if (extraDp > 0f) r.indent(c, extraDp);
         if (rowClickable) r.setRowClickSwitch(sw);
+
+        r.post(() -> {
+            android.view.ViewParent p = r.getParent();
+            while (p instanceof android.view.ViewGroup) {
+                android.view.ViewGroup g = (android.view.ViewGroup) p;
+                g.setClipChildren(false);
+                g.setClipToPadding(false);
+                p = g.getParent();
+            }
+        });
         return r;
     }
     public static TextView group(Context c, String title) {
@@ -1183,6 +1951,7 @@ public final class SoftUi {
     public static Row link(Context c, String title, final OnClick cb) {
         TextView arrow = text(c, "›", BODY_SIZE + 4, TEXT_SECONDARY);
         Row r = new Row(c, title, arrow, false);
+        pressFeedback(r);
         r.setOnClickListener(v -> { if (cb != null) cb.onClick(); });
         return r;
     }
@@ -1191,6 +1960,7 @@ public final class SoftUi {
     }
     public static Row action(Context c, String title, View right, final OnClick cb) {
         Row r = new Row(c, title, right, false);
+        pressFeedback(r);
         r.setOnClickListener(v -> { if (cb != null) cb.onClick(); });
         return r;
     }
@@ -1227,6 +1997,7 @@ public final class SoftUi {
         outer.setGravity(Gravity.CENTER_VERTICAL);
         outer.addView(line, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        pressFeedback(outer);
         outer.setOnClickListener(v -> { if (cb != null) cb.onClick(); });
         return outer;
     }
@@ -1242,6 +2013,7 @@ public final class SoftUi {
         alp.leftMargin = dp(c, 6f);
         wrap.addView(arrow, alp);
         Row r = new Row(c, title, wrap, false);
+        pressFeedback(r);
         r.setOnClickListener(v -> { if (cb != null) cb.onClick(); });
         return r;
     }
@@ -1297,6 +2069,9 @@ public final class SoftUi {
         col.addView(line, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
+        col.setClickable(true);
+        col.setFocusable(true);
+        pressFeedback(col);
         col.setOnClickListener(v -> { if (cb != null) cb.onClick(); });
         return col;
     }
@@ -1322,7 +2097,18 @@ public final class SoftUi {
             }
         });
         right.addView(sl);
-        return new Row(c, title, right, false);
+        Row row = new Row(c, title, right, false);
+
+        row.post(() -> {
+            android.view.ViewParent p = row.getParent();
+            while (p instanceof android.view.ViewGroup) {
+                android.view.ViewGroup g = (android.view.ViewGroup) p;
+                g.setClipChildren(false);
+                g.setClipToPadding(false);
+                p = g.getParent();
+            }
+        });
+        return row;
     }
     private static String fmt(float v) {
         if (v == (long) v) return String.valueOf((long) v);
@@ -1550,6 +2336,16 @@ public final class SoftUi {
     public static void scrollToTop(View shell) {
         android.widget.ScrollView sc = scrollerOf(shell);
         if (sc != null) sc.scrollTo(0, 0);
+    }
+
+    public static int scrollY(View shell) {
+        android.widget.ScrollView sc = scrollerOf(shell);
+        return sc != null ? sc.getScrollY() : 0;
+    }
+
+    public static void scrollToY(View shell, int y) {
+        android.widget.ScrollView sc = scrollerOf(shell);
+        if (sc != null) sc.scrollTo(0, Math.max(0, y));
     }
     public static void setTitle(View root, String title) {
         if (root == null || title == null) return;

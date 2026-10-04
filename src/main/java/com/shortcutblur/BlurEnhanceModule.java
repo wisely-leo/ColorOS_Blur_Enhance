@@ -1182,6 +1182,8 @@ public class BlurEnhanceModule extends XposedModule {
                 java.util.List<Object> args = chain.getArgs();
                 Object vg = args.size() > 1 ? args.get(1) : null;
                 if (vg instanceof ViewGroup) {
+
+                    WidgetBlurAttacher.resetGiveUp((View) vg);
                     WidgetBlurAttacher.attach("[apply]", (View) vg, cl);
                 }
                 try { GlyphBlurRenderer.notifyContentMaybeChangedAll(); } catch (Throwable ignored) {}
@@ -1202,6 +1204,8 @@ public class BlurEnhanceModule extends XposedModule {
                 if (self instanceof View) {
                     View v = (View) self;
                     if (v instanceof ViewGroup) {
+
+                        WidgetBlurAttacher.resetGiveUp(v);
                         WidgetBlurAttacher.attach("[ahv]", v, cl);
                     }
                     GlyphBlurRenderer.onWidgetUpdated(v);

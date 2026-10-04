@@ -1,7 +1,8 @@
 package com.shortcutblur;
 public final class FeatureFlags {
     public static volatile boolean SHORTCUT_BLUR = true;
-    public static volatile boolean RECENTS_BLUR = true;
+
+    public static volatile boolean RECENTS_BLUR = false;
     public static volatile boolean WIDGET_BLUR = true;
     public static volatile boolean QUICKSEARCH_BLUR = true;
     public static volatile boolean POSTEFFECT = true;

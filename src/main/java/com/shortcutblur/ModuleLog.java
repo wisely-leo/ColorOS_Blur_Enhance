@@ -90,6 +90,12 @@ public final class ModuleLog {
         try {
             if (Process.myUid() == UID_BLUR) return FILE_BLUR;
         } catch (Throwable ignored) {}
+
+        int pid = -1;
+        try { pid = Process.myPid(); } catch (Throwable ignored) {}
+        if (pid > 0) {
+            return "ColorOSBlurEnhance_p" + pid + ".log";
+        }
         return FILE;
     }
     private static File open() {

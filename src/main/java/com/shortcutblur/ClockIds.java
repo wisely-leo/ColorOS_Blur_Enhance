@@ -1,6 +1,7 @@
 package com.shortcutblur;
 public final class ClockIds {
     private ClockIds() {}
+
     public static final int HOUR     = 0x7f0a02cf;
     public static final int COLON    = 0x7f0a02c8;
     public static final int MINUTES  = 0x7f0a02d3;
@@ -13,10 +14,26 @@ public final class ClockIds {
     public static final int WEATHER_IMG2 = 0x7f0a0276;
     public static final int TARGET_ROOT = 0x7f0a017b;
     public static final int CONTAINER = 0x7f0a02ab;
+
+    public static final int HOUR17    = 0x7f0a02c8;
+    public static final int COLON17   = 0x7f0a02c1;
+    public static final int MINUTE17  = 0x7f0a02cc;
+
+    public static final int DATE17    = 0x7f0a02c3;
+    public static final int LUNAR17   = 0x7f0a02c4;
+    public static final int WICON17   = 0x7f0a0278;
+    public static final int TEMP17    = 0x7f0a02d3;
+
     public static final int[] TEXT_IDS = {
-            HOUR, COLON, MINUTES, DATE, WEATHER, WEEK, WEATHER2, LUNAR
+
+            HOUR, COLON, MINUTES, DATE, WEATHER, WEEK, WEATHER2, LUNAR,
+
+            HOUR17, COLON17, MINUTE17, DATE17, LUNAR17, TEMP17
     };
     public static final int[] ICON_IDS = {
-            WEATHER_IMG1, WEATHER_IMG2
+
+            WEATHER_IMG1, WEATHER_IMG2,
+
+            WICON17
     };
 }

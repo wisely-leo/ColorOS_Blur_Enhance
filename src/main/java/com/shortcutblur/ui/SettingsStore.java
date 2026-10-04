@@ -12,14 +12,44 @@ public final class SettingsStore {
     private static final String KEY_BG_FILE     = "bg_file";
     private static final String KEY_LOG         = "log";
     private static final String KEY_QS_PROBE    = "quicksearch_blur";
+    private static final String KEY_THEME_MODE  = "theme_mode";
+
+    private static final String KEY_LAST_VERCODE = "last_version_code";
+
+    public static volatile boolean sUpgradeClosedRecents = false;
     private final SharedPreferences sp;
     private final Context ctx;
     public SettingsStore(Context ctx) {
         this.ctx = ctx.getApplicationContext() != null ? ctx.getApplicationContext() : ctx;
         this.sp = this.ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE);
+        migrateOnUpgrade();
+    }
+
+    private void migrateOnUpgrade() {
+        try {
+            final long cur = versionCode();
+            if (cur <= 0) return;
+            final long last = sp.getLong(KEY_LAST_VERCODE, -1L);
+            if (last == cur) return;
+            boolean hadRecents = sp.getBoolean(KEY_RECENTS, DEF_RECENTS);
+            if (hadRecents) {
+                sp.edit().putBoolean(KEY_RECENTS, false).apply();
+                sUpgradeClosedRecents = true;
+                App.lg("[migrate] 版本 " + last + " -> " + cur
+                        + "：已自动关闭「最近任务模糊」（需手动重新启用）");
+
+                try { syncToHost(); } catch (Throwable ignored) {}
+            } else {
+                App.lg("[migrate] 版本 " + last + " -> " + cur + "：最近任务模糊本就未启用");
+            }
+            sp.edit().putLong(KEY_LAST_VERCODE, cur).apply();
+        } catch (Throwable t) {
+            App.lg("[migrate] EX: " + t);
+        }
     }
     public static final boolean DEF_SHORTCUT   = true;
-    public static final boolean DEF_RECENTS    = true;
+
+    public static final boolean DEF_RECENTS    = false;
     public static final boolean DEF_WIDGET     = true;
     public static final boolean DEF_POSTEFFECT = true;
     public static final float   DEF_SAMPLE_SCALE = 0.5f;
@@ -116,6 +146,10 @@ public final class SettingsStore {
     public float   getSampleScale(){ return sp.getFloat(KEY_SAMPLE_SCALE, DEF_SAMPLE_SCALE); }
     public boolean isLog()         { return sp.getBoolean(KEY_LOG, DEF_LOG); }
     public boolean isQsProbe()     { return sp.getBoolean(KEY_QS_PROBE, DEF_QS_PROBE); }
+
+    public static final int THEME_SYSTEM = 0, THEME_LIGHT = 1, THEME_DARK = 2;
+    public int getThemeMode()      { return sp.getInt(KEY_THEME_MODE, THEME_SYSTEM); }
+    public SettingsStore setThemeMode(int v) { sp.edit().putInt(KEY_THEME_MODE, v).apply(); return this; }
     public SettingsStore setShortcut(boolean v)   { sp.edit().putBoolean(KEY_SHORTCUT, v).apply(); syncToHost(); return this; }
     public SettingsStore setRecents(boolean v)    { sp.edit().putBoolean(KEY_RECENTS, v).apply(); syncToHost(); return this; }
     public SettingsStore setWidget(boolean v)     { sp.edit().putBoolean(KEY_WIDGET, v).apply(); syncToHost(); return this; }

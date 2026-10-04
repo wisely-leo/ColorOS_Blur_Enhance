@@ -4,15 +4,29 @@ import android.view.ViewGroup;
 import java.lang.reflect.Method;
 public class WidgetBlurAttacher {
     private static final int TYPE_WIDGET = 7;
-    private static final long ATTACH_RETRY_MS = 120L;
-    private static final int ATTACH_MAX_RETRY = 8;
+    private static final long ATTACH_RETRY_MS = 200L;
+    private static final int ATTACH_MAX_RETRY = 16;
     private static final java.util.WeakHashMap<View, Boolean> sDone = new java.util.WeakHashMap<View, Boolean>();
     private static final java.util.WeakHashMap<View, View> sDoneHost = new java.util.WeakHashMap<View, View>();
     private static final java.util.WeakHashMap<View, Boolean> sGaveUp = new java.util.WeakHashMap<View, Boolean>();
     private static final java.util.WeakHashMap<View, Boolean> sEverHit = new java.util.WeakHashMap<View, Boolean>();
+
     public static void attach(final String tag, final View root, final ClassLoader cl) {
         attach(tag, root, cl, 0);
     }
+
+    public static void resetGiveUp(final View root) {
+        if (root == null) return;
+        try {
+
+            synchronized (sGaveUp) { sGaveUp.remove(root); }
+            View host = ViewUtils.ancestorOfType(root, "AppWidgetHostView");
+            if (host != null) {
+                synchronized (sGaveUp) { sGaveUp.remove(host); }
+            }
+        } catch (Throwable ignored) {}
+    }
+
     private static void attach(final String tag, final View root, final ClassLoader cl, final int attempt) {
         if (root == null) return;
         try {
@@ -20,7 +34,9 @@ public class WidgetBlurAttacher {
             if (host == null) { ModuleLog.e("BW", tag + " host not found", null); return; }
             synchronized (sDoneHost) {
                 View bound = sDoneHost.get(host);
-                if (bound != null && Boolean.TRUE.equals(sDone.get(bound))) return;
+                if (bound != null && Boolean.TRUE.equals(sDone.get(bound))) {
+                    return;
+                }
             }
             View containerEarly = ViewUtils.findByViewId(root, ClockIds.TARGET_ROOT);
             boolean hasT = (containerEarly != null);
@@ -28,13 +44,14 @@ public class WidgetBlurAttacher {
                 synchronized (sEverHit) { sEverHit.put(root, Boolean.TRUE); }
                 synchronized (sGaveUp) { sGaveUp.remove(root); }
             } else {
-                if (Boolean.TRUE.equals(sGaveUp.get(root))) return;
+                if (Boolean.TRUE.equals(sGaveUp.get(root))) {
+                    return;
+                }
                 if (attempt >= ATTACH_MAX_RETRY && !Boolean.TRUE.equals(sEverHit.get(root))) {
                     synchronized (sGaveUp) { sGaveUp.put(root, Boolean.TRUE); }
                     return;
                 }
             }
-            if (host == null) { ModuleLog.e("BW", tag + " host not found", null); return; }
             Object launcher = ViewUtils.contextOfType(host.getContext(), "com.android.launcher.Launcher");
             if (launcher == null) { ModuleLog.e("BW", "no launcher", null); return; }
             View container = containerEarly;
