@@ -125,6 +125,14 @@ public class BlurEnhanceModule extends XposedModule {
                     ModuleLog.d("READY", "clock alpha disabled by flag, skip");
                 }
             }
+            if (GalleryLightHook.PKG_GALLERY.equals(pkg)) {
+                if (FeatureFlags.GALLERY_LIGHT) {
+                    GalleryLightHook.install(this, param.getClassLoader(), null);
+                } else {
+                    ModuleLog.d("READY", "gallery light disabled by flag, skip");
+                }
+                return;
+            }
             ClassLoader anyLoader = param.getClassLoader();
             if (anyLoader != null) {
                 if (FeatureFlags.WIDGET_BLUR) {

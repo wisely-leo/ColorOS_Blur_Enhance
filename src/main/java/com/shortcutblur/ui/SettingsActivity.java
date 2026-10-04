@@ -302,7 +302,14 @@ public class SettingsActivity extends Activity {
     }
 
     private static final String CHANGELOG =
-            "v44.1\n"
+            "v44.2\n"
+            + "· 新增「相册强制白色主题」（默认开启）\n"
+            + "  · 强制相册照片页使用浅色背景\n"
+            + "  · 需在 LSPosed 中把本模块作用域勾选「相册」后重启相册生效\n"
+            + "· 调整升级迁移策略：「最近任务模糊增强」仅在从 v44 及更早版本升级时自动关闭一次；\n"
+            + "  从 v44.1 及更高版本升级将完全尊重你的设置（不再强制关闭）\n"
+            + "\n"
+            + "v44.1\n"
             + "· 适配 17 版时钟组件（布局改版导致旧 ID 白名单失效）\n"
             + "· 修复 4×2 布局组件刚放置时无模糊的问题\n"
             + "· 「最近任务模糊增强」调整为实验性功能（默认关闭）\n"
@@ -531,7 +538,9 @@ public class SettingsActivity extends Activity {
                     SoftUi.toggle(this, "小组件模糊（含时钟）", store.isWidget(),
                             v -> store.setWidget(v)),
                     SoftUi.toggle(this, "下拉搜索实时模糊", store.isQsProbe(),
-                            v -> store.setQsProbe(v)));
+                            v -> store.setQsProbe(v)),
+                    SoftUi.toggle(this, "相册强制白色主题", store.isGalleryLight(),
+                            v -> store.setGalleryLight(v)));
 
             final SoftUi.Row recentsRow = SoftUi.toggle(this,
                     "最近任务模糊增强（实验性）", store.isRecents(), null, 0f, false);

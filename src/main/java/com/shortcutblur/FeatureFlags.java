@@ -5,6 +5,7 @@ public final class FeatureFlags {
     public static volatile boolean RECENTS_BLUR = false;
     public static volatile boolean WIDGET_BLUR = true;
     public static volatile boolean QUICKSEARCH_BLUR = true;
+    public static volatile boolean GALLERY_LIGHT = true;
     public static volatile boolean POSTEFFECT = true;
     public static volatile float SAMPLE_SCALE = 0.5f;
     public static volatile boolean LOG_ENABLED = false;
@@ -73,6 +74,8 @@ public final class FeatureFlags {
         if (b != null) POSTEFFECT = b;
         b = readSettingBool(cr, "coloros_blur_feature_quicksearch");
         if (b != null) QUICKSEARCH_BLUR = b;
+        b = readSettingBool(cr, "coloros_blur_feature_gallery_light");
+        if (b != null) GALLERY_LIGHT = b;
         try {
             String s = android.provider.Settings.System.getString(cr, "coloros_blur_feature_sample_scale");
             if (s != null) {
@@ -113,6 +116,10 @@ public final class FeatureFlags {
             case "quicksearch":
             case "qs_blur":
                 QUICKSEARCH_BLUR = parseBool(v, QUICKSEARCH_BLUR);
+                break;
+            case "gallery_light":
+            case "gallery_light_theme":
+                GALLERY_LIGHT = parseBool(v, GALLERY_LIGHT);
                 break;
             case "log_enabled":
             case "log":
