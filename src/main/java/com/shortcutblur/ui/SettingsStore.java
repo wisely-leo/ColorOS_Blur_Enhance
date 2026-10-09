@@ -9,6 +9,11 @@ public final class SettingsStore {
     private static final String KEY_WIDGET      = "widget_blur";
     private static final String KEY_POSTEFFECT  = "posteffect";
     private static final String KEY_SAMPLE_SCALE= "sample_scale";
+
+    private static final String KEY_IME_BLUR        = "ime_blur";
+    private static final String KEY_IME_BLUR_RADIUS = "ime_blur_radius";
+    private static final String KEY_IME_BLUR_CORNER = "ime_blur_corner";
+    private static final String KEY_IME_BLUR_MASK   = "ime_blur_mask";
     private static final String KEY_BG_FILE     = "bg_file";
     private static final String KEY_LOG         = "log";
     private static final String KEY_QS_PROBE    = "quicksearch_blur";
@@ -65,6 +70,11 @@ public final class SettingsStore {
     public static final boolean DEF_WIDGET     = true;
     public static final boolean DEF_POSTEFFECT = true;
     public static final float   DEF_SAMPLE_SCALE = 0.5f;
+
+    public static final boolean DEF_IME_BLUR        = false;
+    public static final float   DEF_IME_BLUR_RADIUS = 100f;
+    public static final float   DEF_IME_BLUR_CORNER = 0f;
+    public static final float   DEF_IME_BLUR_MASK   = 1.0f;
     public static final boolean DEF_LOG        = false;
     public static final boolean DEF_QS_PROBE   = true;
     public static final boolean DEF_GALLERY_LIGHT = true;
@@ -77,6 +87,7 @@ public final class SettingsStore {
             "com.android.launcher",
             "com.oplus.blur",
             "com.heytap.quicksearchbox",
+            "com.yuyan.pinyin.offline.release",
     };
     public static final String ACTION_SETCONF = "com.wiselyleo.blurenhance.SETCONF";
     private static final String PUBLIC_DIR = "/data/local/tmp/ColorOSBlurEnhance";
@@ -140,6 +151,10 @@ public final class SettingsStore {
         sb.append("clock_glass=").append(isClockGlass() ? 1 : 0).append("\n");
         sb.append("clock_glass_blend=").append(Integer.toHexString(getClockGlassBlend())).append("\n");
         sb.append("clock_glass_mix=").append(Integer.toHexString(getClockGlassMix())).append("\n");
+        sb.append("ime_blur=").append(isImeBlur() ? 1 : 0).append("\n");
+        sb.append("ime_blur_radius=").append((int) getImeBlurRadius()).append("\n");
+        sb.append("ime_blur_corner=").append(getImeBlurCornerDp()).append("\n");
+        sb.append("ime_blur_mask=").append(getImeBlurMask()).append("\n");
         return sb.toString();
     }
     public int sendConfBroadcast() {
@@ -162,6 +177,11 @@ public final class SettingsStore {
                 i.putExtra("clock_glass", isClockGlass() ? "1" : "0");
                 i.putExtra("clock_glass_blend", Integer.toHexString(getClockGlassBlend()));
                 i.putExtra("clock_glass_mix", Integer.toHexString(getClockGlassMix()));
+
+                i.putExtra("ime_blur", isImeBlur() ? "1" : "0");
+                i.putExtra("ime_blur_radius", String.valueOf((int) getImeBlurRadius()));
+                i.putExtra("ime_blur_corner", String.valueOf(getImeBlurCornerDp()));
+                i.putExtra("ime_blur_mask", String.valueOf(getImeBlurMask()));
                 ctx.sendBroadcast(i);
                 ok++;
             } catch (Throwable t) {
@@ -193,6 +213,15 @@ public final class SettingsStore {
     public SettingsStore setWidget(boolean v)     { sp.edit().putBoolean(KEY_WIDGET, v).apply(); syncToHost(); return this; }
     public SettingsStore setPostEffect(boolean v) { sp.edit().putBoolean(KEY_POSTEFFECT, v).apply(); syncToHost(); return this; }
     public SettingsStore setSampleScale(float v)  { sp.edit().putFloat(KEY_SAMPLE_SCALE, v).apply(); syncToHost(); return this; }
+
+    public boolean isImeBlur()        { return sp.getBoolean(KEY_IME_BLUR, DEF_IME_BLUR); }
+    public float   getImeBlurRadius() { return sp.getFloat(KEY_IME_BLUR_RADIUS, DEF_IME_BLUR_RADIUS); }
+    public float   getImeBlurCornerDp(){ return sp.getFloat(KEY_IME_BLUR_CORNER, DEF_IME_BLUR_CORNER); }
+    public SettingsStore setImeBlur(boolean v)    { sp.edit().putBoolean(KEY_IME_BLUR, v).apply(); syncToHost(); return this; }
+    public SettingsStore setImeBlurRadius(float v){ sp.edit().putFloat(KEY_IME_BLUR_RADIUS, v).apply(); syncToHost(); return this; }
+    public SettingsStore setImeBlurCorner(float v){ sp.edit().putFloat(KEY_IME_BLUR_CORNER, v).apply(); syncToHost(); return this; }
+    public float   getImeBlurMask()   { return sp.getFloat(KEY_IME_BLUR_MASK, DEF_IME_BLUR_MASK); }
+    public SettingsStore setImeBlurMask(float v){ sp.edit().putFloat(KEY_IME_BLUR_MASK, v).apply(); syncToHost(); return this; }
     public SettingsStore setLog(boolean v)        { sp.edit().putBoolean(KEY_LOG, v).apply(); syncToHost(); return this; }
     public SettingsStore setQsProbe(boolean v)    { sp.edit().putBoolean(KEY_QS_PROBE, v).apply(); syncToHost(); return this; }
     public SettingsStore setGalleryLight(boolean v) { sp.edit().putBoolean(KEY_GALLERY_LIGHT, v).apply(); syncToHost(); return this; }

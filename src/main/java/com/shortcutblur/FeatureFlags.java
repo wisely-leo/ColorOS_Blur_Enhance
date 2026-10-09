@@ -21,6 +21,19 @@ public final class FeatureFlags {
     public static volatile int CLOCK_GLASS_BLEND = 0;
 
     public static volatile int CLOCK_GLASS_MIX = 0;
+
+    public static volatile boolean IME_BLUR = false;
+
+    public static volatile int IME_BLUR_RADIUS = 100;
+
+    public static volatile float IME_BLUR_CORNER_DP = 0f;
+
+    public static volatile int IME_BLUR_COLOR_LIGHT = 0xC0DCDCDC;
+
+    public static volatile int IME_BLUR_COLOR_DARK = 0xB3000000;
+
+    public static volatile float IME_BLUR_MASK_ALPHA = 1.0f;
+
     public static final String CONF_PATH = "/data/local/tmp/ColorOSBlurEnhance/blur.conf";
     private static volatile boolean sLoaded = false;
     private static final String TAG = "FLAGS";
@@ -175,6 +188,36 @@ public final class FeatureFlags {
                     if (f >= 0.0f && f <= 1.0f) SAMPLE_SCALE = f;
                 } catch (Throwable ignored) {}
                 break;
+            case "ime_blur":
+            case "imeblur":
+                IME_BLUR = parseBool(v, IME_BLUR);
+                break;
+            case "ime_blur_radius":
+                try {
+                    int r = Integer.parseInt(v.trim());
+                    if (r >= 0 && r <= 500) IME_BLUR_RADIUS = r;
+                } catch (Throwable ignored) {}
+                break;
+            case "ime_blur_corner":
+            case "ime_blur_corner_dp":
+                try {
+                    float f = Float.parseFloat(v.trim());
+                    if (f >= 0f && f <= 100f) IME_BLUR_CORNER_DP = f;
+                } catch (Throwable ignored) {}
+                break;
+            case "ime_blur_color_light":
+                try { IME_BLUR_COLOR_LIGHT = (int) Long.parseLong(v.trim(), 16); } catch (Throwable ignored) {}
+                break;
+            case "ime_blur_color_dark":
+                try { IME_BLUR_COLOR_DARK = (int) Long.parseLong(v.trim(), 16); } catch (Throwable ignored) {}
+                break;
+            case "ime_blur_mask":
+            case "ime_blur_mask_alpha":
+                try {
+                    float f = Float.parseFloat(v.trim());
+                    if (f >= 0f && f <= 1f) IME_BLUR_MASK_ALPHA = f;
+                } catch (Throwable ignored) {}
+                break;
             default:
                 ModuleLog.d(TAG, "unknown key: " + k);
                 break;
@@ -209,6 +252,19 @@ public final class FeatureFlags {
             if (v != null) { int old = CLOCK_GLASS_BLEND; applyKey("clock_glass_blend", v); changed |= (old != CLOCK_GLASS_BLEND); }
             v = i.getStringExtra("clock_glass_mix");
             if (v != null) { int old = CLOCK_GLASS_MIX; applyKey("clock_glass_mix", v); changed |= (old != CLOCK_GLASS_MIX); }
+
+            v = i.getStringExtra("ime_blur");
+            if (v != null) { boolean old = IME_BLUR; applyKey("ime_blur", v); changed |= (old != IME_BLUR); }
+            v = i.getStringExtra("ime_blur_radius");
+            if (v != null) { int old = IME_BLUR_RADIUS; applyKey("ime_blur_radius", v); changed |= (old != IME_BLUR_RADIUS); }
+            v = i.getStringExtra("ime_blur_corner");
+            if (v != null) { float old = IME_BLUR_CORNER_DP; applyKey("ime_blur_corner", v); changed |= (old != IME_BLUR_CORNER_DP); }
+            v = i.getStringExtra("ime_blur_color_light");
+            if (v != null) { int old = IME_BLUR_COLOR_LIGHT; applyKey("ime_blur_color_light", v); changed |= (old != IME_BLUR_COLOR_LIGHT); }
+            v = i.getStringExtra("ime_blur_color_dark");
+            if (v != null) { int old = IME_BLUR_COLOR_DARK; applyKey("ime_blur_color_dark", v); changed |= (old != IME_BLUR_COLOR_DARK); }
+            v = i.getStringExtra("ime_blur_mask");
+            if (v != null) { float old = IME_BLUR_MASK_ALPHA; applyKey("ime_blur_mask", v); changed |= (old != IME_BLUR_MASK_ALPHA); }
         } catch (Throwable t) {
             ModuleLog.e(TAG, "applyFromIntent failed", t);
         }
@@ -226,6 +282,9 @@ public final class FeatureFlags {
                 + " clockIconA=" + CLOCK_ICON_ALPHA
                 + " clockTextA=" + CLOCK_TEXT_ALPHA
                 + " clockBright=" + CLOCK_BRIGHTEN
-                + " clockGlass=" + CLOCK_GLASS;
+                + " clockGlass=" + CLOCK_GLASS
+                + " imeBlur=" + IME_BLUR
+                + " imeRadius=" + IME_BLUR_RADIUS
+                + " imeCorner=" + IME_BLUR_CORNER_DP;
     }
 }
