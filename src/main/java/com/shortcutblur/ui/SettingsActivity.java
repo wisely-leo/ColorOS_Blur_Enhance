@@ -311,7 +311,7 @@ public class SettingsActivity extends Activity {
     }
 
     private static final String CHANGELOG =
-            "v44.4\n"
+            "v45\n"
             + "· 新增「输入法键盘模糊」（仅适配语燕输入法）\n"
             + "  · 让输入法键盘背景呈现高斯模糊，与系统其他模糊区域观感统一\n"
             + "  · 可调：模糊程度 / 键盘圆角 / 白灰蒙版强度\n"
