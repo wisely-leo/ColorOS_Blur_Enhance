@@ -5,7 +5,16 @@ import io.github.libxposed.api.XposedInterface.Chain;
 import io.github.libxposed.api.XposedInterface.ExceptionMode;
 import io.github.libxposed.api.XposedModule;
 public final class ClockTextAlphaHook {
-    private static final int TARGET_ALPHA = 0x4D;
+    /** 时钟文字 alpha（0-255）：读可调参数（默认 0x4D≈30%）*/
+    private static int targetAlpha() {
+        try {
+            // 自定义混色启用时：文字透明度强制为 0（由混色接管）
+            if (FeatureFlags.CLOCK_GLASS) return 0;
+            float f = FeatureFlags.CLOCK_TEXT_ALPHA;
+            if (f < 0f) f = 0f; if (f > 1f) f = 1f;
+            return (int) (f * 255f + 0.5f);
+        } catch (Throwable t) { return 0x4D; }
+    }
     private static volatile boolean sInstalled = false;
     private ClockTextAlphaHook() {}
     private static boolean isClockTextId(int id) {
@@ -42,7 +51,7 @@ public final class ClockTextAlphaHook {
                         int id = (Integer) a0;
                         int color = (Integer) a1;
                         if (isClockTextId(id)) {
-                            int newColor = (color & 0x00FFFFFF) | (TARGET_ALPHA << 24);
+                            int newColor = (color & 0x00FFFFFF) | (targetAlpha() << 24);
                             try { GlyphBlurRenderer.notifyContentMaybeChangedAll(); } catch (Throwable ignored) {}
                             ModuleLog.d("CTCH", "setTextColor id=0x" + Integer.toHexString(id)
                                 + " color=0x" + Integer.toHexString(color)

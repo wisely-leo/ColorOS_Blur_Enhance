@@ -26,9 +26,18 @@ public final class SoftUi {
     public static int SWITCH_OFF     = 0xFFE9E9EA;
     public static int TRACK          = 0xFFE9E9EA;
     public static int KNOB           = 0xFFFFFFFF;
+    // 禁用态颜色（置灰）
+    public static int DISABLED_TRACK  = 0xFFE0E0E0;
+    public static int DISABLED_ACCENT = 0xFFBDBDBD;
+    public static int DISABLED_KNOB   = 0xFFF0F0F0;
+    // 输入框配色
+    public static int INPUT_FILL      = 0x14000000;
+    public static int INPUT_STROKE    = 0x33808080;
     public static float RADIUS      = 22f;
     public static float ROW_H       = 48f;
     public static float PAD         = 16f;
+    /** Row 标题 TextView 的固定 ID（用于 setRowTitle 查找）。 */
+    public static final int ROW_TITLE_ID = 0x7F00A001;
     public static float GAP         = 10f;
     public static float SIDE        = 16f;
     public static float TITLE_TOP   = 18f;
@@ -62,6 +71,8 @@ public final class SoftUi {
     public static int   DIALOG_FILL = 0xF2FFFFFF;
 
     public static int   SCRIM       = 0x4D000000;
+    // content 额外底部空间 tag
+    private static final int EXTRA_PAD_TAG = 0x7F00B101;
 
     public static int   BTN_SUBTLE      = 0x14000000;
     public static int   BTN_SUBTLE_PRESS = 0x28000000;
@@ -101,6 +112,11 @@ public final class SoftUi {
             SWITCH_OFF     = 0xFF39393D;
             TRACK          = 0xFF39393D;
             KNOB           = 0xFFFFFFFF;
+            DISABLED_TRACK  = 0xFF2C2C2E;
+            DISABLED_ACCENT = 0xFF48484A;
+            DISABLED_KNOB   = 0xFF636366;
+            INPUT_FILL      = 0x1FFFFFFF;
+            INPUT_STROKE    = 0x44FFFFFF;
             GLASS_TINT     = 0x33000000;
             GLASS_EDGE     = 0x33FFFFFF;
             HEADER_TINT    = 0x33000000;
@@ -123,6 +139,11 @@ public final class SoftUi {
             SWITCH_OFF     = 0xFFE9E9EA;
             TRACK          = 0xFFE9E9EA;
             KNOB           = 0xFFFFFFFF;
+            DISABLED_TRACK  = 0xFFE0E0E0;
+            DISABLED_ACCENT = 0xFFB0B0B5;
+            DISABLED_KNOB   = 0xFFCCCCCF;
+            INPUT_FILL      = 0x14000000;
+            INPUT_STROKE    = 0x33808080;
             GLASS_TINT     = 0x33FFFFFF;
             GLASS_EDGE     = 0x33FFFFFF;
             HEADER_TINT    = 0x33FFFFFF;
@@ -175,26 +196,6 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         return new android.graphics.drawable.InsetDrawable(d, l, t, r, b);
     }
 
-    private static void expandHorizontal(View v) {
-        ViewGroup.LayoutParams lp = v.getLayoutParams();
-        LinearLayout.LayoutParams llp;
-        if (lp instanceof LinearLayout.LayoutParams) {
-            llp = (LinearLayout.LayoutParams) lp;
-        } else if (lp == null) {
-            llp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT);
-        } else {
-            return;
-        }
-        int pad = dp(v.getContext(), PAD);
-        if (llp.leftMargin == -pad && llp.rightMargin == -pad) return;
-        llp.leftMargin = -pad;
-        llp.rightMargin = -pad;
-        v.setLayoutParams(llp);
-        v.setPadding(v.getPaddingLeft() + pad, v.getPaddingTop(),
-                v.getPaddingRight() + pad, v.getPaddingBottom());
-    }
 
     private static android.graphics.drawable.GradientDrawable pressShape(
             Context c, int color, float rTopDp, float rBottomDp) {
@@ -361,6 +362,7 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
             return w - 2 * (pad + kr);
         }
         @Override public boolean onTouchEvent(MotionEvent e) {
+            if (!isEnabled()) return false;
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN: {
                     if (animator != null) { animator.cancel(); animator = null; }
@@ -428,7 +430,6 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
             value = Math.max(min, Math.min(max, v));
             invalidate();
         }
-        public float getValue() { return value; }
         public Slider setOnChange(OnChange c) { this.cb = c; return this; }
 
         private void animatePress(boolean active) {
@@ -456,14 +457,18 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
             float cy = h / 2f;
             float left = maxTh, right = w - maxTh;
             float frac = (max > min) ? (value - min) / (max - min) : 0f;
-            paint.setColor(TRACK);
+            boolean en = isEnabled();
+            int cTrack = en ? TRACK : DISABLED_TRACK;
+            int cAccent = en ? ACCENT : DISABLED_ACCENT;
+            int cKnob = en ? KNOB : DISABLED_KNOB;
+            paint.setColor(cTrack);
             track.set(left, cy - trackH / 2f, right, cy + trackH / 2f);
             cv.drawRoundRect(track, trackH / 2f, trackH / 2f, paint);
             float cx = left + (right - left) * frac;
-            paint.setColor(ACCENT);
+            paint.setColor(cAccent);
             track.set(left, cy - trackH / 2f, cx, cy + trackH / 2f);
             cv.drawRoundRect(track, trackH / 2f, trackH / 2f, paint);
-            paint.setColor(KNOB);
+            paint.setColor(cKnob);
             cv.drawCircle(cx, cy, th, paint);
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(dp(getContext(), 0.5f));
@@ -518,6 +523,405 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
             if (cb != null) cb.onChange(value);
         }
     }
+    /**
+     * 色相滑块：彩虹渐变轨道 + 圆形 knob（当前色）+ 连续选色。
+     * 取值范围 0-360（色相角度）；0 时为无彩色（灰/关闭态）。
+     */
+    public static class ColorSlider extends View {
+        public interface OnColorChange { void onChange(int color, float hue01); }
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint border = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private android.graphics.LinearGradient rainbow;
+        private float downX, downY;
+        private boolean dragging = false;
+        private float touchSlop = -1f;
+        private final RectF track = new RectF();
+        // 0-1 位置
+        private float frac = 0f;
+        private OnColorChange cb;
+        private float pressScale = 0.82f;
+        private ValueAnimator scaleAnimator;
+        private boolean enabledColor = true;
+
+        public ColorSlider(Context c, float startFrac) {
+            super(c);
+            this.frac = Math.max(0f, Math.min(1f, startFrac));
+            setClickable(true);
+            touchSlop = android.view.ViewConfiguration.get(c).getScaledTouchSlop();
+        }
+        /** 是否启用颜色（false = 灰色“关闭”态）。 */
+        public void setFrac(float f) { frac = Math.max(0f, Math.min(1f, f)); invalidate(); }
+        public ColorSlider setOnChange(OnColorChange c) { this.cb = c; return this; }
+        /** 当前颜色（enabledColor=false 时返回灰色）。 */
+        public int currentColor() {
+            if (!enabledColor) return 0x9E9E9E;
+            return android.graphics.Color.HSVToColor(new float[]{ frac * 360f, 0.72f, 0.88f });
+        }
+
+        private void animatePress(boolean active) {
+            final float target = active ? 1.12f : 0.82f;
+            if (scaleAnimator != null) scaleAnimator.cancel();
+            scaleAnimator = ValueAnimator.ofFloat(pressScale, target);
+            scaleAnimator.setDuration(active ? 130L : 200L);
+            scaleAnimator.addUpdateListener(a -> { pressScale = (Float) a.getAnimatedValue(); invalidate(); });
+            scaleAnimator.start();
+        }
+        @Override protected void onMeasure(int w, int h) {
+            setMeasuredDimension(dp(getContext(), SLIDER_W), dp(getContext(), SWITCH_H));
+        }
+        @Override protected void onDraw(Canvas cv) {
+            float w = getWidth(), h = getHeight();
+            float trackH = dp(getContext(), Math.max(TRACK_H, 8f));
+            float maxTh = dp(getContext(), THUMB_R) * 1.12f;
+            float th = dp(getContext(), THUMB_R) * pressScale;
+            float cy = h / 2f;
+            float left = maxTh, right = w - maxTh;
+            track.set(left, cy - trackH / 2f, right, cy + trackH / 2f);
+            if (rainbow == null) {
+                int[] colors = new int[37];
+                for (int i = 0; i <= 36; i++) colors[i] = android.graphics.Color.HSVToColor(new float[]{ i * 10f, 0.72f, 0.88f });
+                rainbow = new android.graphics.LinearGradient(left, 0, right, 0, colors, null,
+                        android.graphics.Shader.TileMode.CLAMP);
+            }
+            paint.setShader(enabledColor ? rainbow : null);
+            if (!enabledColor) paint.setColor(0xFFD0D0D0);
+            float r = trackH / 2f;
+            cv.drawRoundRect(track, r, r, paint);
+            paint.setShader(null);
+            // 外边框
+            border.setStyle(Paint.Style.STROKE);
+            border.setStrokeWidth(dp(getContext(), 0.7f));
+            border.setColor(0x22000000);
+            cv.drawRoundRect(track, r, r, border);
+            // knob
+            float cx = left + (right - left) * frac;
+            if (enabledColor) {
+                paint.setColor(android.graphics.Color.HSVToColor(new float[]{ frac * 360f, 0.72f, 0.88f }));
+            } else {
+                paint.setColor(0xFFBDBDBD);
+            }
+            cv.drawCircle(cx, cy, th, paint);
+            border.setStrokeWidth(dp(getContext(), 1.5f));
+            border.setColor(0xFFFFFFFF);
+            cv.drawCircle(cx, cy, th, border);
+        }
+        @Override public boolean onTouchEvent(MotionEvent e) {
+            if (!isEnabled()) return false;
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    downX = e.getX(); downY = e.getY();
+                    dragging = false;
+                    if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(true);
+                    animatePress(true);
+                    return true;
+                case MotionEvent.ACTION_MOVE: {
+                    if (!dragging) {
+                        float dx = Math.abs(e.getX() - downX);
+                        float dy = Math.abs(e.getY() - downY);
+                        if (dx < touchSlop && dy < touchSlop) return true;
+                        if (dy > dx) {
+                            if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(false);
+                            dragging = false; animatePress(false); return false;
+                        }
+                        dragging = true;
+                    }
+                    applyX(e.getX());
+                    return true;
+                }
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(false);
+                    if (dragging) { applyX(e.getX()); fire(); }
+                    dragging = false;
+                    animatePress(false);
+                    return true;
+            }
+            return true;
+        }
+        private void applyX(float x) {
+            float th = dp(getContext(), THUMB_R) * 1.12f;
+            float left = th, right = getWidth() - th;
+            float f = (right > left) ? (x - left) / (right - left) : 0f;
+            frac = Math.max(0f, Math.min(1f, f));
+            invalidate();
+            fire();
+        }
+        private void fire() {
+            if (cb != null) cb.onChange(currentColor(), frac);
+        }
+    }
+
+    /** 色相滑块行：标题 + 色块预览 + 彩虹滑条。 */
+    public static View colorSlider(Context c, String title, float startFrac,
+                                   ColorSlider.OnColorChange cb) {
+        ColorSlider cs = new ColorSlider(c, startFrac);
+        if (cb != null) cs.setOnChange(cb);
+        LinearLayout right = new LinearLayout(c);
+        right.setOrientation(LinearLayout.HORIZONTAL);
+        right.setGravity(Gravity.CENTER_VERTICAL);
+        right.addView(cs);
+        Row row = new Row(c, title, right, false);
+        row.post(() -> {
+            android.view.ViewParent p = row.getParent();
+            while (p instanceof android.view.ViewGroup) {
+                android.view.ViewGroup g = (android.view.ViewGroup) p;
+                g.setClipChildren(false); g.setClipToPadding(false);
+                p = g.getParent();
+            }
+        });
+        return row;
+    }
+
+    /** 递归查找 View 树中第一个 ColorSlider。 */
+    public static ColorSlider findColorSlider(View root) {
+        if (root instanceof ColorSlider) return (ColorSlider) root;
+        if (root instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) root;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                ColorSlider s = findColorSlider(g.getChildAt(i));
+                if (s != null) return s;
+            }
+        }
+        return null;
+    }
+
+    /** 递归查找 View 树中第一个 Switch。 */
+    public static Switch findSwitchView(View root) {
+        if (root instanceof Switch) return (Switch) root;
+        if (root instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) root;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                Switch sw = findSwitchView(g.getChildAt(i));
+                if (sw != null) return sw;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 设置开关行的状态。
+     * @param fireCallback true = 走完整流程（触发折叠动画 + onToggle 回调）；false = 仅改视觉
+     */
+    public static void setToggleChecked(View row, boolean checked, boolean fireCallback) {
+        if (row == null) return;
+        Switch sw = findSwitchView(row);
+        if (sw == null) return;
+        if (fireCallback) sw.setChecked(checked);
+        else sw.setCheckedImmediate(checked);
+    }
+
+    /** 兼容：默认仅改视觉，不触发回调。 */
+    public static void setToggleChecked(View row, boolean checked) {
+        setToggleChecked(row, checked, false);
+    }
+
+    /** 颜色输入回调。 */
+    public interface ColorInputCb { void onColor(int rgb, boolean valid); }
+
+
+    /** 递归查找 EditText（用于程序化更新显示）。 */
+    public static android.widget.EditText findEditText(View root) {
+        if (root instanceof android.widget.EditText) return (android.widget.EditText) root;
+        if (root instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) root;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                android.widget.EditText e = findEditText(g.getChildAt(i));
+                if (e != null) return e;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 色号输入弹窗：点击行后弹出，内部大输入框 + 实时预览 + 取消/确定。
+     * 弹窗自带键盘避让（独立窗口层，IME 会挤压它而非主界面）。
+     */
+    public static void colorPickerDialog(final View anchor, String title, int initialRgb,
+                                         final ColorInputCb cb) {
+        showPanel(anchor, title, 16f, new PanelBuilder() {
+            @Override public void build(ViewGroup host, final Context ctx,
+                                        final LinearLayout inner, android.widget.FrameLayout panel,
+                                        final Runnable dismiss) {
+                // 预览块 + 输入框 同行
+                LinearLayout line = new LinearLayout(ctx);
+                line.setOrientation(LinearLayout.HORIZONTAL);
+                line.setGravity(Gravity.CENTER_VERTICAL);
+                final View preview = new View(ctx);
+                final android.graphics.drawable.GradientDrawable pv =
+                        new android.graphics.drawable.GradientDrawable();
+                pv.setCornerRadius(dp(ctx, 12f));
+                pv.setColor(0xFF000000 | (initialRgb & 0xFFFFFF));
+                pv.setStroke(dp(ctx, 1f), INPUT_STROKE);
+                preview.setBackground(pv);
+                LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(dp(ctx, 48f), dp(ctx, 48f));
+                plp.rightMargin = dp(ctx, 12f);
+                line.addView(preview, plp);
+
+                final android.widget.EditText et = new android.widget.EditText(ctx);
+                et.setText(String.format("%06X", initialRgb & 0xFFFFFF));
+                et.setTextSize(BODY_SIZE + 4f);
+                et.setTextColor(TEXT_PRIMARY);
+                et.setSingleLine(true);
+                et.setGravity(Gravity.CENTER);
+                et.setHint("RRGGBB");
+                et.setHintTextColor(TEXT_SECONDARY);
+                et.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                        | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                        | android.text.InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+                final android.graphics.drawable.GradientDrawable etBg =
+                        new android.graphics.drawable.GradientDrawable();
+                etBg.setCornerRadius(dp(ctx, 12f));
+                etBg.setColor(INPUT_FILL);
+                etBg.setStroke(dp(ctx, 1.6f), ACCENT);
+                et.setBackground(etBg);
+                int ep = (int) dp(ctx, 14f);
+                et.setPadding(ep, ep, ep, ep);
+                et.setFilters(new android.text.InputFilter[]{
+                        new android.text.InputFilter.LengthFilter(7),
+                        new android.text.InputFilter() {
+                            @Override public CharSequence filter(CharSequence src, int st, int en,
+                                                                 android.text.Spanned dst, int dstart, int dend) {
+                                StringBuilder sb = new StringBuilder();
+                                for (int i2 = st; i2 < en; i2++) {
+                                    char ch = Character.toUpperCase(src.charAt(i2));
+                                    if ((ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'F') || ch == '#') sb.append(ch);
+                                }
+                                return sb.toString();
+                            }
+                        }
+                });
+                line.addView(et, new LinearLayout.LayoutParams(0,
+                        ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                LinearLayout.LayoutParams lnlp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                lnlp.bottomMargin = dp(ctx, 12f);
+                inner.addView(line, lnlp);
+
+                final int[] result = { initialRgb & 0xFFFFFF, 0 };
+                final java.util.function.Consumer<String> eval = raw0 -> {
+                    String raw = raw0.trim();
+                    if (raw.startsWith("#")) raw = raw.substring(1);
+                    if (raw.length() == 6) {
+                        try {
+                            int rgb = (int) Long.parseLong(raw, 16) & 0xFFFFFF;
+                            result[0] = rgb; result[1] = 1;
+                            pv.setColor(0xFF000000 | rgb);
+                            preview.setBackground(pv);
+                            return;
+                        } catch (Throwable ignored) {}
+                    }
+                    result[1] = 0;
+                    pv.setColor(0xFF9E9E9E);
+                    preview.setBackground(pv);
+                };
+                et.addTextChangedListener(new android.text.TextWatcher() {
+                    @Override public void beforeTextChanged(CharSequence s2, int a, int b, int c2) {}
+                    @Override public void onTextChanged(CharSequence s2, int a, int b, int c2) {}
+                    @Override public void afterTextChanged(android.text.Editable s2) { eval.accept(s2.toString()); }
+                });
+
+                // 按钮行
+                LinearLayout btnRow = new LinearLayout(ctx);
+                btnRow.setOrientation(LinearLayout.HORIZONTAL);
+                btnRow.setGravity(Gravity.BOTTOM);
+                TextView btnCancel = dialogButton(ctx, "取消", TEXT_SECONDARY, false, true);
+                btnCancel.setOnClickListener(v -> dismiss.run());
+                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(0, dp(ctx, 46f), 1f);
+                clp.rightMargin = dp(ctx, 8f);
+                btnRow.addView(btnCancel, clp);
+                TextView btnOk = dialogButton(ctx, "确定", ACCENT, true, true);
+                btnOk.setOnClickListener(v -> {
+                    dismiss.run();
+                    eval.accept(et.getText().toString());
+                    if (result[1] == 1 && cb != null) cb.onColor(result[0], true);
+                });
+                LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(0, dp(ctx, 46f), 1f);
+                olp.leftMargin = dp(ctx, 8f);
+                btnRow.addView(btnOk, olp);
+                LinearLayout.LayoutParams brlp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                brlp.topMargin = dp(ctx, 12f);
+                inner.addView(btnRow, brlp);
+
+                // 自动弹键盘
+                et.postDelayed(new Runnable() {
+                    @Override public void run() {
+                        try {
+                            et.requestFocus();
+                            et.setSelection(et.getText().length());
+                            android.view.inputmethod.InputMethodManager imm =
+                                    (android.view.inputmethod.InputMethodManager) ctx.getSystemService(Context.INPUT_METHOD_SERVICE);
+                            if (imm != null) imm.showSoftInput(et, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+                        } catch (Throwable ignored) {}
+                    }
+                }, 260);
+            }
+        });
+    }
+
+
+    /** 修改一个 Row 的标题文字。 */
+    public static void setRowTitle(View row, String title) {
+        if (row == null || title == null) return;
+        View v = findRowTitle(row);
+        if (v instanceof TextView) ((TextView) v).setText(title);
+    }
+
+    private static View findRowTitle(View v) {
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                View c = g.getChildAt(i);
+                if (c instanceof TextView && c.getId() == ROW_TITLE_ID) return c;
+                View r = findRowTitle(c);
+                if (r != null) return r;
+            }
+        }
+        return null;
+    }
+
+    /** 递归查找 View 树中第一个 Slider。 */
+    public static Slider findSlider(View root) {
+        if (root instanceof Slider) return (Slider) root;
+        if (root instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) root;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                Slider s = findSlider(g.getChildAt(i));
+                if (s != null) return s;
+            }
+        }
+        return null;
+    }
+
+    /** 设置滑杆行（Row）的可用状态：禁用后不可拖动且置灰，并同步值显示。 */
+    public static void setRowEnabled(View row, boolean enabled) {
+        if (row == null) return;
+        Slider s = findSlider(row);
+        if (s != null) s.setEnabled(enabled);
+        ColorSlider cs = findColorSlider(row);
+        if (cs != null) cs.setEnabled(enabled);
+        // 统一递归禁用所有交互子控件（含 EditText）
+        setEnabledRecursive(row, enabled);
+        row.setAlpha(enabled ? 1f : 0.45f);
+    }
+
+    private static void setEnabledRecursive(View v, boolean enabled) {
+        v.setEnabled(enabled);
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                setEnabledRecursive(g.getChildAt(i), enabled);
+            }
+        }
+    }
+
+    /** 设置滑杆行的值（不动 callback）。 */
+    public static void setRowValue(View row, float v) {
+        if (row == null) return;
+        Slider s = findSlider(row);
+        if (s != null) s.setValue(v);
+    }
+
     public static class Card extends android.widget.FrameLayout {
         private final LinearLayout inner;
         private StaticGlass glass;
@@ -535,9 +939,8 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
 
             inner.setClipToPadding(false);
         }
-
         private static final int TAG_PRESS = "softui_press".hashCode();
-        private static final int TAG_BASE_PAD = "softui_base_pad".hashCode();
+
 
         public void applyEdgeInsets(float insetDp) {
             final int n = inner.getChildCount();
@@ -604,6 +1007,7 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
             line.setGravity(Gravity.CENTER_VERTICAL);
             line.setMinimumHeight(dp(c, ROW_H));
             TextView tv = text(c, title, BODY_SIZE, TEXT_PRIMARY);
+            tv.setId(ROW_TITLE_ID);
             line.addView(tv, new LinearLayout.LayoutParams(0,
                     ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             if (right != null) line.addView(right);
@@ -650,12 +1054,6 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
             });
             return this;
         }
-        public void attachBelow(View below) {
-            if (below == null) return;
-            addView(below, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT));
-        }
         private static View findSwitch(ViewGroup g) {
             for (int i = 0; i < g.getChildCount(); i++) {
                 View c = g.getChildAt(i);
@@ -698,16 +1096,6 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
     }
     public static void blurBehind(View target, View sample) {
         blurBehind(target, sample, BLUR_RADIUS, true);
-    }
-    public static void glass(View v, float radiusDp) {
-        if (v == null) return;
-        v.setBackground(new GlassDrawable(v.getContext(), radiusDp, GLASS_TINT));
-    }
-    public static void clearEffects(View v) {
-        if (v == null) return;
-        if (android.os.Build.VERSION.SDK_INT >= 31) {
-            try { v.setRenderEffect(null); } catch (Throwable ignored) {}
-        }
     }
     static final class Backdrop {
         static android.graphics.Bitmap src;
@@ -868,19 +1256,6 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         }
         void onTick() { doTick(); }
 
-        public void pulse(final int durationMs) {
-            final long end = android.os.SystemClock.uptimeMillis() + Math.max(0, durationMs);
-            final Runnable r = new Runnable() {
-                @Override public void run() {
-                    if (!isAttachedToWindow()) return;
-                    doTick();
-                    if (android.os.SystemClock.uptimeMillis() < end) {
-                        postOnAnimation(this);
-                    }
-                }
-            };
-            postOnAnimation(r);
-        }
         abstract void drawSource(Canvas cv);
         static final class Painter extends View {
             private final GlassView owner;
@@ -1094,21 +1469,6 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
             }
         }
     }
-    public static LinearLayout screen(Context c, String title) {
-        LinearLayout root = new LinearLayout(c);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(CANVAS);
-        root.setPadding(dp(c, SIDE), dp(c, TITLE_TOP), dp(c, SIDE), dp(c, SIDE));
-        if (title != null && !title.isEmpty()) {
-            TextView t = text(c, title, TITLE_SIZE, TEXT_PRIMARY);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT);
-            lp.bottomMargin = dp(c, TITLE_BOTTOM);
-            root.addView(t, lp);
-        }
-        return root;
-    }
     public static void stack(LinearLayout root, View... children) {
         Context c = root.getContext();
         for (int i = 0; i < children.length; i++) {
@@ -1248,183 +1608,58 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
     }
 
     public static void infoDialog(View anchor, String title, String message, String closeText) {
-        try {
-            final ViewGroup host = resolveHost(anchor);
-            if (host == null) return;
-            final Context ctx = host.getContext();
-            final android.widget.ScrollView sample = scrollerOf(host);
-            final android.widget.FrameLayout overlay = new android.widget.FrameLayout(ctx);
-            overlay.setBackgroundColor(SCRIM);
-            overlay.setClickable(true);
-            overlay.setFocusable(true);
-            final android.widget.FrameLayout panel = new android.widget.FrameLayout(ctx);
-            panel.setClickable(true);
-            float corner = 28f;
-            panel.setClipToOutline(true);
-            final float cornerFinal = corner;
-
-            final Runnable[] adjustPanelHeight = new Runnable[1];
-
-            final LiveGlass[] glassRef = new LiveGlass[1];
-            adjustPanelHeight[0] = () -> {
-                try {
-                    int w = panel.getWidth();
-                    if (w <= 0) w = ctx.getResources().getDisplayMetrics().widthPixels - dp(ctx, 24f);
-                    panel.measure(
-                            View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
-                            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
-                    int targetH = panel.getMeasuredHeight();
-                    android.widget.FrameLayout.LayoutParams p2 =
-                            (android.widget.FrameLayout.LayoutParams) panel.getLayoutParams();
-                    if (p2 != null) {
-                        p2.height = targetH;
-                        panel.setLayoutParams(p2);
-                    }
-                } catch (Throwable ignored) {}
-            };
-            panel.setOutlineProvider(new android.view.ViewOutlineProvider() {
-                @Override public void getOutline(View v, android.graphics.Outline o) {
-                    int w = v.getWidth(), h = v.getHeight();
-                    if (w <= 0 || h <= 0) { o.setEmpty(); return; }
-                    o.setRoundRect(0, 0, w, h, dp(v.getContext(), cornerFinal));
-                }
-            });
-            LinearLayout inner = new LinearLayout(ctx);
-            inner.setOrientation(LinearLayout.VERTICAL);
-            int pad = dp(ctx, PAD + 6f);
-            inner.setPadding(pad, pad, pad, pad);
-            if (title != null && title.length() > 0) {
-                TextView tvT = text(ctx, title, BODY_SIZE + 2f, TEXT_PRIMARY);
-                tvT.setTypeface(tvT.getTypeface(), android.graphics.Typeface.BOLD);
-                tvT.setGravity(Gravity.CENTER);
-                LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT);
-                tlp.bottomMargin = dp(ctx, 12f);
-                inner.addView(tvT, tlp);
-            }
-            final Runnable[] dismiss = new Runnable[1];
-            final android.widget.ScrollView msgScroll;
-            if (message != null && message.length() > 0) {
-                TextView tvM = text(ctx, message, SUB_SIZE + 2f, TEXT_SECONDARY);
-                tvM.setGravity(Gravity.START);
-                tvM.setLineSpacing(dp(ctx, 5f), 1f);
-                msgScroll = new android.widget.ScrollView(ctx);
-
-                msgScroll.setVerticalFadingEdgeEnabled(true);
-                msgScroll.setFadingEdgeLength(dp(ctx, 20f));
-                msgScroll.setVerticalScrollBarEnabled(false);
-                msgScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-                msgScroll.addView(tvM, new android.widget.FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT));
-                LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT);
-                mlp.bottomMargin = dp(ctx, 16f);
-                inner.addView(msgScroll, mlp);
-                final int maxMsgH = Math.round(ctx.getResources()
-                        .getDisplayMetrics().heightPixels * 0.55f);
-
-                tvM.post(new Runnable() {
-                    @Override public void run() {
-                        try {
-                            int h = tvM.getHeight();
-                            if (h <= 0) h = tvM.getMeasuredHeight();
-                            if (h > maxMsgH) {
-                                android.view.ViewGroup.LayoutParams lp = msgScroll.getLayoutParams();
-                                lp.height = maxMsgH;
-                                msgScroll.setLayoutParams(lp);
-                            }
-                            adjustPanelHeight[0].run();
-                        } catch (Throwable ignored) {}
-                    }
-                });
-            } else {
-                msgScroll = null;
-            }
-            LinearLayout btnRow = new LinearLayout(ctx);
-            btnRow.setOrientation(LinearLayout.HORIZONTAL);
-            final String closeLabel = (closeText == null ? "关闭" : closeText);
-            TextView btnClose = dialogButton(ctx, closeLabel, ACCENT, true, true);
-            LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, dp(ctx, 46f));
-            btnRow.addView(btnClose, blp);
-            LinearLayout.LayoutParams brlp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT);
-            brlp.topMargin = dp(ctx, 12f);
-            inner.addView(btnRow, brlp);
-            panel.addView(inner, new android.widget.FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT));
-            android.widget.FrameLayout.LayoutParams plp =
-                    new android.widget.FrameLayout.LayoutParams(
+        final String msg = message;
+        final String closeLabel = (closeText == null ? "关闭" : closeText);
+        showPanel(anchor, title, 12f, new PanelBuilder() {
+            @Override public void build(ViewGroup host, final Context ctx,
+                                        final LinearLayout inner, android.widget.FrameLayout panel,
+                                        final Runnable dismiss) {
+                if (msg != null && msg.length() > 0) {
+                    TextView tvM = text(ctx, msg, SUB_SIZE + 2f, TEXT_SECONDARY);
+                    tvM.setGravity(Gravity.START);
+                    tvM.setLineSpacing(dp(ctx, 5f), 1f);
+                    final android.widget.ScrollView msgScroll = new android.widget.ScrollView(ctx);
+                    msgScroll.setVerticalFadingEdgeEnabled(true);
+                    msgScroll.setFadingEdgeLength(dp(ctx, 20f));
+                    msgScroll.setVerticalScrollBarEnabled(false);
+                    msgScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+                    msgScroll.addView(tvM, new android.view.ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT));
+                    LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.WRAP_CONTENT);
-            plp.gravity = Gravity.BOTTOM;
-            plp.leftMargin = dp(ctx, 12f);
-            plp.rightMargin = dp(ctx, 12f);
-            plp.bottomMargin = dp(ctx, 40f);
-            overlay.addView(panel, plp);
-
-            panel.post(new Runnable() {
-                @Override public void run() {
-                    adjustPanelHeight[0].run();
-                    if (sample != null) {
-                        try {
-                            LiveGlass g = new LiveGlass(ctx, sample, BLUR_RADIUS, GLASS_TINT, cornerFinal);
-                            g.setClickable(false);
-                            glassRef[0] = g;
-                            panel.addView(g, 0, new android.widget.FrameLayout.LayoutParams(
-                                    ViewGroup.LayoutParams.MATCH_PARENT,
-                                    ViewGroup.LayoutParams.MATCH_PARENT));
-                            g.start();
-                        } catch (Throwable t2) {
-                            com.shortcutblur.ModuleLog.e("SoftUi", "infoDialog glass failed", t2);
-                            panel.setBackground(roundRect(CARD_FILL, cornerFinal, ctx));
+                    mlp.bottomMargin = dp(ctx, 16f);
+                    inner.addView(msgScroll, mlp);
+                    // 同步测量文本高度并立即限高（避免与 panel 高度锁定产生时序竞争）
+                    try {
+                        int panelW = ctx.getResources().getDisplayMetrics().widthPixels - dp(ctx, 24f);
+                        int contentW = panelW - dp(ctx, (PAD + 6f) * 2f);
+                        tvM.measure(
+                                View.MeasureSpec.makeMeasureSpec(contentW, View.MeasureSpec.AT_MOST),
+                                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+                        int maxMsgH = Math.round(ctx.getResources()
+                                .getDisplayMetrics().heightPixels * 0.55f);
+                        int th = tvM.getMeasuredHeight();
+                        if (th > maxMsgH) {
+                            mlp.height = maxMsgH;
+                            msgScroll.setLayoutParams(mlp);
                         }
-                    } else {
-                        panel.setBackground(roundRect(DIALOG_FILL, cornerFinal, ctx));
-                    }
+                    } catch (Throwable ignored) {}
                 }
-            });
-            dismiss[0] = () -> {
-                if (overlay.getParent() == null) return;
-
-                final LiveGlass dg = glassRef[0];
-                panel.animate().translationY(dp(ctx, 80f)).setDuration(200)
-                        .setInterpolator(new android.view.animation.AccelerateInterpolator())
-                        .setUpdateListener(a -> { if (dg != null) dg.doTick(); })
-                        .start();
-                overlay.animate().alpha(0f).setDuration(200)
-                        .setListener(new android.animation.AnimatorListenerAdapter() {
-                            @Override public void onAnimationEnd(android.animation.Animator a) {
-                                host.removeView(overlay);
-                            }
-                        }).start();
-            };
-            btnClose.setOnClickListener(v -> dismiss[0].run());
-            overlay.setOnClickListener(v -> dismiss[0].run());
-            host.addView(overlay, new android.view.ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT));
-            overlay.setAlpha(0f);
-            overlay.animate().alpha(1f).setDuration(180).start();
-            panel.setTranslationY(dp(ctx, 80f));
-
-            final android.animation.ValueAnimator enter = android.animation.ValueAnimator.ofFloat(dp(ctx, 80f), 0f);
-            enter.setDuration(240);
-            enter.setInterpolator(new android.view.animation.DecelerateInterpolator());
-            enter.addUpdateListener(a -> {
-                panel.setTranslationY((Float) a.getAnimatedValue());
-                LiveGlass g = glassRef[0];
-                if (g != null) g.doTick();
-            });
-            enter.start();
-        } catch (Throwable t) {
-            com.shortcutblur.ModuleLog.e("SoftUi", "infoDialog failed", t);
-        }
+                LinearLayout btnRow = new LinearLayout(ctx);
+                btnRow.setOrientation(LinearLayout.HORIZONTAL);
+                TextView btnClose = dialogButton(ctx, closeLabel, ACCENT, true, true);
+                btnClose.setOnClickListener(v -> dismiss.run());
+                btnRow.addView(btnClose, new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, dp(ctx, 46f)));
+                LinearLayout.LayoutParams brlp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT);
+                brlp.topMargin = dp(ctx, 12f);
+                inner.addView(btnRow, brlp);
+            }
+        });
     }
     public static void confirm(View anchor, String title, String message,
                                String okText, String cancelText,
@@ -1434,27 +1669,121 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
     public static void confirm(View anchor, String title, String message,
                                String okText, String cancelText,
                                final ConfirmCb onConfirm, final ConfirmCb onCancel) {
-        try {
-            final ViewGroup host = resolveHost(anchor);
-            if (host == null) {
-                if (onConfirm != null) onConfirm.onConfirm();
-                return;
+        final String msg = message;
+        final String cancelLabel = (cancelText == null ? "取消" : cancelText);
+        final String okLabel = (okText == null ? "确定" : okText);
+        showPanel(anchor, title, 12f, new PanelBuilder() {
+            @Override public void build(ViewGroup host, final Context ctx,
+                                        final LinearLayout inner, android.widget.FrameLayout panel,
+                                        final Runnable dismiss) {
+                if (msg != null && msg.length() > 0) {
+                    TextView tvM = text(ctx, msg, SUB_SIZE + 2f, TEXT_SECONDARY);
+                    tvM.setGravity(Gravity.CENTER);
+                    tvM.setLineSpacing(dp(ctx, 5f), 1f);
+                    final android.widget.ScrollView msgScroll = new android.widget.ScrollView(ctx);
+                    msgScroll.setVerticalFadingEdgeEnabled(true);
+                    msgScroll.setFadingEdgeLength(dp(ctx, 20f));
+                    msgScroll.setVerticalScrollBarEnabled(false);
+                    msgScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+                    msgScroll.addView(tvM, new android.view.ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT));
+                    LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT);
+                    mlp.bottomMargin = dp(ctx, 16f);
+                    inner.addView(msgScroll, mlp);
+                    // 同步测量文本高度并立即限高（避免与 panel 高度锁定产生时序竞争）
+                    try {
+                        int panelW = ctx.getResources().getDisplayMetrics().widthPixels - dp(ctx, 24f);
+                        int contentW = panelW - dp(ctx, (PAD + 6f) * 2f);
+                        tvM.measure(
+                                View.MeasureSpec.makeMeasureSpec(contentW, View.MeasureSpec.AT_MOST),
+                                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+                        int maxMsgH = Math.round(ctx.getResources()
+                                .getDisplayMetrics().heightPixels * 0.55f);
+                        int th = tvM.getMeasuredHeight();
+                        if (th > maxMsgH) {
+                            mlp.height = maxMsgH;
+                            msgScroll.setLayoutParams(mlp);
+                        }
+                    } catch (Throwable ignored) {}
+                }
+                LinearLayout btnRow = new LinearLayout(ctx);
+                btnRow.setOrientation(LinearLayout.HORIZONTAL);
+                btnRow.setGravity(Gravity.BOTTOM);
+                TextView btnCancel = dialogButton(ctx, cancelLabel, TEXT_SECONDARY, false, true);
+                btnCancel.setOnClickListener(v -> {
+                    dismiss.run();
+                    if (onCancel != null) {
+                        try { onCancel.onConfirm(); } catch (Throwable ignored) {}
+                    }
+                });
+                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(0, dp(ctx, 46f), 1f);
+                clp.rightMargin = dp(ctx, 8f);
+                btnRow.addView(btnCancel, clp);
+                TextView btnOk = dialogButton(ctx, okLabel, ACCENT, true, true);
+                btnOk.setOnClickListener(v -> {
+                    dismiss.run();
+                    if (onConfirm != null) onConfirm.onConfirm();
+                });
+                LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(0, dp(ctx, 46f), 1f);
+                olp.leftMargin = dp(ctx, 8f);
+                btnRow.addView(btnOk, olp);
+                LinearLayout.LayoutParams brlp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT);
+                brlp.topMargin = dp(ctx, 12f);
+                inner.addView(btnRow, brlp);
             }
+        });
+    }
+    // ==================== 通用弹窗骨架（confirm / infoDialog / colorPickerDialog 共用） ====================
+    /**
+     * 面板内容构建器：往 inner 里添加自有内容（含按钮行）。
+     * @param dismiss 调用它执行“退出动画并移除弹窗”
+     */
+    public interface PanelBuilder {
+        void build(ViewGroup host, Context ctx, LinearLayout inner, android.widget.FrameLayout panel, Runnable dismiss);
+    }
+
+    /**
+     * 弹出 SoftUi 风格面板（SCRIM 遮罩 + 28dp 圆角 + 毛玻璃 + 底部滑入）。
+     */
+    public static void showPanel(final View anchor, String title, float titleBottomMarginDp,
+                                 final PanelBuilder builder) {
+        try {
+            // 向上找最顶层 ViewGroup（uiRoot），保证 overlay 撑满全屏
+            ViewGroup host = null;
+            View v0 = anchor;
+            while (v0 instanceof View) {
+                if (v0 instanceof ViewGroup) host = (ViewGroup) v0;
+                android.view.ViewParent pp = v0.getParent();
+                if (!(pp instanceof View)) break;
+                v0 = (View) pp;
+            }
+            if (host == null) host = resolveHost(anchor);
+            if (host == null) return;
+            final ViewGroup fhost = host;
             final Context ctx = host.getContext();
             final android.widget.ScrollView sample = scrollerOf(host);
+
             final android.widget.FrameLayout overlay = new android.widget.FrameLayout(ctx);
             overlay.setBackgroundColor(SCRIM);
             overlay.setClickable(true);
             overlay.setFocusable(true);
             final android.widget.FrameLayout panel = new android.widget.FrameLayout(ctx);
             panel.setClickable(true);
-            float corner = 28f;
+            final float corner = 28f;
             panel.setClipToOutline(true);
-            final float cornerFinal = corner;
-
+            panel.setOutlineProvider(new android.view.ViewOutlineProvider() {
+                @Override public void getOutline(View v, android.graphics.Outline o) {
+                    int w = v.getWidth(), h = v.getHeight();
+                    if (w <= 0 || h <= 0) { o.setEmpty(); return; }
+                    o.setRoundRect(0, 0, w, h, dp(v.getContext(), corner));
+                }
+            });
             final Runnable[] adjustPanelHeight = new Runnable[1];
-
-            final LiveGlass[] glassRef = new LiveGlass[1];
             adjustPanelHeight[0] = () -> {
                 try {
                     int w = panel.getWidth();
@@ -1463,6 +1792,11 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
                             View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
                             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
                     int targetH = panel.getMeasuredHeight();
+                    // 高度上限：屏高 - 上下留白（超长内容由内部 ScrollView 滚动查看）
+                    int screenH = ctx.getResources().getDisplayMetrics().heightPixels;
+                    int maxPanelH = screenH - dp(ctx, 40f) * 2 - navBarH(ctx);
+                    if (maxPanelH < dp(ctx, 120f)) maxPanelH = screenH - dp(ctx, 40f) * 2;
+                    if (targetH > maxPanelH) targetH = maxPanelH;
                     android.widget.FrameLayout.LayoutParams p2 =
                             (android.widget.FrameLayout.LayoutParams) panel.getLayoutParams();
                     if (p2 != null) {
@@ -1471,14 +1805,8 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
                     }
                 } catch (Throwable ignored) {}
             };
-            panel.setOutlineProvider(new android.view.ViewOutlineProvider() {
-                @Override public void getOutline(View v, android.graphics.Outline o) {
-                    int w = v.getWidth(), h = v.getHeight();
-                    if (w <= 0 || h <= 0) { o.setEmpty(); return; }
-                    o.setRoundRect(0, 0, w, h, dp(v.getContext(), cornerFinal));
-                }
-            });
-            LinearLayout inner = new LinearLayout(ctx);
+
+            final LinearLayout inner = new LinearLayout(ctx);
             inner.setOrientation(LinearLayout.VERTICAL);
             int pad = dp(ctx, PAD + 6f);
             inner.setPadding(pad, pad, pad, pad);
@@ -1487,116 +1815,62 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
                 tvT.setTypeface(tvT.getTypeface(), android.graphics.Typeface.BOLD);
                 tvT.setGravity(Gravity.CENTER);
                 LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT);
-                tlp.bottomMargin = dp(ctx, 12f);
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                tlp.bottomMargin = dp(ctx, titleBottomMarginDp);
                 inner.addView(tvT, tlp);
             }
-            if (message != null && message.length() > 0) {
-                TextView tvM = text(ctx, message, SUB_SIZE + 2f, TEXT_SECONDARY);
-                tvM.setGravity(Gravity.CENTER);
-                tvM.setLineSpacing(dp(ctx, 5f), 1f);
 
-                final android.widget.ScrollView msgScroll = new android.widget.ScrollView(ctx);
+            final LiveGlass[] glassRef = new LiveGlass[1];
+            final Runnable dismiss = () -> dismissPanelRaw(fhost, overlay, panel, ctx, glassRef[0]);
 
-                msgScroll.setVerticalFadingEdgeEnabled(true);
-                msgScroll.setFadingEdgeLength(dp(ctx, 20f));
-                msgScroll.setVerticalScrollBarEnabled(false);
-                msgScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-                msgScroll.addView(tvM, new android.widget.FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT));
-                LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT);
-                mlp.bottomMargin = dp(ctx, 16f);
-                inner.addView(msgScroll, mlp);
-
-                final int maxMsgH = Math.round(ctx.getResources()
-                        .getDisplayMetrics().heightPixels * 0.55f);
-                tvM.post(new Runnable() {
-                    @Override public void run() {
-                        try {
-                            int h = tvM.getHeight();
-                            if (h <= 0) h = tvM.getMeasuredHeight();
-                            if (h > maxMsgH) {
-                                android.view.ViewGroup.LayoutParams lp = msgScroll.getLayoutParams();
-                                lp.height = maxMsgH;
-                                msgScroll.setLayoutParams(lp);
-                            }
-                            adjustPanelHeight[0].run();
-                        } catch (Throwable ignored) {}
-                    }
-                });
+            // 子类内容（含按钮行）
+            if (builder != null) {
+                builder.build(fhost, ctx, inner, panel, dismiss);
             }
-            LinearLayout btnRow = new LinearLayout(ctx);
-            btnRow.setOrientation(LinearLayout.HORIZONTAL);
-            btnRow.setGravity(Gravity.BOTTOM);
-            final String cancelLabel = (cancelText == null ? "取消" : cancelText);
-            final String okLabel = (okText == null ? "确定" : okText);
-            final Runnable[] dismiss = new Runnable[1];
-            final Runnable invokeCancel = () -> {
-                if (onCancel != null) {
-                    try { onCancel.onConfirm(); } catch (Throwable ignored) {}
-                }
-            };
-            dismiss[0] = () -> {
-                if (overlay.getParent() == null) return;
-                final LiveGlass dg = glassRef[0];
-                panel.animate().translationY(dp(ctx, 80f)).setDuration(200)
-                        .setInterpolator(new android.view.animation.AccelerateInterpolator())
-                        .setUpdateListener(a -> { if (dg != null) dg.doTick(); })
-                        .start();
-                overlay.animate().alpha(0f).setDuration(200)
-                        .setListener(new android.animation.AnimatorListenerAdapter() {
-                            @Override public void onAnimationEnd(android.animation.Animator a) {
-                                host.removeView(overlay);
-                            }
-                        }).start();
-            };
-            TextView btnCancel = dialogButton(ctx, cancelLabel, TEXT_SECONDARY, false, true);
-            btnCancel.setOnClickListener(v -> { dismiss[0].run(); invokeCancel.run(); });
-            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
-                    0, dp(ctx, 46f), 1f);
-            clp.rightMargin = dp(ctx, 8f);
-            btnRow.addView(btnCancel, clp);
-            TextView btnOk = dialogButton(ctx, okLabel, ACCENT, true, true);
-            btnOk.setOnClickListener(v -> {
-                dismiss[0].run();
-                if (onConfirm != null) onConfirm.onConfirm();
-            });
-            LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(
-                    0, dp(ctx, 46f), 1f);
-            olp.leftMargin = dp(ctx, 8f);
-            btnRow.addView(btnOk, olp);
 
-            LinearLayout.LayoutParams brlp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT);
-            brlp.topMargin = dp(ctx, 12f);
-            inner.addView(btnRow, brlp);
             panel.addView(inner, new android.widget.FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT));
-
-            android.widget.FrameLayout.LayoutParams plp =
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            final android.widget.FrameLayout.LayoutParams plp =
                     new android.widget.FrameLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.WRAP_CONTENT);
+                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             plp.gravity = Gravity.BOTTOM;
             plp.leftMargin = dp(ctx, 12f);
             plp.rightMargin = dp(ctx, 12f);
-            plp.bottomMargin = dp(ctx, 40f);
+            final int baseBottom = dp(ctx, 40f);
+            plp.bottomMargin = baseBottom;
             overlay.addView(panel, plp);
 
-            final float cornerForGlass = cornerFinal;
+            // 键盘避让（动画驱动 + 每帧重采样，避免静态模糊错位）
+            final int[] curMargin = { baseBottom };
+            overlay.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
+                @Override public android.view.WindowInsets onApplyWindowInsets(View v, android.view.WindowInsets insets) {
+                    int ime = 0;
+                    try { ime = insets.getInsets(android.view.WindowInsets.Type.ime()).bottom; } catch (Throwable ignored) {}
+                    final int toMargin = (ime > 0) ? ime + dp(ctx, 12f) : baseBottom;
+                    if (toMargin == curMargin[0]) return insets;
+                    android.animation.ValueAnimator va =
+                            android.animation.ValueAnimator.ofInt(curMargin[0], toMargin);
+                    curMargin[0] = toMargin;
+                    va.setDuration(200);
+                    va.setInterpolator(new android.view.animation.DecelerateInterpolator());
+                    va.addUpdateListener(a -> {
+                        plp.bottomMargin = (Integer) a.getAnimatedValue();
+                        panel.setLayoutParams(plp);
+                        LiveGlass g = glassRef[0];
+                        if (g != null) g.doTick();
+                    });
+                    va.start();
+                    return insets;
+                }
+            });
+
+            // 毛玻璃背景 / 兜底纯色
             panel.post(new Runnable() {
                 @Override public void run() {
                     adjustPanelHeight[0].run();
-
                     if (sample != null) {
                         try {
-                            LiveGlass g = new LiveGlass(ctx, sample, BLUR_RADIUS, GLASS_TINT, cornerForGlass);
+                            LiveGlass g = new LiveGlass(ctx, sample, BLUR_RADIUS, GLASS_TINT, corner);
                             g.setClickable(false);
                             glassRef[0] = g;
                             panel.addView(g, 0, new android.widget.FrameLayout.LayoutParams(
@@ -1604,23 +1878,24 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
                                     ViewGroup.LayoutParams.MATCH_PARENT));
                             g.start();
                         } catch (Throwable t2) {
-                            com.shortcutblur.ModuleLog.e("SoftUi", "confirm glass failed", t2);
-                            panel.setBackground(roundRect(CARD_FILL, cornerForGlass, ctx));
+                            com.shortcutblur.ModuleLog.e("SoftUi", "showPanel glass failed", t2);
+                            panel.setBackground(roundRect(CARD_FILL, corner, ctx));
                         }
                     } else {
-                        panel.setBackground(roundRect(DIALOG_FILL, cornerForGlass, ctx));
+                        panel.setBackground(roundRect(DIALOG_FILL, corner, ctx));
                     }
                 }
             });
-            overlay.setOnClickListener(v -> { dismiss[0].run(); invokeCancel.run(); });
-            host.addView(overlay, new android.view.ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT));
+
+            // 入场动画
+            overlay.requestApplyInsets();
+            fhost.addView(overlay, new android.view.ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
             overlay.setAlpha(0f);
             overlay.animate().alpha(1f).setDuration(180).start();
             panel.setTranslationY(dp(ctx, 80f));
-
-            final android.animation.ValueAnimator enter = android.animation.ValueAnimator.ofFloat(dp(ctx, 80f), 0f);
+            final android.animation.ValueAnimator enter =
+                    android.animation.ValueAnimator.ofFloat(dp(ctx, 80f), 0f);
             enter.setDuration(240);
             enter.setInterpolator(new android.view.animation.DecelerateInterpolator());
             enter.addUpdateListener(a -> {
@@ -1630,10 +1905,28 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
             });
             enter.start();
         } catch (Throwable t) {
-            com.shortcutblur.ModuleLog.e("SoftUi", "confirm dialog failed", t);
-            if (onConfirm != null) onConfirm.onConfirm();
+            com.shortcutblur.ModuleLog.e("SoftUi", "showPanel failed", t);
         }
     }
+
+    /** 统一的退出动画 */
+    private static void dismissPanelRaw(final ViewGroup host, final View overlayView,
+                                        final View panelView, final Context ctx, final LiveGlass glass) {
+        try {
+            if (overlayView.getParent() == null) return;
+            panelView.animate().translationY(dp(ctx, 80f)).setDuration(200)
+                    .setInterpolator(new android.view.animation.AccelerateInterpolator())
+                    .setUpdateListener(a -> { if (glass != null) glass.doTick(); })
+                    .start();
+            overlayView.animate().alpha(0f).setDuration(200)
+                    .setListener(new android.animation.AnimatorListenerAdapter() {
+                        @Override public void onAnimationEnd(android.animation.Animator a) {
+                            try { host.removeView(overlayView); } catch (Throwable ignored) {}
+                        }
+                    }).start();
+        } catch (Throwable ignored) {}
+    }
+
     private static ViewGroup resolveHost(View anchor) {
         if (anchor instanceof ViewGroup) return (ViewGroup) anchor;
         if (anchor != null) {
@@ -1728,7 +2021,6 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
             animator.start();
             selected = idx;
         }
-        public int selectedIndex() { return selected; }
 
         private void animatePress(boolean down) {
             final float target = down ? 1.12f : 1.0f;
@@ -2114,34 +2406,6 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         if (v == (long) v) return String.valueOf((long) v);
         return String.valueOf(Math.round(v));
     }
-    public static android.widget.FrameLayout header(Context c, String title, final View sample) {
-        final android.widget.FrameLayout bar = new android.widget.FrameLayout(c);
-        bar.setClickable(false);
-        bar.setFocusable(false);
-        bar.setWillNotDraw(false);
-        bar.setBackgroundColor(0x00000000);
-        TextView t = text(c, title, TITLE_SIZE, TEXT_PRIMARY);
-        android.widget.FrameLayout.LayoutParams tlp =
-                new android.widget.FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT);
-        tlp.gravity = Gravity.BOTTOM | Gravity.START;
-        tlp.leftMargin = dp(c, SIDE);
-        tlp.bottomMargin = dp(c, 10);
-        bar.addView(t, tlp);
-        bar.setBackgroundColor(0x00000000);
-        bar.post(() -> {
-            try {
-                blurBehind(bar, sample, HEADER_BLUR, true);
-                Effects.logDiag("header: 毛玻璃（壁纸+内容）");
-                Effects.logDiag("header.post: bar=" + bar.getWidth() + "x" + bar.getHeight()
-                        + " children=" + bar.getChildCount());
-            } catch (Throwable t2) {
-                Effects.logDiag("header.post 失败: " + t2);
-            }
-        });
-        return bar;
-    }
     public static android.widget.FrameLayout headerF(Context c, String title, final View sample) {
         return headerF(c, title, sample, statusBarH(c));
     }
@@ -2220,6 +2484,24 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         shell.addView(sc, new android.widget.FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
+        // === 键盘（IME）适配：API 35+ 强制 edge-to-edge，adjustResize 失效，
+        //     改为监听 IME insets，动态给内容加底部 padding，保证底部控件可滚出键盘。
+        final int basePadBottom = dp(c, SIDE);
+        sc.setOnApplyWindowInsetsListener((v2, insets) -> {
+            int ime = 0;
+            try { ime = insets.getInsets(android.view.WindowInsets.Type.ime()).bottom; } catch (Throwable ignored) {}
+            // 额外底部空间（如底栏高度，由 attachFooter 写入 tag）
+            int extra = 0;
+            try {
+                Object ex = content.getTag(EXTRA_PAD_TAG);
+                if (ex instanceof Integer) extra = (Integer) ex;
+            } catch (Throwable ignored) {}
+            content.setPadding(content.getPaddingLeft(), content.getPaddingTop(),
+                    content.getPaddingRight(), basePadBottom + extra + ime);
+            return insets;
+        });
+        sc.post(() -> { try { sc.requestApplyInsets(); } catch (Throwable ignored) {} });
+
         final android.widget.FrameLayout bar = headerF(c, title, sc, sbh);
         android.widget.FrameLayout.LayoutParams blp =
                 new android.widget.FrameLayout.LayoutParams(
@@ -2288,7 +2570,6 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
             index = Math.max(0, Math.min(labels.length - 1, i));
             applySelection();
         }
-        public int selected() { return index; }
         private void applySelection() {
             for (int i = 0; i < labels.length; i++) {
                 labels[i].setTextColor(i == index ? TAB_SEL : TEXT_SECONDARY);
@@ -2313,23 +2594,34 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         int h = dp(c, heightDp) + nav;
         fl.addView(bar, new android.widget.FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, h, Gravity.BOTTOM));
-        LinearLayout content = contentOf(shell);
+        final LinearLayout content = contentOf(shell);
         if (content != null) {
+            // 把底栏高度写入 tag，交给 IME 监听器统一累加（避免被覆盖）
+            content.setTag(EXTRA_PAD_TAG, h);
             content.setPadding(content.getPaddingLeft(), content.getPaddingTop(),
                     content.getPaddingRight(), h + dp(c, SIDE));
+            android.widget.ScrollView sc0 = scrollerOf(shell);
+            if (sc0 != null) sc0.post(() -> { try { sc0.requestApplyInsets(); } catch (Throwable ignored) {} });
         }
         android.widget.ScrollView sc = scrollerOf(shell);
         if (sc != null) blurBehind(bar, sc, HEADER_BLUR, true);
     }
     public static android.widget.ScrollView scrollerOf(View shell) {
-        if (shell instanceof ViewGroup) {
-            ViewGroup g = (ViewGroup) shell;
-            for (int i = 0; i < g.getChildCount(); i++) {
-                View ch = g.getChildAt(i);
-                if (ch instanceof android.widget.ScrollView) {
-                    return (android.widget.ScrollView) ch;
-                }
+        return scrollerOf(shell, 0);
+    }
+    private static android.widget.ScrollView scrollerOf(View shell, int depth) {
+        if (depth > 8 || !(shell instanceof ViewGroup)) return null;
+        ViewGroup g = (ViewGroup) shell;
+        for (int i = 0; i < g.getChildCount(); i++) {
+            View ch = g.getChildAt(i);
+            if (ch instanceof android.widget.ScrollView) {
+                return (android.widget.ScrollView) ch;
             }
+        }
+        for (int i = 0; i < g.getChildCount(); i++) {
+            View ch = g.getChildAt(i);
+            android.widget.ScrollView r = scrollerOf(ch, depth + 1);
+            if (r != null) return r;
         }
         return null;
     }

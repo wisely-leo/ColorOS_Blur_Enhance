@@ -13,6 +13,13 @@ public final class SettingsStore {
     private static final String KEY_LOG         = "log";
     private static final String KEY_QS_PROBE    = "quicksearch_blur";
     private static final String KEY_GALLERY_LIGHT = "gallery_light";
+    // ===== 时钟透明度 / 彩色玻璃 =====
+    private static final String KEY_CLOCK_ICON_ALPHA = "clock_icon_alpha";
+    private static final String KEY_CLOCK_TEXT_ALPHA = "clock_text_alpha";
+    private static final String KEY_CLOCK_BRIGHTEN   = "clock_brighten";
+    private static final String KEY_CLOCK_GLASS      = "clock_glass";
+    private static final String KEY_CLOCK_GLASS_BLEND= "clock_glass_blend";
+    private static final String KEY_CLOCK_GLASS_MIX  = "clock_glass_mix";
     private static final String KEY_THEME_MODE  = "theme_mode";
 
     private static final String KEY_LAST_VERCODE = "last_version_code";
@@ -62,6 +69,10 @@ public final class SettingsStore {
     public static final boolean DEF_LOG        = false;
     public static final boolean DEF_QS_PROBE   = true;
     public static final boolean DEF_GALLERY_LIGHT = true;
+    public static final float   DEF_CLOCK_ICON_ALPHA = 0.30f;
+    public static final float   DEF_CLOCK_TEXT_ALPHA = 0.30f;
+    public static final float   DEF_CLOCK_BRIGHTEN   = 1.25f;
+    public static final boolean DEF_CLOCK_GLASS      = false;
     private static final String[] HOST_PKGS = {
             "com.coloros.alarmclock",
             "com.android.launcher",
@@ -124,6 +135,12 @@ public final class SettingsStore {
         sb.append("log_enabled=").append(isLog() ? 1 : 0).append("\n");
         sb.append("quicksearch_blur=").append(isQsProbe() ? 1 : 0).append("\n");
         sb.append("gallery_light=").append(isGalleryLight() ? 1 : 0).append("\n");
+        sb.append("clock_icon_alpha=").append(getClockIconAlpha()).append("\n");
+        sb.append("clock_text_alpha=").append(getClockTextAlpha()).append("\n");
+        sb.append("clock_brighten=").append(getClockBrighten()).append("\n");
+        sb.append("clock_glass=").append(isClockGlass() ? 1 : 0).append("\n");
+        sb.append("clock_glass_blend=").append(Integer.toHexString(getClockGlassBlend())).append("\n");
+        sb.append("clock_glass_mix=").append(Integer.toHexString(getClockGlassMix())).append("\n");
         return sb.toString();
     }
     public int sendConfBroadcast() {
@@ -140,6 +157,12 @@ public final class SettingsStore {
                 i.putExtra("log_enabled",   isLog() ? "1" : "0");
                 i.putExtra("quicksearch_blur", isQsProbe() ? "1" : "0");
                 i.putExtra("gallery_light", isGalleryLight() ? "1" : "0");
+                i.putExtra("clock_icon_alpha", String.valueOf(getClockIconAlpha()));
+                i.putExtra("clock_text_alpha", String.valueOf(getClockTextAlpha()));
+                i.putExtra("clock_brighten", String.valueOf(getClockBrighten()));
+                i.putExtra("clock_glass", isClockGlass() ? "1" : "0");
+                i.putExtra("clock_glass_blend", Integer.toHexString(getClockGlassBlend()));
+                i.putExtra("clock_glass_mix", Integer.toHexString(getClockGlassMix()));
                 ctx.sendBroadcast(i);
                 ok++;
             } catch (Throwable t) {
@@ -156,6 +179,12 @@ public final class SettingsStore {
     public boolean isLog()         { return sp.getBoolean(KEY_LOG, DEF_LOG); }
     public boolean isQsProbe()     { return sp.getBoolean(KEY_QS_PROBE, DEF_QS_PROBE); }
     public boolean isGalleryLight(){ return sp.getBoolean(KEY_GALLERY_LIGHT, DEF_GALLERY_LIGHT); }
+    public float   getClockIconAlpha(){ return sp.getFloat(KEY_CLOCK_ICON_ALPHA, DEF_CLOCK_ICON_ALPHA); }
+    public float   getClockTextAlpha(){ return sp.getFloat(KEY_CLOCK_TEXT_ALPHA, DEF_CLOCK_TEXT_ALPHA); }
+    public float   getClockBrighten(){ return sp.getFloat(KEY_CLOCK_BRIGHTEN, DEF_CLOCK_BRIGHTEN); }
+    public boolean isClockGlass(){ return sp.getBoolean(KEY_CLOCK_GLASS, DEF_CLOCK_GLASS); }
+    public int     getClockGlassBlend(){ return sp.getInt(KEY_CLOCK_GLASS_BLEND, 0); }
+    public int     getClockGlassMix(){ return sp.getInt(KEY_CLOCK_GLASS_MIX, 0); }
 
     public static final int THEME_SYSTEM = 0, THEME_LIGHT = 1, THEME_DARK = 2;
     public int getThemeMode()      { return sp.getInt(KEY_THEME_MODE, THEME_SYSTEM); }
@@ -168,6 +197,41 @@ public final class SettingsStore {
     public SettingsStore setLog(boolean v)        { sp.edit().putBoolean(KEY_LOG, v).apply(); syncToHost(); return this; }
     public SettingsStore setQsProbe(boolean v)    { sp.edit().putBoolean(KEY_QS_PROBE, v).apply(); syncToHost(); return this; }
     public SettingsStore setGalleryLight(boolean v) { sp.edit().putBoolean(KEY_GALLERY_LIGHT, v).apply(); syncToHost(); return this; }
+    public SettingsStore setClockIconAlpha(float v){ sp.edit().putFloat(KEY_CLOCK_ICON_ALPHA, v).apply(); syncToHost(); return this; }
+    public SettingsStore setClockTextAlpha(float v){ sp.edit().putFloat(KEY_CLOCK_TEXT_ALPHA, v).apply(); syncToHost(); return this; }
+    public SettingsStore setClockBrighten(float v){ sp.edit().putFloat(KEY_CLOCK_BRIGHTEN, v).apply(); syncToHost(); return this; }
+    public SettingsStore setClockGlass(boolean v){ sp.edit().putBoolean(KEY_CLOCK_GLASS, v).apply(); syncToHost(); return this; }
+
+    /**
+     * 依据「色相预设 + 不透明度(0-1) + 混合强度(0-1)」计算并写入 blend/mix 两个 ARGB。
+     */
+    public void setClockGlassColor(int hueColorBase, float opacity, float mixStrength) {
+        opacity = Math.max(0f, Math.min(1f, opacity));
+        mixStrength = Math.max(0f, Math.min(1f, mixStrength));
+        int aA = Math.round(opacity * 255f);
+        int r = (hueColorBase >> 16) & 0xFF;
+        int g = (hueColorBase >> 8) & 0xFF;
+        int b = hueColorBase & 0xFF;
+        int blendA = (aA << 24) | (r << 16) | (g << 8) | b;
+        int rB = Math.min(255, r + (255 - r) / 4);
+        int gB = Math.min(255, g + (255 - g) / 4);
+        int bB = Math.min(255, b + (255 - b) / 4);
+        int aB = Math.round(opacity * mixStrength * 255f);
+        int mixB = (aB << 24) | (rB << 16) | (gB << 8) | bB;
+        sp.edit().putInt(KEY_CLOCK_GLASS_BLEND, blendA)
+                 .putInt(KEY_CLOCK_GLASS_MIX, mixB).apply();
+        syncToHost();
+    }
+
+    /** 当前浓度（从 blend 的 alpha 通道反推，0-1）。 */
+    public float getClockGlassOpacity() {
+        return ((getClockGlassBlend() >>> 24) & 0xFF) / 255f;
+    }
+
+    public int   getClockGlassHue(){ return sp.getInt("clock_glass_hue", 0); }
+    public void  setClockGlassHue(int v){ sp.edit().putInt("clock_glass_hue", v).apply(); }
+    public float getClockGlassMixStrength(){ return sp.getFloat("clock_glass_mix_strength", 0.5f); }
+    public void  setClockGlassMixStrength(float v){ sp.edit().putFloat("clock_glass_mix_strength", v).apply(); }
     public String appName() {
         String[] dirs = {
                 "/data/adb/modules/" + ctx.getPackageName(),

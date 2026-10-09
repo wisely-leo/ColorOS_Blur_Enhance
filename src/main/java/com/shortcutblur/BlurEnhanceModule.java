@@ -238,6 +238,10 @@ public class BlurEnhanceModule extends XposedModule {
                         if (i == null) return;
                         try {
                             RecentsBlur.applyConf(i);
+                            boolean clockChanged = FeatureFlags.applyFromIntent(i);
+                            if (clockChanged) {
+                                try { GlyphBlurRenderer.notifyContentMaybeChangedAll(); } catch (Throwable ignored) {}
+                            }
                             String mk = i.getStringExtra("mark");
                             if (mk != null) ModuleLog.d("MARK", "==== " + mk + " ====");
                             String vb = i.getStringExtra("verbose");
@@ -273,6 +277,8 @@ public class BlurEnhanceModule extends XposedModule {
         HookInstallResult r = new HookInstallResult();
         Set<Method> hooked = new HashSet<>();
         try {
+            // 彩色玻璃：拦截 blur drawable 参数重设
+            GlassColorHook.install(this, loader);
             if (FeatureFlags.SHORTCUT_BLUR) {
                 Class<?> cls = Reflect.loadClass(CLS_POPUP_BLUR_VIEW, loader);
                 if (cls != null) {

@@ -10,10 +10,24 @@ public class GlyphBlurRenderer {
     private static final int MAX_RETRY = 12;
     private static final float GLYPH_DY = 0.0f;
     private static final long RETRY_DELAY_MS = 120L;
-    private static final float ICON_ALPHA = 0.30f;
     private static final int ICON_ALPHA_THRESHOLD = 40;
     private static final int ICON_SAMPLE_MAX_W = 96;
-    private static final float BRIGHTEN_GAIN = 1.25f;
+    /** 天气图标透明度：读可调参数（默认0.30）*/
+    private static float iconAlpha() {
+        try {
+            // 自定义混色启用时：时钟透明度强制为 0（由混色接管）
+            if (FeatureFlags.CLOCK_GLASS) return 0f;
+            return FeatureFlags.CLOCK_ICON_ALPHA;
+        } catch (Throwable t) { return 0.30f; }
+    }
+    /** 提亮增益：读可调参数（默认1.25）*/
+    private static float brightenGain() {
+        try {
+            // 自定义混色启用时：提亮增益强制为 1.0（不变亮，由混色接管）
+            if (FeatureFlags.CLOCK_GLASS) return 1.0f;
+            return FeatureFlags.CLOCK_BRIGHTEN;
+        } catch (Throwable t) { return 1.25f; }
+    }
     private static final class GlyphSnapshot {
         final Path localPath;
         final float offX, offY;
@@ -24,6 +38,22 @@ public class GlyphBlurRenderer {
     private static final java.util.WeakHashMap<View, GlyphSnapshot[]> sSnapsMap = new java.util.WeakHashMap<View, GlyphSnapshot[]>();
     private static volatile boolean sScreenOn = true;
     private static final java.util.WeakHashMap<View, ClockBlurStateMachine> sRunners = new java.util.WeakHashMap<View, ClockBlurStateMachine>();
+    /** 记录所有时钟 blurDrawable（供 setBlurParamsInternal hook 做身份判断）*/
+    private static final java.util.ArrayList<Object> sClockBlurDrawables = new java.util.ArrayList<Object>();
+    public static void registerBlurDrawable(Object bd) {
+        if (bd == null) return;
+        synchronized (sClockBlurDrawables) {
+            for (Object o : sClockBlurDrawables) { if (o == bd) return; }
+            sClockBlurDrawables.add(bd);
+        }
+    }
+    public static boolean isClockBlurDrawable(Object bd) {
+        if (bd == null) return false;
+        synchronized (sClockBlurDrawables) {
+            for (Object o : sClockBlurDrawables) { if (o == bd) return true; }
+        }
+        return false;
+    }
     private static final class IconCacheEntry {
         final int fp;
         final int ivW, ivH;
@@ -79,6 +109,7 @@ public class GlyphBlurRenderer {
             Object blurDrawable = Reflect.call(bg, "getBlurDrawable");
             if (blurDrawable == null) { retry(container, cl, attempt, "bg=" + bgName + " no getBlurDrawable"); return; }
             ModuleLog.d("GB", "bg=" + bgName + " blur=" + blurDrawable.getClass().getName());
+            registerBlurDrawable(blurDrawable);
             rebuildSnapshots(container);
             GlyphSnapshot[] snaps = sSnapsMap.get(container);
             if (snaps == null || snaps.length == 0) { return; }
@@ -99,6 +130,7 @@ public class GlyphBlurRenderer {
             if (setPP == null) { ModuleLog.e("GB", "setPathProvider not found", null); return; }
             setPP.invoke(blurDrawable, provider);
             ModuleLog.d("GB", "setPathProvider ok");
+            applyGlassColor(blurDrawable, cl);
             installRefreshPoller(container, blurDrawable);
             applyClockBrighten(container);
             Method inv = Reflect.method(blurDrawable.getClass(), "invalidatePath", 0);
@@ -111,12 +143,13 @@ public class GlyphBlurRenderer {
     }
     private static volatile Method sSetRenderEffectMethod;
     private static volatile android.graphics.RenderEffect sBrightenEffect;
+    private static volatile float sBrightenEffectGain = Float.NaN;
     private static volatile boolean sBrightenBuildFailed;
     private static volatile boolean sBrightenLogged;
     private static android.graphics.RenderEffect buildBrightenEffect() {
-        if (sBrightenEffect != null) return sBrightenEffect;
-        if (sBrightenBuildFailed) return null;
-        final float gain = BRIGHTEN_GAIN;
+        final float gain = brightenGain();
+        android.graphics.RenderEffect cached = sBrightenEffect;
+        if (cached != null && Math.abs(sBrightenEffectGain - gain) < 0.001f) return cached;
         float[] m = new float[] {
                 gain, 0f,   0f,   0f, 0f,
                 0f,   gain, 0f,   0f, 0f,
@@ -129,9 +162,9 @@ public class GlyphBlurRenderer {
             Method cmf = android.graphics.RenderEffect.class.getMethod(
                     "createColorFilterEffect", android.graphics.ColorFilter.class);
             sBrightenEffect = (android.graphics.RenderEffect) cmf.invoke(null, cf);
+            sBrightenEffectGain = gain;
             return sBrightenEffect;
         } catch (Throwable t) {
-            sBrightenBuildFailed = true;
             ModuleLog.e("BRIGHT", "buildBrightenEffect fail", t);
             return null;
         }
@@ -150,6 +183,68 @@ public class GlyphBlurRenderer {
             return null;
         }
     }
+    /**
+     * 彩色玻璃：给模糊 drawable 上色。
+     * 调用链：BlurParam.setMaterialParams(blendMode, blendColorA, blendColorB)
+     *         -> ContinuousBlurDrawable.setBlurParams(BlurParam)
+     */
+    static void applyGlassColor(Object blurDrawable, ClassLoader cl) {
+        try {
+            if (blurDrawable == null) return;
+            Class<?> paramCls = Class.forName("com.oplus.posteffect.BlurParam", false, cl);
+            // 1) 读当前参数（保留 blurRadius/blurType 等）
+            Method getBP = Reflect.method(blurDrawable.getClass(), "getBlurParam", 0);
+            if (getBP == null) { ModuleLog.e("GLASS", "getBlurParam not found", null); return; }
+            getBP.setAccessible(true);
+            Object oldParam = getBP.invoke(blurDrawable);
+            if (oldParam == null) { ModuleLog.e("GLASS", "oldParam null", null); return; }
+            // 2) 新建并复制旧参数
+            Object param = paramCls.newInstance();
+            Method copyFrom = Reflect.method(paramCls, "copyFrom", 1);
+            if (copyFrom == null) { ModuleLog.e("GLASS", "copyFrom not found", null); return; }
+            copyFrom.setAccessible(true);
+            copyFrom.invoke(param, oldParam);
+            // 3) 开关关闭 → 不上色（保持原样）
+            if (!FeatureFlags.CLOCK_GLASS) {
+                return;
+            }
+            // 4) 用 setMaterialParams(mode, A, B) 染色（颜色从 FeatureFlags 读）
+            boolean dark = isUiDarkMode();
+            int blendMode = dark ? 4 : 3;
+            int blendA = FeatureFlags.CLOCK_GLASS_BLEND;
+            int blendB = FeatureFlags.CLOCK_GLASS_MIX;
+            // 无色 → 跳过
+            if (blendA == 0 && blendB == 0) { return; }
+            Method setMP = Reflect.method(paramCls, "setMaterialParams", 3);
+            if (setMP != null) { setMP.setAccessible(true); setMP.invoke(param, blendMode, blendA, blendB); }
+            // 4) 写回
+            Method setBP = Reflect.method(blurDrawable.getClass(), "setBlurParams", 1);
+            if (setBP == null) { ModuleLog.e("GLASS", "setBlurParams not found", null); return; }
+            setBP.setAccessible(true);
+            setBP.invoke(blurDrawable, param);
+            ModuleLog.d("GLASS", "applied mode=" + blendMode + " A=0x" + Integer.toHexString(blendA)
+                    + " B=0x" + Integer.toHexString(blendB));
+        } catch (Throwable t) {
+            ModuleLog.e("GLASS", "applyGlassColor fail", t);
+        }
+    }
+    /** 判断当前是否深色模式（用于彩色玻璃 blendMode 自适应）。 */
+    private static boolean isUiDarkMode() {
+        try {
+            Class<?> appCls = Class.forName("android.app.ActivityThread", false, null);
+            Object app = appCls.getMethod("currentApplication").invoke(null);
+            if (app instanceof android.app.Application) {
+                android.content.res.Resources res = ((android.app.Application) app).getResources();
+                if (res != null) {
+                    android.content.res.Configuration cfg = res.getConfiguration();
+                    return (cfg.uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                            == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+                }
+            }
+        } catch (Throwable ignored) {}
+        return false;
+    }
+
     static void applyClockBrighten(View container) {
         if (container == null) return;
         try {
@@ -158,7 +253,7 @@ public class GlyphBlurRenderer {
             Method setRE = findSetRenderEffect(container);
             if (setRE == null) return;
             setRE.invoke(container, effect);
-            if (!sBrightenLogged) { sBrightenLogged = true; ModuleLog.d("BRIGHT", "applied gain=" + BRIGHTEN_GAIN); }
+            if (!sBrightenLogged) { sBrightenLogged = true; ModuleLog.d("BRIGHT", "applied gain=" + brightenGain()); }
         } catch (Throwable t) {
             ModuleLog.e("BRIGHT", "applyClockBrighten fail", t);
         }
@@ -173,19 +268,6 @@ public class GlyphBlurRenderer {
     static void onWidgetUpdated(final View container) {
         if (container == null) return;
         notifyContentMaybeChangedAll();
-    }
-    private static void rebuildSnapshotsNow(View container) {
-        try {
-            Object blur = null;
-            android.graphics.drawable.Drawable bg = container.getBackground();
-            if (bg != null) blur = Reflect.call(bg, "getBlurDrawable");
-            rebuildSnapshots(container);
-            if (blur != null) {
-                Method inv = Reflect.method(blur.getClass(), "invalidatePath", 0);
-                if (inv != null) { inv.setAccessible(true); inv.invoke(blur); }
-            }
-            container.invalidate();
-        } catch (Throwable t) { ModuleLog.e("GB", "rebuildSnapshotsNow fail", t); }
     }
     private static android.graphics.Bitmap drawableToBitmap(android.graphics.drawable.Drawable d, View host) {
         if (d == null) return null;
@@ -315,13 +397,44 @@ public class GlyphBlurRenderer {
                     View root = ViewUtils.descendantJustBelow(container, "AppWidgetHostView");
                     if (root != null) v = root.findViewById(id);
                 }
-                if (v != null && Math.abs(v.getAlpha() - ICON_ALPHA) > 0.01f) {
-                    v.setAlpha(ICON_ALPHA);
+                if (v != null && Math.abs(v.getAlpha() - iconAlpha()) > 0.01f) {
+                    v.setAlpha(iconAlpha());
                     ModuleLog.d("GB", "iconAlpha id=0x" + Integer.toHexString(id)
-                        + " cls=" + v.getClass().getSimpleName() + " alpha=" + ICON_ALPHA);
+                        + " cls=" + v.getClass().getSimpleName() + " alpha=" + iconAlpha());
                 }
             }
         } catch (Throwable t) { ModuleLog.e("GB", "applyIconAlpha fail", t); }
+    }
+    /** 实时刷新时钟文字 alpha：遍历 TEXT_IDS，改已存在 TextView 文字色的 alpha */
+    static void applyTextAlpha(View container) {
+        try {
+            int a = 0x4D;
+            try {
+                // 自定义混色启用时：文字透明度强制为 0（与 ClockTextAlphaHook 保持一致）
+                if (FeatureFlags.CLOCK_GLASS) {
+                    a = 0;
+                } else {
+                    float f = FeatureFlags.CLOCK_TEXT_ALPHA;
+                    if (f < 0f) f = 0f; if (f > 1f) f = 1f;
+                    a = (int) (f * 255f + 0.5f);
+                }
+            } catch (Throwable ignore) {}
+            int[] ids = ClockIds.TEXT_IDS;
+            for (int id : ids) {
+                View v = container.findViewById(id);
+                if (!(v instanceof TextView)) {
+                    View root = ViewUtils.descendantJustBelow(container, "AppWidgetHostView");
+                    if (root != null) v = root.findViewById(id);
+                }
+                if (!(v instanceof TextView)) continue;
+                TextView tv = (TextView) v;
+                android.content.res.ColorStateList csl = tv.getTextColors();
+                if (csl == null) continue;
+                int cur = csl.getDefaultColor();
+                int newColor = (cur & 0x00FFFFFF) | (a << 24);
+                if (cur != newColor) tv.setTextColor(newColor);
+            }
+        } catch (Throwable t) { ModuleLog.e("GB", "applyTextAlpha fail", t); }
     }
     static void rebuildSnapshots(View container) {
         try {
@@ -368,6 +481,7 @@ public class GlyphBlurRenderer {
             appendWeatherIconSnapshots(container, base, list);
             sSnapsMap.put(container, list.isEmpty() ? null : list.toArray(new GlyphSnapshot[0]));
             applyIconAlpha(container);
+            applyTextAlpha(container);
         } catch (Throwable t) {
             ModuleLog.e("GB", "rebuildSnapshots fail", t);
         }
@@ -601,6 +715,7 @@ public class GlyphBlurRenderer {
         }
         private void doRebuild() {
             rebuildSnapshots(container);
+            try { applyGlassColor(blurDrawable, container.getContext().getClassLoader()); } catch (Throwable ignored) {}
             lastStateSig = computeSignature();
             lastFingerprint = computeFallbackFingerprint();
             Method inv = Reflect.method(blurDrawable.getClass(), "invalidatePath", 0);

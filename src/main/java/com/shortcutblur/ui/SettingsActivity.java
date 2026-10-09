@@ -15,6 +15,12 @@ import java.io.OutputStreamWriter;
 import java.net.HttpURLConnection;
 import java.net.URL;
 public class SettingsActivity extends Activity {
+    /** 由色相角度(0-360)算出基础混合色。 */
+    private static int hueToBaseColor(int hueDeg) {
+        float h = ((hueDeg % 360) + 360) % 360;
+        return android.graphics.Color.HSVToColor(new float[]{ h, 0.72f, 0.88f });
+    }
+
     private static boolean sFadeOnCreate = false;
 
     private static final String EXTRA_FADE = "fade_in";
@@ -24,7 +30,7 @@ public class SettingsActivity extends Activity {
     private static final int MAX_BG_MB = 15;
     private static final long MAX_BG_BYTES = MAX_BG_MB * 1024L * 1024L;
 
-    private static final String LOG_TAG_VER = "v44.1";
+    private static final String LOG_TAG_VER = "v44.3";
     static void lg(String s) {
         if (!App.logEnabled()) return;
         android.util.Log.i("SoftUi", s);
@@ -69,6 +75,10 @@ public class SettingsActivity extends Activity {
             store = new SettingsStore(this);
             SoftUi.initTheme(this, store.getThemeMode());
 
+            // 键盘弹出时窗口自动缩放（避免输入框被遮挡）
+            getWindow().setSoftInputMode(
+                    android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+                            | android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_UNSPECIFIED);
             getWindow().setBackgroundDrawable(
                     new android.graphics.drawable.ColorDrawable(SoftUi.CANVAS));
             android.graphics.Bitmap bg = null;
@@ -108,9 +118,9 @@ public class SettingsActivity extends Activity {
                     ((android.view.ViewGroup) decor).setFitsSystemWindows(false);
                 }
                 shell.setFitsSystemWindows(false);
-                shell.setOnApplyWindowInsetsListener((v, insets) -> {
-                    return insets;
-                });
+                // 不消费 insets，继续向下传播（ScrollView 靠它算 IME 高度）
+                shell.setOnApplyWindowInsetsListener((v, insets) -> insets);
+                shell.post(() -> { try { shell.requestApplyInsets(); } catch (Throwable ignored) {} });
                 lg("shell inset ok: shellTop=" + shell.getTop() + " shellH=" + shell.getHeight());
             } catch (Throwable t) { lg("shell inset 失败: " + t); }
             lg("setContentView OK —— onCreate 完成");
@@ -302,7 +312,17 @@ public class SettingsActivity extends Activity {
     }
 
     private static final String CHANGELOG =
-            "v44.2\n"
+            "v44.3\n"
+            + "· 新增时钟组件「自定义混色」：可调色相 + 手工输入色号，彩色玻璃效果\n"
+            + "  · 色相条与色号输入双向联动，实时同步\n"
+            + "· 设置界面弹窗重构：统一为通用弹窗骨架，三个弹窗共用\n"
+            + "  · 色号输入弹窗、确认弹窗、信息弹窗样式与键盘避让一致\n"
+            + "  · 弹窗毛玻璃随位置实时重采样，键盘顶起不错位\n"
+            + "· 修复深色模式切回浅色后，禁用控件灰度偏深的问题\n"
+            + "· 修复一级页面底部选项被底栏遮挡的问题\n"
+            + "· 清理无调用的冗余代码与行内注释\n"
+            + "\n"
+            + "v44.2\n"
             + "· 新增「相册强制白色主题」（默认开启）\n"
             + "  · 强制相册照片页使用浅色背景\n"
             + "  · 需在 LSPosed 中把本模块作用域勾选「相册」后重启相册生效\n"
@@ -535,8 +555,6 @@ public class SettingsActivity extends Activity {
             SoftUi.Card cardFunc = SoftUi.card(this,
                     SoftUi.toggle(this, "Shortcut 实时模糊", store.isShortcut(),
                             v -> store.setShortcut(v)),
-                    SoftUi.toggle(this, "小组件模糊（含时钟）", store.isWidget(),
-                            v -> store.setWidget(v)),
                     SoftUi.toggle(this, "下拉搜索实时模糊", store.isQsProbe(),
                             v -> store.setQsProbe(v)),
                     SoftUi.toggle(this, "相册强制白色主题", store.isGalleryLight(),
@@ -566,6 +584,136 @@ public class SettingsActivity extends Activity {
                             if (sw != null) sw.setCheckedImmediate(false);
                         });
             });
+            // ===== 时钟透明度（合并滑块 + 折叠）=====
+            View clockAlphaRow = SoftUi.slider(this, "时钟透明度",
+                    store.getClockIconAlpha() * 100f, 0, 100, "%",
+                    v -> { float a = v / 100f; store.setClockIconAlpha(a); store.setClockTextAlpha(a); });
+            View clockBrightRow = SoftUi.slider(this, "时钟提亮增益",
+                    store.getClockBrighten() * 100f, 50, 300, "%",
+                    v -> store.setClockBrighten(v / 100f));
+
+            // ===== 自定义混色 =====
+            float initOpacity = store.getClockGlassOpacity();
+            // 避免 alpha=0 → 透明无效
+            if (initOpacity <= 0.01f) initOpacity = 0.5f;
+            final float[] glassOpacityRef = { initOpacity };
+            final float[] glassMixRef = { store.getClockGlassMixStrength() };
+
+            // 兼容旧版存储（旧值 0-8 为索引；新值 0-360 为角度）
+            int rawHue = store.getClockGlassHue();
+            if (rawHue > 0 && rawHue <= 8) {
+                rawHue = Math.round((rawHue - 1) * 45f);
+                store.setClockGlassHue(rawHue);
+            }
+            final float[] glassHueFracRef = { rawHue / 360f };
+            final View[] hexValHolder = new View[1];
+            View glassHueRow = SoftUi.colorSlider(this, "自定义混色颜色",
+                    glassHueFracRef[0],
+                    (color, frac) -> {
+                        glassHueFracRef[0] = frac;
+                        store.setClockGlassHue(Math.round(frac * 360f));
+                        store.setClockGlass(true);
+                        store.setClockGlassColor(color, glassOpacityRef[0], glassMixRef[0]);
+                        // 同步色号展示，跟随色相变化
+                        if (hexValHolder[0] != null) {
+                            SoftUi.setRowTitle(hexValHolder[0],
+                                    "色号  #" + String.format("%06X", color & 0xFFFFFF));
+                        }
+                    });
+
+            // 色号（点击弹出输入弹窗，避免键盘遮挡）
+            final int initRgb = hueToBaseColor(store.getClockGlassHue()) & 0xFFFFFF;
+            View glassHexRow = SoftUi.link(this,
+                    "色号  #" + String.format("%06X", initRgb), () -> {
+                        SoftUi.colorPickerDialog(hexValHolder[0], "输入色号", initRgb, (rgb, valid) -> {
+                            if (!valid) return;
+                            float[] hsv = new float[3];
+                            android.graphics.Color.colorToHSV(rgb, hsv);
+                            store.setClockGlassHue(Math.round(hsv[0]));
+                            SoftUi.ColorSlider cs = SoftUi.findColorSlider(glassHueRow);
+                            if (cs != null) cs.setFrac(hsv[0] / 360f);
+                            store.setClockGlass(true);
+                            store.setClockGlassColor(rgb, glassOpacityRef[0], glassMixRef[0]);
+                            // 同步标题显示
+                            if (hexValHolder[0] != null) {
+                                SoftUi.setRowTitle(hexValHolder[0],
+                                        "色号  #" + String.format("%06X", rgb));
+                            }
+                        });
+                    });
+            hexValHolder[0] = glassHexRow;
+            View glassOpacityRow = SoftUi.slider(this, "混色浓度",
+                    glassOpacityRef[0] * 100f, 0, 100, "%",
+                    v -> {
+                        glassOpacityRef[0] = v / 100f;
+                        int base = hueToBaseColor(store.getClockGlassHue());
+                        store.setClockGlassColor(base, glassOpacityRef[0], glassMixRef[0]);
+                        store.setClockGlass(true);
+                    });
+
+            View glassMixRow = SoftUi.slider(this, "混色提亮强度",
+                    glassMixRef[0] * 100f, 0, 100, "%",
+                    v -> {
+                        glassMixRef[0] = v / 100f;
+                        store.setClockGlassMixStrength(glassMixRef[0]);
+                        int base = hueToBaseColor(store.getClockGlassHue());
+                        store.setClockGlassColor(base, glassOpacityRef[0], glassMixRef[0]);
+                        store.setClockGlass(true);
+                    });
+
+            // 混色开关只改变“时钟透明度/提亮”滑杆的【可用性与视觉】，
+            // 绝不改写用户存储的自定义值（clock_icon_alpha / clock_text_alpha / clock_brighten）。
+            // 真正的“混色期间强制 0 / 1.0”由模块侧读取时判断（FeatureFlags.CLOCK_GLASS）。
+            final Runnable applyGlassLock = () -> {
+                boolean on = store.isClockGlass();
+                // 只灰化，不改写滑杆数值 → 始终显示用户真实设置（混色期间不生效）
+                SoftUi.setRowEnabled(clockAlphaRow, !on);
+                SoftUi.setRowEnabled(clockBrightRow, !on);
+                // 数值始终同步为用户存储的真实值（防上一位被其它流程改动留下脏显示）
+                SoftUi.setRowValue(clockAlphaRow, store.getClockIconAlpha() * 100f);
+                SoftUi.setRowValue(clockBrightRow, store.getClockBrighten() * 100f);
+            };
+            // 统一刷新「时钟模糊 ↔ 自定义混色」的启用/灰化状态
+            final View[] sGlassToggleRowRef = new View[1];
+            final Runnable syncGlassEnable = () -> {
+                boolean widgetOn = store.isWidget();
+                boolean glassUsable = widgetOn && store.isClockGlass();
+                SoftUi.setRowEnabled(sGlassToggleRowRef[0], widgetOn);
+                SoftUi.setRowEnabled(glassHueRow, glassUsable);
+                SoftUi.setRowEnabled(glassHexRow, glassUsable);
+                SoftUi.setRowEnabled(glassOpacityRow, glassUsable);
+                SoftUi.setRowEnabled(glassMixRow, glassUsable);
+            };
+            View[] glassRows = SoftUi.toggleWithDependents(this, "自定义混色",
+                    store.isClockGlass(), v -> {
+                        store.setClockGlass(v);
+                        applyGlassLock.run();
+                        syncGlassEnable.run();
+                    },
+                    glassHueRow, glassHexRow, glassOpacityRow, glassMixRow);
+            // 供 syncGlassEnable 引用
+            sGlassToggleRowRef[0] = glassRows[0];
+
+            View[] clockRows = SoftUi.toggleWithDependents(this, "时钟组件模糊",
+                    store.isWidget(), v -> {
+                        store.setWidget(v);
+                        if (!v) {
+                            // 父功能关闭 → 子功能自然关闭（走完整流程：折叠 + 回调 + 数据）
+                            SoftUi.setToggleChecked(glassRows[0], false, true);
+                        }
+                        syncGlassEnable.run();
+                    },
+                    clockAlphaRow, clockBrightRow, glassRows[0]);
+            SoftUi.Card cardClock = SoftUi.card(this, clockRows[0], clockRows[1], glassRows[1]);
+
+            // 初始化：同步「时钟模糊 ↔ 混色」的启用状态 + 透明度/提亮锁定视觉
+            syncGlassEnable.run();
+            if (store.isWidget()) {
+                applyGlassLock.run();
+            } else {
+                SoftUi.setRowEnabled(clockAlphaRow, false);
+                SoftUi.setRowEnabled(clockBrightRow, false);
+            }
             SoftUi.Card cardExperimental = SoftUi.card(this, recentsRow);
             View[] pePair = SoftUi.toggleWithDependents(this, "posteffect 模糊采样率",
                     store.isPostEffect(), v -> store.setPostEffect(v), sampleRow);
@@ -701,11 +849,13 @@ public class SettingsActivity extends Activity {
                     SoftUi.infoBlock(this, "Shizuku API",
                             "RikkaApps  ·  Apache-2.0",
                             () -> openUrl("https://github.com/RikkaApps/Shizuku-API")));
-            SoftUi.Card[] cards = { cardFunc, cardPost, cardOther, cardExperimental,
+            SoftUi.Card[] cards = { cardFunc, cardClock, cardPost, cardOther, cardExperimental,
                                     cardAdb, cardScope, cardUpdate, cardPerm, cardAbout, cardFiles, cardNote, cardOss };
             SoftUi.stack(pageSettings,
                 SoftUi.group(this, "功能"),
                 cardFunc,
+                SoftUi.group(this, "时钟组件模糊"),
+                cardClock,
                 SoftUi.group(this, "实验性功能"),
                 cardExperimental,
                 SoftUi.group(this, "posteffect 模糊采样率"),

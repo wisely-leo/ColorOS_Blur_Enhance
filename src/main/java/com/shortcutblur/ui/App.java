@@ -1,18 +1,13 @@
 package com.shortcutblur.ui;
 import android.app.Application;
 import android.content.Context;
-import android.content.SharedPreferences;
 public class App extends Application {
-    public static final String REMOTE_GROUP = "blur_conf";
     private static App sApp;
     @Override
     public void onCreate() {
         super.onCreate();
         sApp = this;
         lg("=== App.onCreate (v42.5-ui) pid=" + android.os.Process.myPid() + " ===");
-    }
-    public static SharedPreferences prefs(Context ctx) {
-        return ctx.getApplicationContext().getSharedPreferences(REMOTE_GROUP, Context.MODE_PRIVATE);
     }
     public static boolean logEnabled() {
         try {
