@@ -312,7 +312,7 @@ public class SettingsActivity extends Activity {
 
     private static final String CHANGELOG =
             "v44.3\n"
-            + "· 新增时钟组件「自定义混色」：可调色相 + 手工输入色号，彩色玻璃效果\n"
+            + "· 新增时钟组件「自定义混色」：可调色相 + 手工输入色号，向时钟混入自定义颜色\n"
             + "  · 色相条与色号输入双向联动，实时同步\n"
             + "· 设置界面弹窗重构：统一为通用弹窗骨架，三个弹窗共用\n"
             + "  · 色号输入弹窗、确认弹窗、信息弹窗样式与键盘避让一致\n"
