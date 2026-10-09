@@ -14,9 +14,12 @@ public final class ImeBlurHook {
 
     private static final String TAG = "IMEBLUR";
 
-    public static final String PKG_YUYAN = "com.yuyan.pinyin.offline.release";
+    private static final String[] IMV_BASE_CANDIDATES = { "fx" };
 
-    private static final String CLS_IMV_BASE = "fx";
+    private static final String[] THEME_BG_CANDIDATES = { "xu" };
+
+    private static volatile String sImvBaseName = null;
+    private static volatile String sThemeBgName = null;
 
     private static volatile java.lang.ref.WeakReference<View> sLastView =
             new java.lang.ref.WeakReference<>(null);
@@ -70,6 +73,58 @@ public final class ImeBlurHook {
 
     private ImeBlurHook() {}
 
+    private static Class<?> findImvBase(ClassLoader cl) {
+        for (String name : IMV_BASE_CANDIDATES) {
+            try {
+                Class<?> c = Class.forName(name, false, cl);
+                if (c == null) continue;
+                if (!android.widget.RelativeLayout.class.isAssignableFrom(c)) {
+                    ModuleLog.d(TAG, "candidate " + name + " is not RelativeLayout, skip");
+                    continue;
+                }
+                boolean hasAttach = false;
+                boolean hasVis = false;
+                for (Method m : c.getDeclaredMethods()) {
+                    if ("onAttachedToWindow".equals(m.getName()) && m.getParameterCount() == 0) hasAttach = true;
+                    if ("onVisibilityChanged".equals(m.getName()) && m.getParameterCount() == 2) hasVis = true;
+                }
+                if (hasAttach && hasVis) {
+                    sImvBaseName = name;
+                    ModuleLog.d(TAG, "imv base resolved: " + name);
+                    return c;
+                }
+                ModuleLog.d(TAG, "candidate " + name + " missing required methods, skip");
+            } catch (Throwable t) {
+                ModuleLog.d(TAG, "candidate " + name + " load fail: " + t);
+            }
+        }
+        return null;
+    }
+
+    private static Class<?> findThemeBg(ClassLoader cl, Class<?> imvBase) {
+        for (String name : THEME_BG_CANDIDATES) {
+            try {
+                Class<?> c = Class.forName(name, false, cl);
+                if (c == null) continue;
+                if (imvBase != null && !imvBase.isAssignableFrom(c)) {
+                    ModuleLog.d(TAG, "candidate " + name + " is not subclass of imv base, skip");
+                    continue;
+                }
+                for (Method m : c.getDeclaredMethods()) {
+                    if ("u".equals(m.getName()) && m.getParameterCount() == 0) {
+                        sThemeBgName = name;
+                        ModuleLog.d(TAG, "theme bg resolved: " + name);
+                        return c;
+                    }
+                }
+                ModuleLog.d(TAG, "candidate " + name + " has no u(), skip");
+            } catch (Throwable t) {
+                ModuleLog.d(TAG, "candidate " + name + " load fail: " + t);
+            }
+        }
+        return null;
+    }
+
     public static void install(final BlurEnhanceModule mod,
                                XposedModuleInterface.PackageReadyParam param) {
         final ClassLoader cl = param.getClassLoader();
@@ -80,11 +135,12 @@ public final class ImeBlurHook {
 
     private static void installYuyan(final BlurEnhanceModule mod, final ClassLoader cl) {
         try {
-            Class<?> base = Class.forName(CLS_IMV_BASE, false, cl);
-            if (base == null || !View.class.isAssignableFrom(base)) {
-                ModuleLog.d(TAG, "base class not a View: " + CLS_IMV_BASE);
+            Class<?> base = findImvBase(cl);
+            if (base == null) {
+                ModuleLog.d(TAG, "imv base class not found (tried " + IMV_BASE_CANDIDATES.length + " candidates)");
                 return;
             }
+            final String baseName = sImvBaseName;
 
             Executable target = null;
             for (Method m : base.getDeclaredMethods()) {
@@ -94,7 +150,7 @@ public final class ImeBlurHook {
                 }
             }
             if (target == null) {
-                ModuleLog.d(TAG, "onAttachedToWindow not found in " + CLS_IMV_BASE);
+                ModuleLog.d(TAG, "onAttachedToWindow not found in " + baseName);
                 return;
             }
 
@@ -117,7 +173,7 @@ public final class ImeBlurHook {
                             return r;
                         }
                     });
-            ModuleLog.d(TAG, "hooked " + CLS_IMV_BASE + ".onAttachedToWindow");
+            ModuleLog.d(TAG, "hooked " + baseName + ".onAttachedToWindow");
 
             Executable visTarget = null;
             for (Method m : base.getDeclaredMethods()) {
@@ -152,13 +208,16 @@ public final class ImeBlurHook {
                                 return r;
                             }
                         });
-                ModuleLog.d(TAG, "hooked " + CLS_IMV_BASE + ".onVisibilityChanged");
+                ModuleLog.d(TAG, "hooked " + baseName + ".onVisibilityChanged");
             } else {
                 ModuleLog.d(TAG, "onVisibilityChanged not found, skip");
             }
 
             try {
-                Class<?> xu = Class.forName("xu", false, cl);
+                Class<?> xu = findThemeBg(cl, base);
+                if (xu == null) {
+                    throw new ClassNotFoundException("theme bg class not found");
+                }
                 Executable bgTarget = null;
                 for (Method m : xu.getDeclaredMethods()) {
                     if ("u".equals(m.getName()) && m.getParameterCount() == 0) {
@@ -177,7 +236,7 @@ public final class ImeBlurHook {
                                     try {
                                         Object self = chain.getThisObject();
                                         if (self instanceof View) {
-                                            ModuleLog.d(TAG, "xu.u() -> re-applyBlur after theme bg");
+                                            ModuleLog.d(TAG, sThemeBgName + ".u() -> re-applyBlur after theme bg");
                                             applyBlur((View) self);
                                         }
                                     } catch (Throwable t) {
@@ -186,12 +245,12 @@ public final class ImeBlurHook {
                                     return r;
                                 }
                             });
-                    ModuleLog.d(TAG, "hooked xu.u (theme bg)");
+                    ModuleLog.d(TAG, "hooked " + sThemeBgName + ".u (theme bg)");
                 } else {
-                    ModuleLog.d(TAG, "xu.u not found, skip");
+                    ModuleLog.d(TAG, sThemeBgName + ".u not found, skip");
                 }
             } catch (Throwable t) {
-                ModuleLog.d(TAG, "hook xu.u failed: " + t);
+                ModuleLog.d(TAG, "hook " + sThemeBgName + ".u failed: " + t);
             }
 
             } catch (Throwable t) {

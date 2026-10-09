@@ -49,6 +49,7 @@ public class BlurEnhanceModule extends XposedModule {
     private static final String PKG_POSTEFFECT = "com.oplus.blur";
     private static final String PKG_QUICKSEARCH = "com.heytap.quicksearchbox";
     private static final String PKG_CLOCK = "com.coloros.alarmclock";
+    private static final String PKG_YUYAN = "com.yuyan.pinyin.offline.release";
     private static final String CLS_EA = "e.a";
     private static final String CLS_BLUR_MGR = "com.oplus.posteffect.manager.BlurDrawableManager";
     private static final float BLUR_RADIUS = 64.0f;
@@ -126,7 +127,7 @@ public class BlurEnhanceModule extends XposedModule {
                 }
             }
 
-            if (ImeBlurHook.PKG_YUYAN.equals(pkg)) {
+            if (PKG_YUYAN.equals(pkg)) {
                 if (FeatureFlags.IME_BLUR) {
                     ImeBlurHook.install(this, param);
                 } else {

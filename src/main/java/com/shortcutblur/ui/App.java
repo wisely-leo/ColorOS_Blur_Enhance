@@ -9,6 +9,9 @@ public class App extends Application {
         sApp = this;
         lg("=== App.onCreate (v42.5-ui) pid=" + android.os.Process.myPid() + " ===");
     }
+    public static Context ctx() {
+        return sApp;
+    }
     public static boolean logEnabled() {
         try {
             if (sApp == null) return false;

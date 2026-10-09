@@ -82,13 +82,56 @@ public final class SettingsStore {
     public static final float   DEF_CLOCK_TEXT_ALPHA = 0.30f;
     public static final float   DEF_CLOCK_BRIGHTEN   = 1.25f;
     public static final boolean DEF_CLOCK_GLASS      = false;
-    private static final String[] HOST_PKGS = {
+    private static final String[] HOST_PKGS_FALLBACK = {
             "com.coloros.alarmclock",
             "com.android.launcher",
             "com.oplus.blur",
             "com.heytap.quicksearchbox",
             "com.yuyan.pinyin.offline.release",
     };
+    private static volatile String[] sHostPkgs = null;
+    private static String[] hostPkgs() {
+        if (sHostPkgs != null) return sHostPkgs;
+        synchronized (SettingsStore.class) {
+            if (sHostPkgs != null) return sHostPkgs;
+            String[] loaded = readScopeList();
+            sHostPkgs = (loaded != null && loaded.length > 0) ? loaded : HOST_PKGS_FALLBACK;
+            App.lg("[scope] host pkgs=" + sHostPkgs.length
+                    + (loaded != null && loaded.length > 0 ? " (from scope.list)" : " (fallback)"));
+            return sHostPkgs;
+        }
+    }
+    private static String[] readScopeList() {
+        android.content.Context ctx = App.ctx();
+        if (ctx == null) return null;
+        java.util.zip.ZipFile zf = null;
+        java.io.InputStream is = null;
+        try {
+            java.io.File apk = new java.io.File(ctx.getApplicationInfo().sourceDir);
+            if (!apk.exists()) return null;
+            zf = new java.util.zip.ZipFile(apk);
+            java.util.zip.ZipEntry e = zf.getEntry("META-INF/xposed/scope.list");
+            if (e == null) return null;
+            is = zf.getInputStream(e);
+            java.io.BufferedReader br = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(is, "UTF-8"));
+            java.util.List<String> out = new java.util.ArrayList<>();
+            String line;
+            while ((line = br.readLine()) != null) {
+                line = line.trim();
+                if (line.length() == 0 || line.startsWith("#")) continue;
+                out.add(line);
+            }
+            br.close();
+            return out.isEmpty() ? null : out.toArray(new String[0]);
+        } catch (Throwable t) {
+            App.lg("[scope] read scope.list failed: " + t);
+            return null;
+        } finally {
+            try { if (is != null) is.close(); } catch (Throwable ignored) {}
+            try { if (zf != null) zf.close(); } catch (Throwable ignored) {}
+        }
+    }
     public static final String ACTION_SETCONF = "com.wiselyleo.blurenhance.SETCONF";
     private static final String PUBLIC_DIR = "/data/local/tmp/ColorOSBlurEnhance";
     private static final String PUBLIC_PATH = PUBLIC_DIR + "/blur.conf";
@@ -104,7 +147,7 @@ public final class SettingsStore {
     private void doSync() {
         sendShizukuWrite();
         int n = sendConfBroadcast();
-        App.lg("[sync] broadcast=" + n + "/" + HOST_PKGS.length + " pkgs"
+        App.lg("[sync] broadcast=" + n + "/" + hostPkgs().length + " pkgs"
                 + "  " + snapshot().replace("\n", " "));
     }
     private void sendShizukuWrite() {
@@ -159,7 +202,7 @@ public final class SettingsStore {
     }
     public int sendConfBroadcast() {
         int ok = 0;
-        for (String pkg : HOST_PKGS) {
+        for (String pkg : hostPkgs()) {
             try {
                 Intent i = new Intent(ACTION_SETCONF);
                 i.setPackage(pkg);
