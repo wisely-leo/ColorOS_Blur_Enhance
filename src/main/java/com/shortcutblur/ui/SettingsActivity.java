@@ -559,15 +559,18 @@ public class SettingsActivity extends Activity {
                     SoftUi.toggle(this, "相册强制白色主题", store.isGalleryLight(),
                             v -> store.setGalleryLight(v)));
 
-            SoftUi.Card cardImeBlur = SoftUi.card(this,
-                    SoftUi.toggle(this, "输入法键盘模糊", store.isImeBlur(),
-                            v -> store.setImeBlur(v)),
-                    SoftUi.slider(this, "模糊程度", store.getImeBlurRadius(), 0f, 350f, "",
-                            v -> store.setImeBlurRadius(v)),
-                    SoftUi.slider(this, "键盘圆角", store.getImeBlurCornerDp(), 0f, 48f, "dp",
-                            v -> store.setImeBlurCorner(v)),
-                    SoftUi.slider(this, "白灰蒙版强度", store.getImeBlurMask() * 100f, 0f, 100f, "%",
-                            v -> store.setImeBlurMask(v / 100f)));
+            View imeRadiusRow = SoftUi.slider(this, "模糊程度", store.getImeBlurRadius(), 0f, 350f, "",
+                    v -> store.setImeBlurRadius(v));
+            View imeCornerRow = SoftUi.slider(this, "键盘圆角", store.getImeBlurCornerDp(), 0f, 48f, "dp",
+                    v -> store.setImeBlurCorner(v));
+            View imeMaskRow = SoftUi.slider(this, "白灰蒙版强度", store.getImeBlurMask() * 100f, 0f, 100f, "%",
+                    v -> store.setImeBlurMask(v / 100f));
+
+            View[] imeRows = SoftUi.toggleWithDependents(this, "输入法键盘模糊",
+                    store.isImeBlur(), v -> store.setImeBlur(v),
+                    imeRadiusRow, imeCornerRow, imeMaskRow);
+
+            SoftUi.Card cardImeBlur = SoftUi.card(this, imeRows[0], imeRows[1]);
 
             final SoftUi.Row recentsRow = SoftUi.toggle(this,
                     "最近任务模糊增强（实验性）", store.isRecents(), null, 0f, false);
