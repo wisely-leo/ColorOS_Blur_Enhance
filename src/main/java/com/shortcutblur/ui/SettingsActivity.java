@@ -567,8 +567,32 @@ public class SettingsActivity extends Activity {
                     v -> store.setImeBlurMask(v / 100f));
 
             View[] imeRows = SoftUi.toggleWithDependents(this, "输入法键盘模糊",
-                    store.isImeBlur(), v -> store.setImeBlur(v),
+                    store.isImeBlur(), null,
                     imeRadiusRow, imeCornerRow, imeMaskRow);
+            final SoftUi.Row imeToggleRow = (SoftUi.Row) imeRows[0];
+            final View imeFoldHolder = imeRows[1];
+            imeToggleRow.setOnToggle(v -> {
+                final SoftUi.Switch sw = imeToggleRow.switchView();
+                if (!v) {
+                    store.setImeBlur(false);
+                    SoftUi.applyFold(imeFoldHolder, false, true);
+                    return;
+                }
+                SoftUi.confirm(shell,
+                        "启用输入法键盘模糊",
+                        "该功能当前仅适配了语燕输入法(2026530.10)，"
+                                + "以后不保证适配其他输入法(取决于适配难度)，"
+                                + "如果你不使用该输入法就没有必要启用该功能。\n\n确定启用吗？",
+                        "确定启用", "取消",
+                        () -> {
+                            store.setImeBlur(true);
+                            SoftUi.applyFold(imeFoldHolder, true, true);
+                        },
+                        () -> {
+                            if (sw != null) sw.setCheckedImmediate(false);
+                            SoftUi.applyFold(imeFoldHolder, false, false);
+                        });
+            });
 
             SoftUi.Card cardImeBlur = SoftUi.card(this, imeRows[0], imeRows[1]);
 
