@@ -277,7 +277,7 @@ public class BlurEnhanceModule extends XposedModule {
         HookInstallResult r = new HookInstallResult();
         Set<Method> hooked = new HashSet<>();
         try {
-            // 彩色玻璃：拦截 blur drawable 参数重设
+
             GlassColorHook.install(this, loader);
             if (FeatureFlags.SHORTCUT_BLUR) {
                 Class<?> cls = Reflect.loadClass(CLS_POPUP_BLUR_VIEW, loader);

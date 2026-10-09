@@ -15,7 +15,7 @@ import java.io.OutputStreamWriter;
 import java.net.HttpURLConnection;
 import java.net.URL;
 public class SettingsActivity extends Activity {
-    /** 由色相角度(0-360)算出基础混合色。 */
+
     private static int hueToBaseColor(int hueDeg) {
         float h = ((hueDeg % 360) + 360) % 360;
         return android.graphics.Color.HSVToColor(new float[]{ h, 0.72f, 0.88f });
@@ -75,7 +75,6 @@ public class SettingsActivity extends Activity {
             store = new SettingsStore(this);
             SoftUi.initTheme(this, store.getThemeMode());
 
-            // 键盘弹出时窗口自动缩放（避免输入框被遮挡）
             getWindow().setSoftInputMode(
                     android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
                             | android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_UNSPECIFIED);
@@ -118,7 +117,7 @@ public class SettingsActivity extends Activity {
                     ((android.view.ViewGroup) decor).setFitsSystemWindows(false);
                 }
                 shell.setFitsSystemWindows(false);
-                // 不消费 insets，继续向下传播（ScrollView 靠它算 IME 高度）
+
                 shell.setOnApplyWindowInsetsListener((v, insets) -> insets);
                 shell.post(() -> { try { shell.requestApplyInsets(); } catch (Throwable ignored) {} });
                 lg("shell inset ok: shellTop=" + shell.getTop() + " shellH=" + shell.getHeight());
@@ -584,7 +583,7 @@ public class SettingsActivity extends Activity {
                             if (sw != null) sw.setCheckedImmediate(false);
                         });
             });
-            // ===== 时钟透明度（合并滑块 + 折叠）=====
+
             View clockAlphaRow = SoftUi.slider(this, "时钟透明度",
                     store.getClockIconAlpha() * 100f, 0, 100, "%",
                     v -> { float a = v / 100f; store.setClockIconAlpha(a); store.setClockTextAlpha(a); });
@@ -592,14 +591,12 @@ public class SettingsActivity extends Activity {
                     store.getClockBrighten() * 100f, 50, 300, "%",
                     v -> store.setClockBrighten(v / 100f));
 
-            // ===== 自定义混色 =====
             float initOpacity = store.getClockGlassOpacity();
-            // 避免 alpha=0 → 透明无效
+
             if (initOpacity <= 0.01f) initOpacity = 0.5f;
             final float[] glassOpacityRef = { initOpacity };
             final float[] glassMixRef = { store.getClockGlassMixStrength() };
 
-            // 兼容旧版存储（旧值 0-8 为索引；新值 0-360 为角度）
             int rawHue = store.getClockGlassHue();
             if (rawHue > 0 && rawHue <= 8) {
                 rawHue = Math.round((rawHue - 1) * 45f);
@@ -614,14 +611,13 @@ public class SettingsActivity extends Activity {
                         store.setClockGlassHue(Math.round(frac * 360f));
                         store.setClockGlass(true);
                         store.setClockGlassColor(color, glassOpacityRef[0], glassMixRef[0]);
-                        // 同步色号展示，跟随色相变化
+
                         if (hexValHolder[0] != null) {
                             SoftUi.setRowTitle(hexValHolder[0],
                                     "色号  #" + String.format("%06X", color & 0xFFFFFF));
                         }
                     });
 
-            // 色号（点击弹出输入弹窗，避免键盘遮挡）
             final int initRgb = hueToBaseColor(store.getClockGlassHue()) & 0xFFFFFF;
             View glassHexRow = SoftUi.link(this,
                     "色号  #" + String.format("%06X", initRgb), () -> {
@@ -634,7 +630,7 @@ public class SettingsActivity extends Activity {
                             if (cs != null) cs.setFrac(hsv[0] / 360f);
                             store.setClockGlass(true);
                             store.setClockGlassColor(rgb, glassOpacityRef[0], glassMixRef[0]);
-                            // 同步标题显示
+
                             if (hexValHolder[0] != null) {
                                 SoftUi.setRowTitle(hexValHolder[0],
                                         "色号  #" + String.format("%06X", rgb));
@@ -661,19 +657,16 @@ public class SettingsActivity extends Activity {
                         store.setClockGlass(true);
                     });
 
-            // 混色开关只改变“时钟透明度/提亮”滑杆的【可用性与视觉】，
-            // 绝不改写用户存储的自定义值（clock_icon_alpha / clock_text_alpha / clock_brighten）。
-            // 真正的“混色期间强制 0 / 1.0”由模块侧读取时判断（FeatureFlags.CLOCK_GLASS）。
             final Runnable applyGlassLock = () -> {
                 boolean on = store.isClockGlass();
-                // 只灰化，不改写滑杆数值 → 始终显示用户真实设置（混色期间不生效）
+
                 SoftUi.setRowEnabled(clockAlphaRow, !on);
                 SoftUi.setRowEnabled(clockBrightRow, !on);
-                // 数值始终同步为用户存储的真实值（防上一位被其它流程改动留下脏显示）
+
                 SoftUi.setRowValue(clockAlphaRow, store.getClockIconAlpha() * 100f);
                 SoftUi.setRowValue(clockBrightRow, store.getClockBrighten() * 100f);
             };
-            // 统一刷新「时钟模糊 ↔ 自定义混色」的启用/灰化状态
+
             final View[] sGlassToggleRowRef = new View[1];
             final Runnable syncGlassEnable = () -> {
                 boolean widgetOn = store.isWidget();
@@ -691,14 +684,14 @@ public class SettingsActivity extends Activity {
                         syncGlassEnable.run();
                     },
                     glassHueRow, glassHexRow, glassOpacityRow, glassMixRow);
-            // 供 syncGlassEnable 引用
+
             sGlassToggleRowRef[0] = glassRows[0];
 
             View[] clockRows = SoftUi.toggleWithDependents(this, "时钟组件模糊",
                     store.isWidget(), v -> {
                         store.setWidget(v);
                         if (!v) {
-                            // 父功能关闭 → 子功能自然关闭（走完整流程：折叠 + 回调 + 数据）
+
                             SoftUi.setToggleChecked(glassRows[0], false, true);
                         }
                         syncGlassEnable.run();
@@ -706,7 +699,6 @@ public class SettingsActivity extends Activity {
                     clockAlphaRow, clockBrightRow, glassRows[0]);
             SoftUi.Card cardClock = SoftUi.card(this, clockRows[0], clockRows[1], glassRows[1]);
 
-            // 初始化：同步「时钟模糊 ↔ 混色」的启用状态 + 透明度/提亮锁定视觉
             syncGlassEnable.run();
             if (store.isWidget()) {
                 applyGlassLock.run();

@@ -12,18 +12,18 @@ public class GlyphBlurRenderer {
     private static final long RETRY_DELAY_MS = 120L;
     private static final int ICON_ALPHA_THRESHOLD = 40;
     private static final int ICON_SAMPLE_MAX_W = 96;
-    /** 天气图标透明度：读可调参数（默认0.30）*/
+
     private static float iconAlpha() {
         try {
-            // 自定义混色启用时：时钟透明度强制为 0（由混色接管）
+
             if (FeatureFlags.CLOCK_GLASS) return 0f;
             return FeatureFlags.CLOCK_ICON_ALPHA;
         } catch (Throwable t) { return 0.30f; }
     }
-    /** 提亮增益：读可调参数（默认1.25）*/
+
     private static float brightenGain() {
         try {
-            // 自定义混色启用时：提亮增益强制为 1.0（不变亮，由混色接管）
+
             if (FeatureFlags.CLOCK_GLASS) return 1.0f;
             return FeatureFlags.CLOCK_BRIGHTEN;
         } catch (Throwable t) { return 1.25f; }
@@ -38,7 +38,7 @@ public class GlyphBlurRenderer {
     private static final java.util.WeakHashMap<View, GlyphSnapshot[]> sSnapsMap = new java.util.WeakHashMap<View, GlyphSnapshot[]>();
     private static volatile boolean sScreenOn = true;
     private static final java.util.WeakHashMap<View, ClockBlurStateMachine> sRunners = new java.util.WeakHashMap<View, ClockBlurStateMachine>();
-    /** 记录所有时钟 blurDrawable（供 setBlurParamsInternal hook 做身份判断）*/
+
     private static final java.util.ArrayList<Object> sClockBlurDrawables = new java.util.ArrayList<Object>();
     public static void registerBlurDrawable(Object bd) {
         if (bd == null) return;
@@ -183,41 +183,37 @@ public class GlyphBlurRenderer {
             return null;
         }
     }
-    /**
-     * 彩色玻璃：给模糊 drawable 上色。
-     * 调用链：BlurParam.setMaterialParams(blendMode, blendColorA, blendColorB)
-     *         -> ContinuousBlurDrawable.setBlurParams(BlurParam)
-     */
+
     static void applyGlassColor(Object blurDrawable, ClassLoader cl) {
         try {
             if (blurDrawable == null) return;
             Class<?> paramCls = Class.forName("com.oplus.posteffect.BlurParam", false, cl);
-            // 1) 读当前参数（保留 blurRadius/blurType 等）
+
             Method getBP = Reflect.method(blurDrawable.getClass(), "getBlurParam", 0);
             if (getBP == null) { ModuleLog.e("GLASS", "getBlurParam not found", null); return; }
             getBP.setAccessible(true);
             Object oldParam = getBP.invoke(blurDrawable);
             if (oldParam == null) { ModuleLog.e("GLASS", "oldParam null", null); return; }
-            // 2) 新建并复制旧参数
+
             Object param = paramCls.newInstance();
             Method copyFrom = Reflect.method(paramCls, "copyFrom", 1);
             if (copyFrom == null) { ModuleLog.e("GLASS", "copyFrom not found", null); return; }
             copyFrom.setAccessible(true);
             copyFrom.invoke(param, oldParam);
-            // 3) 开关关闭 → 不上色（保持原样）
+
             if (!FeatureFlags.CLOCK_GLASS) {
                 return;
             }
-            // 4) 用 setMaterialParams(mode, A, B) 染色（颜色从 FeatureFlags 读）
+
             boolean dark = isUiDarkMode();
             int blendMode = dark ? 4 : 3;
             int blendA = FeatureFlags.CLOCK_GLASS_BLEND;
             int blendB = FeatureFlags.CLOCK_GLASS_MIX;
-            // 无色 → 跳过
+
             if (blendA == 0 && blendB == 0) { return; }
             Method setMP = Reflect.method(paramCls, "setMaterialParams", 3);
             if (setMP != null) { setMP.setAccessible(true); setMP.invoke(param, blendMode, blendA, blendB); }
-            // 4) 写回
+
             Method setBP = Reflect.method(blurDrawable.getClass(), "setBlurParams", 1);
             if (setBP == null) { ModuleLog.e("GLASS", "setBlurParams not found", null); return; }
             setBP.setAccessible(true);
@@ -228,7 +224,7 @@ public class GlyphBlurRenderer {
             ModuleLog.e("GLASS", "applyGlassColor fail", t);
         }
     }
-    /** 判断当前是否深色模式（用于彩色玻璃 blendMode 自适应）。 */
+
     private static boolean isUiDarkMode() {
         try {
             Class<?> appCls = Class.forName("android.app.ActivityThread", false, null);
@@ -405,12 +401,12 @@ public class GlyphBlurRenderer {
             }
         } catch (Throwable t) { ModuleLog.e("GB", "applyIconAlpha fail", t); }
     }
-    /** 实时刷新时钟文字 alpha：遍历 TEXT_IDS，改已存在 TextView 文字色的 alpha */
+
     static void applyTextAlpha(View container) {
         try {
             int a = 0x4D;
             try {
-                // 自定义混色启用时：文字透明度强制为 0（与 ClockTextAlphaHook 保持一致）
+
                 if (FeatureFlags.CLOCK_GLASS) {
                     a = 0;
                 } else {

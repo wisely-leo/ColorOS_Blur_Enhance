@@ -13,7 +13,7 @@ public final class SettingsStore {
     private static final String KEY_LOG         = "log";
     private static final String KEY_QS_PROBE    = "quicksearch_blur";
     private static final String KEY_GALLERY_LIGHT = "gallery_light";
-    // ===== 时钟透明度 / 彩色玻璃 =====
+
     private static final String KEY_CLOCK_ICON_ALPHA = "clock_icon_alpha";
     private static final String KEY_CLOCK_TEXT_ALPHA = "clock_text_alpha";
     private static final String KEY_CLOCK_BRIGHTEN   = "clock_brighten";
@@ -39,8 +39,7 @@ public final class SettingsStore {
             if (cur <= 0) return;
             final long last = sp.getLong(KEY_LAST_VERCODE, -1L);
             if (last == cur) return;
-            // 仅在「从 v44 及之前版本（versionCode <= 440）升级上来」时，强制关闭一次
-            // 「最近任务模糊」；全新安装（last < 0）与 v44.1+ 升级一律尊重用户设置。
+
             if (last >= 0 && last <= 440L) {
                 boolean hadRecents = sp.getBoolean(KEY_RECENTS, DEF_RECENTS);
                 if (hadRecents) {
@@ -202,9 +201,6 @@ public final class SettingsStore {
     public SettingsStore setClockBrighten(float v){ sp.edit().putFloat(KEY_CLOCK_BRIGHTEN, v).apply(); syncToHost(); return this; }
     public SettingsStore setClockGlass(boolean v){ sp.edit().putBoolean(KEY_CLOCK_GLASS, v).apply(); syncToHost(); return this; }
 
-    /**
-     * 依据「色相预设 + 不透明度(0-1) + 混合强度(0-1)」计算并写入 blend/mix 两个 ARGB。
-     */
     public void setClockGlassColor(int hueColorBase, float opacity, float mixStrength) {
         opacity = Math.max(0f, Math.min(1f, opacity));
         mixStrength = Math.max(0f, Math.min(1f, mixStrength));
@@ -223,7 +219,6 @@ public final class SettingsStore {
         syncToHost();
     }
 
-    /** 当前浓度（从 blend 的 alpha 通道反推，0-1）。 */
     public float getClockGlassOpacity() {
         return ((getClockGlassBlend() >>> 24) & 0xFF) / 255f;
     }

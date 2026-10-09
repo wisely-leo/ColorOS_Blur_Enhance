@@ -5,10 +5,10 @@ import io.github.libxposed.api.XposedInterface.Chain;
 import io.github.libxposed.api.XposedInterface.ExceptionMode;
 import io.github.libxposed.api.XposedModule;
 public final class ClockTextAlphaHook {
-    /** 时钟文字 alpha（0-255）：读可调参数（默认 0x4D≈30%）*/
+
     private static int targetAlpha() {
         try {
-            // 自定义混色启用时：文字透明度强制为 0（由混色接管）
+
             if (FeatureFlags.CLOCK_GLASS) return 0;
             float f = FeatureFlags.CLOCK_TEXT_ALPHA;
             if (f < 0f) f = 0f; if (f > 1f) f = 1f;

@@ -10,18 +10,16 @@ public final class FeatureFlags {
     public static volatile float SAMPLE_SCALE = 0.5f;
     public static volatile boolean LOG_ENABLED = false;
 
-    // ===== 时钟组件透明度 / 彩色玻璃（可调参数）=====
-    /** 天气图标透明度 0.0-1.0（默认 0.30）*/
     public static volatile float CLOCK_ICON_ALPHA = 0.30f;
-    /** 时钟文字/数字颜色 alpha 0.0-1.0（默认 0.30）*/
+
     public static volatile float CLOCK_TEXT_ALPHA = 0.30f;
-    /** 时钟提亮增益（默认 1.25）*/
+
     public static volatile float CLOCK_BRIGHTEN = 1.25f;
-    /** 【预留】彩色玻璃开关 */
+
     public static volatile boolean CLOCK_GLASS = false;
-    /** 【预留】彩色玻璃 blendColor（ARGB int）*/
+
     public static volatile int CLOCK_GLASS_BLEND = 0;
-    /** 【预留】彩色玻璃 mixColor（ARGB int）*/
+
     public static volatile int CLOCK_GLASS_MIX = 0;
     public static final String CONF_PATH = "/data/local/tmp/ColorOSBlurEnhance/blur.conf";
     private static volatile boolean sLoaded = false;
@@ -193,7 +191,7 @@ public final class FeatureFlags {
         }
         return def;
     }
-    /** 从广播 Intent 解析配置（GUI 实时下发），返回是否有变更 */
+
     public static boolean applyFromIntent(android.content.Intent i) {
         if (i == null) return false;
         boolean changed = false;

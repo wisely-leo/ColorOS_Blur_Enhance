@@ -5,10 +5,6 @@ import java.lang.reflect.Method;
 import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedModule;
 
-/**
- * 彩色玻璃：拦截 ContinuousBlurDrawable.setBlurParamsInternal(BlurParam, ForegroundBlurParam, boolean)
- * 在系统每次重设模糊参数时，把「时钟」的 blurDrawable 的混合色改掉。
- */
 public final class GlassColorHook {
     private static volatile boolean sInstalled = false;
     private static final String CLS_CONTINUOUS = "com.oplus.posteffect.drawable.ContinuousBlurDrawable";

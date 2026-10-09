@@ -26,17 +26,17 @@ public final class SoftUi {
     public static int SWITCH_OFF     = 0xFFE9E9EA;
     public static int TRACK          = 0xFFE9E9EA;
     public static int KNOB           = 0xFFFFFFFF;
-    // 禁用态颜色（置灰）
+
     public static int DISABLED_TRACK  = 0xFFE0E0E0;
     public static int DISABLED_ACCENT = 0xFFBDBDBD;
     public static int DISABLED_KNOB   = 0xFFF0F0F0;
-    // 输入框配色
+
     public static int INPUT_FILL      = 0x14000000;
     public static int INPUT_STROKE    = 0x33808080;
     public static float RADIUS      = 22f;
     public static float ROW_H       = 48f;
     public static float PAD         = 16f;
-    /** Row 标题 TextView 的固定 ID（用于 setRowTitle 查找）。 */
+
     public static final int ROW_TITLE_ID = 0x7F00A001;
     public static float GAP         = 10f;
     public static float SIDE        = 16f;
@@ -71,7 +71,7 @@ public final class SoftUi {
     public static int   DIALOG_FILL = 0xF2FFFFFF;
 
     public static int   SCRIM       = 0x4D000000;
-    // content 额外底部空间 tag
+
     private static final int EXTRA_PAD_TAG = 0x7F00B101;
 
     public static int   BTN_SUBTLE      = 0x14000000;
@@ -195,7 +195,6 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
             android.graphics.drawable.Drawable d, int l, int t, int r, int b) {
         return new android.graphics.drawable.InsetDrawable(d, l, t, r, b);
     }
-
 
     private static android.graphics.drawable.GradientDrawable pressShape(
             Context c, int color, float rTopDp, float rBottomDp) {
@@ -523,10 +522,7 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
             if (cb != null) cb.onChange(value);
         }
     }
-    /**
-     * 色相滑块：彩虹渐变轨道 + 圆形 knob（当前色）+ 连续选色。
-     * 取值范围 0-360（色相角度）；0 时为无彩色（灰/关闭态）。
-     */
+
     public static class ColorSlider extends View {
         public interface OnColorChange { void onChange(int color, float hue01); }
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -536,7 +532,7 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         private boolean dragging = false;
         private float touchSlop = -1f;
         private final RectF track = new RectF();
-        // 0-1 位置
+
         private float frac = 0f;
         private OnColorChange cb;
         private float pressScale = 0.82f;
@@ -549,10 +545,10 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
             setClickable(true);
             touchSlop = android.view.ViewConfiguration.get(c).getScaledTouchSlop();
         }
-        /** 是否启用颜色（false = 灰色“关闭”态）。 */
+
         public void setFrac(float f) { frac = Math.max(0f, Math.min(1f, f)); invalidate(); }
         public ColorSlider setOnChange(OnColorChange c) { this.cb = c; return this; }
-        /** 当前颜色（enabledColor=false 时返回灰色）。 */
+
         public int currentColor() {
             if (!enabledColor) return 0x9E9E9E;
             return android.graphics.Color.HSVToColor(new float[]{ frac * 360f, 0.72f, 0.88f });
@@ -588,12 +584,12 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
             float r = trackH / 2f;
             cv.drawRoundRect(track, r, r, paint);
             paint.setShader(null);
-            // 外边框
+
             border.setStyle(Paint.Style.STROKE);
             border.setStrokeWidth(dp(getContext(), 0.7f));
             border.setColor(0x22000000);
             cv.drawRoundRect(track, r, r, border);
-            // knob
+
             float cx = left + (right - left) * frac;
             if (enabledColor) {
                 paint.setColor(android.graphics.Color.HSVToColor(new float[]{ frac * 360f, 0.72f, 0.88f }));
@@ -651,7 +647,6 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         }
     }
 
-    /** 色相滑块行：标题 + 色块预览 + 彩虹滑条。 */
     public static View colorSlider(Context c, String title, float startFrac,
                                    ColorSlider.OnColorChange cb) {
         ColorSlider cs = new ColorSlider(c, startFrac);
@@ -672,7 +667,6 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         return row;
     }
 
-    /** 递归查找 View 树中第一个 ColorSlider。 */
     public static ColorSlider findColorSlider(View root) {
         if (root instanceof ColorSlider) return (ColorSlider) root;
         if (root instanceof android.view.ViewGroup) {
@@ -685,7 +679,6 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         return null;
     }
 
-    /** 递归查找 View 树中第一个 Switch。 */
     public static Switch findSwitchView(View root) {
         if (root instanceof Switch) return (Switch) root;
         if (root instanceof android.view.ViewGroup) {
@@ -698,10 +691,6 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         return null;
     }
 
-    /**
-     * 设置开关行的状态。
-     * @param fireCallback true = 走完整流程（触发折叠动画 + onToggle 回调）；false = 仅改视觉
-     */
     public static void setToggleChecked(View row, boolean checked, boolean fireCallback) {
         if (row == null) return;
         Switch sw = findSwitchView(row);
@@ -710,16 +699,12 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         else sw.setCheckedImmediate(checked);
     }
 
-    /** 兼容：默认仅改视觉，不触发回调。 */
     public static void setToggleChecked(View row, boolean checked) {
         setToggleChecked(row, checked, false);
     }
 
-    /** 颜色输入回调。 */
     public interface ColorInputCb { void onColor(int rgb, boolean valid); }
 
-
-    /** 递归查找 EditText（用于程序化更新显示）。 */
     public static android.widget.EditText findEditText(View root) {
         if (root instanceof android.widget.EditText) return (android.widget.EditText) root;
         if (root instanceof android.view.ViewGroup) {
@@ -732,17 +717,13 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         return null;
     }
 
-    /**
-     * 色号输入弹窗：点击行后弹出，内部大输入框 + 实时预览 + 取消/确定。
-     * 弹窗自带键盘避让（独立窗口层，IME 会挤压它而非主界面）。
-     */
     public static void colorPickerDialog(final View anchor, String title, int initialRgb,
                                          final ColorInputCb cb) {
         showPanel(anchor, title, 16f, new PanelBuilder() {
             @Override public void build(ViewGroup host, final Context ctx,
                                         final LinearLayout inner, android.widget.FrameLayout panel,
                                         final Runnable dismiss) {
-                // 预览块 + 输入框 同行
+
                 LinearLayout line = new LinearLayout(ctx);
                 line.setOrientation(LinearLayout.HORIZONTAL);
                 line.setGravity(Gravity.CENTER_VERTICAL);
@@ -820,7 +801,6 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
                     @Override public void afterTextChanged(android.text.Editable s2) { eval.accept(s2.toString()); }
                 });
 
-                // 按钮行
                 LinearLayout btnRow = new LinearLayout(ctx);
                 btnRow.setOrientation(LinearLayout.HORIZONTAL);
                 btnRow.setGravity(Gravity.BOTTOM);
@@ -843,7 +823,6 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
                 brlp.topMargin = dp(ctx, 12f);
                 inner.addView(btnRow, brlp);
 
-                // 自动弹键盘
                 et.postDelayed(new Runnable() {
                     @Override public void run() {
                         try {
@@ -859,8 +838,6 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         });
     }
 
-
-    /** 修改一个 Row 的标题文字。 */
     public static void setRowTitle(View row, String title) {
         if (row == null || title == null) return;
         View v = findRowTitle(row);
@@ -880,7 +857,6 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         return null;
     }
 
-    /** 递归查找 View 树中第一个 Slider。 */
     public static Slider findSlider(View root) {
         if (root instanceof Slider) return (Slider) root;
         if (root instanceof android.view.ViewGroup) {
@@ -893,14 +869,13 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         return null;
     }
 
-    /** 设置滑杆行（Row）的可用状态：禁用后不可拖动且置灰，并同步值显示。 */
     public static void setRowEnabled(View row, boolean enabled) {
         if (row == null) return;
         Slider s = findSlider(row);
         if (s != null) s.setEnabled(enabled);
         ColorSlider cs = findColorSlider(row);
         if (cs != null) cs.setEnabled(enabled);
-        // 统一递归禁用所有交互子控件（含 EditText）
+
         setEnabledRecursive(row, enabled);
         row.setAlpha(enabled ? 1f : 0.45f);
     }
@@ -915,7 +890,6 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         }
     }
 
-    /** 设置滑杆行的值（不动 callback）。 */
     public static void setRowValue(View row, float v) {
         if (row == null) return;
         Slider s = findSlider(row);
@@ -940,7 +914,6 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
             inner.setClipToPadding(false);
         }
         private static final int TAG_PRESS = "softui_press".hashCode();
-
 
         public void applyEdgeInsets(float insetDp) {
             final int n = inner.getChildCount();
@@ -1631,7 +1604,7 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
                             ViewGroup.LayoutParams.WRAP_CONTENT);
                     mlp.bottomMargin = dp(ctx, 16f);
                     inner.addView(msgScroll, mlp);
-                    // 同步测量文本高度并立即限高（避免与 panel 高度锁定产生时序竞争）
+
                     try {
                         int panelW = ctx.getResources().getDisplayMetrics().widthPixels - dp(ctx, 24f);
                         int contentW = panelW - dp(ctx, (PAD + 6f) * 2f);
@@ -1693,7 +1666,7 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
                             ViewGroup.LayoutParams.WRAP_CONTENT);
                     mlp.bottomMargin = dp(ctx, 16f);
                     inner.addView(msgScroll, mlp);
-                    // 同步测量文本高度并立即限高（避免与 panel 高度锁定产生时序竞争）
+
                     try {
                         int panelW = ctx.getResources().getDisplayMetrics().widthPixels - dp(ctx, 24f);
                         int contentW = panelW - dp(ctx, (PAD + 6f) * 2f);
@@ -1738,22 +1711,15 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
             }
         });
     }
-    // ==================== 通用弹窗骨架（confirm / infoDialog / colorPickerDialog 共用） ====================
-    /**
-     * 面板内容构建器：往 inner 里添加自有内容（含按钮行）。
-     * @param dismiss 调用它执行“退出动画并移除弹窗”
-     */
+
     public interface PanelBuilder {
         void build(ViewGroup host, Context ctx, LinearLayout inner, android.widget.FrameLayout panel, Runnable dismiss);
     }
 
-    /**
-     * 弹出 SoftUi 风格面板（SCRIM 遮罩 + 28dp 圆角 + 毛玻璃 + 底部滑入）。
-     */
     public static void showPanel(final View anchor, String title, float titleBottomMarginDp,
                                  final PanelBuilder builder) {
         try {
-            // 向上找最顶层 ViewGroup（uiRoot），保证 overlay 撑满全屏
+
             ViewGroup host = null;
             View v0 = anchor;
             while (v0 instanceof View) {
@@ -1792,7 +1758,7 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
                             View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
                             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
                     int targetH = panel.getMeasuredHeight();
-                    // 高度上限：屏高 - 上下留白（超长内容由内部 ScrollView 滚动查看）
+
                     int screenH = ctx.getResources().getDisplayMetrics().heightPixels;
                     int maxPanelH = screenH - dp(ctx, 40f) * 2 - navBarH(ctx);
                     if (maxPanelH < dp(ctx, 120f)) maxPanelH = screenH - dp(ctx, 40f) * 2;
@@ -1823,7 +1789,6 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
             final LiveGlass[] glassRef = new LiveGlass[1];
             final Runnable dismiss = () -> dismissPanelRaw(fhost, overlay, panel, ctx, glassRef[0]);
 
-            // 子类内容（含按钮行）
             if (builder != null) {
                 builder.build(fhost, ctx, inner, panel, dismiss);
             }
@@ -1840,7 +1805,6 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
             plp.bottomMargin = baseBottom;
             overlay.addView(panel, plp);
 
-            // 键盘避让（动画驱动 + 每帧重采样，避免静态模糊错位）
             final int[] curMargin = { baseBottom };
             overlay.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
                 @Override public android.view.WindowInsets onApplyWindowInsets(View v, android.view.WindowInsets insets) {
@@ -1864,7 +1828,6 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
                 }
             });
 
-            // 毛玻璃背景 / 兜底纯色
             panel.post(new Runnable() {
                 @Override public void run() {
                     adjustPanelHeight[0].run();
@@ -1887,7 +1850,6 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
                 }
             });
 
-            // 入场动画
             overlay.requestApplyInsets();
             fhost.addView(overlay, new android.view.ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -1909,7 +1871,6 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         }
     }
 
-    /** 统一的退出动画 */
     private static void dismissPanelRaw(final ViewGroup host, final View overlayView,
                                         final View panelView, final Context ctx, final LiveGlass glass) {
         try {
@@ -2484,13 +2445,12 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         shell.addView(sc, new android.widget.FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
-        // === 键盘（IME）适配：API 35+ 强制 edge-to-edge，adjustResize 失效，
-        //     改为监听 IME insets，动态给内容加底部 padding，保证底部控件可滚出键盘。
+
         final int basePadBottom = dp(c, SIDE);
         sc.setOnApplyWindowInsetsListener((v2, insets) -> {
             int ime = 0;
             try { ime = insets.getInsets(android.view.WindowInsets.Type.ime()).bottom; } catch (Throwable ignored) {}
-            // 额外底部空间（如底栏高度，由 attachFooter 写入 tag）
+
             int extra = 0;
             try {
                 Object ex = content.getTag(EXTRA_PAD_TAG);
@@ -2596,7 +2556,7 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
                 ViewGroup.LayoutParams.MATCH_PARENT, h, Gravity.BOTTOM));
         final LinearLayout content = contentOf(shell);
         if (content != null) {
-            // 把底栏高度写入 tag，交给 IME 监听器统一累加（避免被覆盖）
+
             content.setTag(EXTRA_PAD_TAG, h);
             content.setPadding(content.getPaddingLeft(), content.getPaddingTop(),
                     content.getPaddingRight(), h + dp(c, SIDE));
