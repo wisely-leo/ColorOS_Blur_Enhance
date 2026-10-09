@@ -436,13 +436,33 @@ public final class SettingsStore {
     public String authorName()  { return moduleProp("author",  "Wisely_Leo"); }
     public String appLabel(String pkg) {
         if (pkg == null || pkg.length() == 0) return "?";
+        String mapped = LABEL_FALLBACK.get(pkg);
+        if (mapped != null) return mapped;
         try {
             android.content.pm.PackageManager pm = ctx.getPackageManager();
             android.content.pm.ApplicationInfo ai =
-                    pm.getApplicationInfo(pkg, 0);
+                    pm.getApplicationInfo(pkg, android.content.pm.PackageManager.MATCH_DISABLED_COMPONENTS);
             CharSequence cs = pm.getApplicationLabel(ai);
-            if (cs != null && cs.length() > 0) return cs.toString();
-        } catch (Throwable ignored) {}
+            if (cs != null && cs.length() > 0) {
+                String s = cs.toString();
+                App.lg("[label] " + pkg + " => " + s);
+                return s;
+            }
+            App.lg("[label] " + pkg + " => empty label");
+        } catch (Throwable t) {
+            App.lg("[label] " + pkg + " => EX " + t);
+        }
         return pkg;
+    }
+    private static final java.util.HashMap<String, String> LABEL_FALLBACK = new java.util.HashMap<>();
+    static {
+        LABEL_FALLBACK.put("com.coloros.alarmclock", "时钟");
+        LABEL_FALLBACK.put("com.android.launcher", "桌面");
+        LABEL_FALLBACK.put("com.oplus.launcher", "桌面");
+        LABEL_FALLBACK.put("com.coloros.launcher", "桌面");
+        LABEL_FALLBACK.put("com.oplus.blur", "模糊服务");
+        LABEL_FALLBACK.put("com.heytap.quicksearchbox", "全局搜索");
+        LABEL_FALLBACK.put("com.coloros.gallery3d", "相册");
+        LABEL_FALLBACK.put("com.yuyan.pinyin.offline.release", "语燕输入法");
     }
 }
