@@ -2,7 +2,7 @@
 
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPLv3--or--later-blue.svg)](LICENSE) [![Platform](https://img.shields.io/badge/Android-16%20(API%2036)-green.svg)](#-支持环境) [![LSPosed](https://img.shields.io/badge/LSPosed-libxposed%20API%20102-orange.svg)](#-支持环境)
 
-为 **ColorOS 16 桌面、多任务与时钟组件**提供动态模糊增强的 [LSPosed](https://github.com/LSPosed/LSPosed) 模块，附带一个可实时调参的 **图形化设置界面**。
+为 **ColorOS 16 桌面、多任务、时钟组件、相册、全局搜索与输入法**提供动态模糊 / 视觉增强的 [LSPosed](https://github.com/LSPosed/LSPosed) 模块，附带一个可实时调参的 **图形化设置界面**。
 
 > 本项目由 `wisely-leo/Color-os-shortcut-enhance`（原 ShortcutBlur）与桌面时钟字形模糊实验合并重构而来。
 
@@ -15,9 +15,10 @@
 模块自带一个独立启动器界面，**无需重启、无需改代码**即可实时调整各项能力：
 
 - **双页结构**：「模块设置」（功能开关）+「更多」（检查更新 / 关于 / 权限说明 / 开源致谢）
+- **可折叠选项**：带子选项的功能使用可折叠控件，开关收起 / 展开子参数
 - **实时生效**：改动立即通过广播 + `blur.conf` 同步给宿主进程，无需重建
 - **检查更新**：直接查询 GitHub Releases，仅当远端版本**高于**当前安装版本时才提示「发现新版本」（按 versionCode 比较，不会误报旧版本）
-- **作用域重启**：借助 Shizuku 逐个应用单独重启（`force-stop`），也能一键重启全部
+- **作用域重启**：借助 Shizuku 逐个应用单独重启（`force-stop`），也能一键重启全部；应用名以中文显示
 - **自定义背景**：可为本界面设置一张背景图片（`15MB` 以内），并带平滑淡入 / 收回动画
 - **背景毛玻璃**：设置背景图后，卡片与顶栏会自动叠加真实模糊
 
@@ -53,10 +54,26 @@
 - **零额外开销**：不在搜索页侧重复做模糊，完全复用桌面侧实时模糊，性能开销极低
 - **可开关**：GUI「模块设置」中「下拉搜索实时模糊」开关，默认开
 
+### 🖼️ 相册强制白色主题
+
+- **强制浅色背景**：强制相册（`com.coloros.gallery3d`）照片页使用浅色背景，不受系统深色模式影响
+- **独立实现**：纯 Java 零依赖，hook 相册配置读取的统一入口 `com.oplus.aiunit.vision.rda` 的 `Boolean M6(String, boolean)`，按配置键覆盖返回值
+- **需勾选作用域**：需在 LSPosed 把本模块作用域勾选「相册」后重启相册生效（升级安装时 LSPosed 会保留旧作用域，需手动勾选）
+
+### ⌨️ 输入法键盘模糊（仅适配语燕输入法）
+
+- **键盘背景高斯模糊**：让输入法键盘背景呈现高斯模糊，与系统其他模糊区域观感统一
+- **可调参数**：模糊程度 / 键盘圆角 / 白灰蒙版强度
+- **启用提示**：开启前会弹窗提示适配范围（当前仅适配语燕输入法，不保证适配其他输入法）
+- **需勾选作用域**：需在 LSPosed 把本模块作用域勾选「语燕输入法」后重启生效；不使用该输入法则无需开启
+- **适配识别去硬编码**：由「写死混淆类名」改为「候选名 + 特征校验」自动识别；宿主列表读取模块作用域自动同步
+
 ### ⚡ 性能
 
-- 反射结果缓存（带容量上限的 LRU），避免热点路径反复解析
-- 帧内临时对象复用，减少每帧内存分配
+- 反射结果缓存（带容量上限的 LRU，上限 512），避免热点路径反复解析
+- 绘制路径上的 `Rect` / `RectF` 以字段复用，避免每帧新建对象
+- 深色判定结果缓存、按键/键盘根布局按类缓存，避免每帧重复读取配置或反射
+- 同一帧内多次触发施模糊时去抖合并，避免重复开销
 - 发布版日志彻底关闭，零运行时开销
 
 ---
@@ -84,7 +101,7 @@
 - **输入法进程**（`com.yuyan.pinyin.offline.release` · 语燕输入法）
   输入法键盘背景高斯模糊
 
-> ⚠️ 本模块**并非只作用于桌面**：必须同时覆盖后处理与时钟进程，否则对应能力不会生效。
+> ⚠️ 本模块**并非只作用于桌面**：桌面模糊必须同时覆盖后处理与时钟进程才会生效；相册、输入法等能力需**单独勾选对应作用域**（升级安装时 LSPosed 会保留旧作用域，可能需手动勾选）。
 
 已在 OnePlus / OPPO PLC110（ColorOS 16.1，Android 16 / API 36）实机验证。
 
@@ -95,7 +112,7 @@
 1. 确保设备已安装 **LSPosed** 框架
 2. 从 [Releases](../../releases) 下载并安装模块 APK
 3. 在 LSPosed 管理器中启用本模块
-4. **作用域**保持默认（模块已声明，全选即可）
+4. **作用域**：建议全选（模块已声明 6 个；升级安装时 LSPosed 可能保留旧作用域，必要时手动勾选「相册」「语燕输入法」等）
 5. 打开模块自带界面，按需调整功能开关
 6. 若开关不立即生效，可在「模块设置」中重启相应作用域（需 Shizuku）
 
@@ -121,6 +138,12 @@
 - **后处理采样**
   提升后处理进程的模糊采样率，改善模糊边缘的马赛克 / 颗粒感。
 
+- **相册强制浅色**
+  hook 相册配置读取的统一入口 `com.oplus.aiunit.vision.rda` 的 `Boolean M6(String, boolean)`，按配置键强制浅色相关返回值为「非深色 / 浅色可用」。
+
+- **输入法键盘模糊**
+  hook 输入法视图基类的 `onAttachedToWindow` / `onVisibilityChanged` 与主题背景刷新方法，在键盘显示 / 主题变化时对键盘根布局施模糊：反射构造 OPLUS `ViewRootManager`（`com.oplus.view.ViewRootManager`），取其 `getBackgroundBlurDrawable` 并设置半径 / 颜色 / 圆角后作为背景。**适配识别**：视图基类与主题背景类由「候选名 + 特征校验」在运行时确定，不写死混淆类名；宿主包列表读取模块自身 `scope.list`。
+
 ---
 
 ## ⚙️ 运行期调参
@@ -131,7 +154,7 @@
 
 界面用到两条同步通道：
 
-1. **广播**：向 3 个宿主包发送 `com.wiselyleo.blurenhance.SETCONF`
+1. **广播**：向全部作用域宿主包（默认 6 个，读取模块自身 `scope.list`）发送 `com.wiselyleo.blurenhance.SETCONF`
 2. **配置文件**：借助 Shizuku 写入 `/data/local/tmp/ColorOSBlurEnhance/blur.conf`
    （模块读不到广播时也能从这里取到最新配置）
 
@@ -143,6 +166,9 @@ shortcut_blur=1
 recents_blur=1
 widget_blur=1
 posteffect=1
+quicksearch_blur=1
+gallery_light=1
+ime_blur=0
 sample_scale=0.5
 log_enabled=0
 ```
@@ -173,7 +199,7 @@ am broadcast --user 0 -a com.wiselyleo.blurenhance.SETCONF --es mark "enter-rece
 
 - 日志默认关闭：**不产生任何日志文件，也没有运行时开销**。
 - 可在界面「模块设置」中临时开启，用于排查问题。
-- 日志按进程分流写入设备 `Download` 目录：主进程与后处理进程各写一个文件；运行时 logcat 使用统一 TAG。
+- 日志按进程分流写入设备 `Download` 目录：文件名带进程 PID（`ColorOSBlurEnhance_p<pid>.log`），避免多进程互相覆盖；运行时 logcat 使用统一 TAG。
 - 界面侧日志写入 `Download/UiStartup.log`。
 
 ### 模块文件位置
@@ -182,7 +208,7 @@ am broadcast --user 0 -a com.wiselyleo.blurenhance.SETCONF --es mark "enter-rece
 |---|---|
 | 运行时配置 | `/data/local/tmp/ColorOSBlurEnhance/blur.conf` |
 | 自定义背景图 | 应用私有目录 `files/bg.jpg` |
-| 模块日志 | `/storage/emulated/0/Download/ColorOSBlurEnhance.log` |
+| 模块日志 | `/storage/emulated/0/Download/ColorOSBlurEnhance_p<pid>.log`（按进程分文件） |
 | 界面日志 | `/storage/emulated/0/Download/UiStartup.log` |
 
 ---
@@ -210,7 +236,7 @@ ColorOS_Blur_Enhance/
 │   └── shizuku-*.jar                   # Shizuku API / AIDL（作用域重启）
 ├── res/                                # 界面资源（图标 / 颜色 / 文字）
 └── src/main/java/com/shortcutblur/
-    ├── BlurEnhanceModule.java          # 模块主入口（安装各进程 Hook）
+    ├── BlurEnhanceModule.java          # 模块主入口（按包分发安装各进程 Hook）
     ├── RecentsBlur.java                # 多任务模糊控制器（与框架解耦）
     ├── BlurLib.java                    # 通用库（常量 + 反射 / 视图 / 状态 / 渲染效果工具）
     ├── FeatureFlags.java               # 运行期功能开关 + 配置读取
@@ -219,13 +245,16 @@ ColorOS_Blur_Enhance/
     ├── WidgetBlurAttacher.java         # 桌面组件（Widget）模糊挂载
     ├── ClockTextAlphaHook.java         # 时钟文字透明度 Hook
     ├── ClockIds.java                   # 时钟文字 / 天气图标 id 常量
+    ├── QuickSearchBlur.java            # 全局搜索背景透明化 Hook
+    ├── GalleryLightHook.java           # 相册强制浅色主题 Hook
+    ├── ImeBlurHook.java                # 输入法键盘模糊 Hook（语燕输入法）
     ├── Reflect.java                    # 反射工具（带容量上限的 LRU 缓存）
     ├── ViewUtils.java                  # 视图工具
-    ├── ModuleLog.java                  # 可选文件日志
+    ├── ModuleLog.java                  # 可选文件日志（按进程分文件）
     └── ui/                             # 图形化设置界面
         ├── SettingsActivity.java       # 主界面（功能开关 / 更多页）
-        ├── SettingsStore.java          # 配置存储 + 与宿主同步
-        ├── SoftUi.java                 # 轻量 UI 组件库（卡片 / 开关 / 动画）
+        ├── SettingsStore.java          # 配置存储 + 与宿主同步（含 scope.list 读取）
+        ├── SoftUi.java                 # 轻量 UI 组件库（卡片 / 开关 / 可折叠 / 动画）
         ├── Adb.java                    # Shizuku 通道（仅用于重启作用域）
         ├── ScopeService.java           # Shizuku 服务
         └── App.java                    # Application 与日志出口
