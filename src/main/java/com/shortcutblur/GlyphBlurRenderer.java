@@ -37,22 +37,37 @@ public class GlyphBlurRenderer {
     }
     private static final java.util.WeakHashMap<View, GlyphSnapshot[]> sSnapsMap = new java.util.WeakHashMap<View, GlyphSnapshot[]>();
     private static volatile boolean sScreenOn = true;
-    private static final java.util.WeakHashMap<View, ClockBlurStateMachine> sRunners = new java.util.WeakHashMap<View, ClockBlurStateMachine>();
+    // key 弱引用 View，value 也须弱引用：StateMachine 强引用 container，
+// 否则 entry 永远无法回收（值是 key 的持有者）。
+    private static final java.util.WeakHashMap<View, java.lang.ref.WeakReference<ClockBlurStateMachine>> sRunners =
+            new java.util.WeakHashMap<View, java.lang.ref.WeakReference<ClockBlurStateMachine>>();
 
-    private static final java.util.ArrayList<Object> sClockBlurDrawables = new java.util.ArrayList<Object>();
+    private static java.util.ArrayList<ClockBlurStateMachine> runnersSnapshot() {
+        java.util.ArrayList<ClockBlurStateMachine> list = new java.util.ArrayList<>();
+        synchronized (sRunners) {
+            for (java.lang.ref.WeakReference<ClockBlurStateMachine> ref : sRunners.values()) {
+                ClockBlurStateMachine sm = ref == null ? null : ref.get();
+                if (sm != null) list.add(sm);
+            }
+        }
+        return list;
+    }
+
+    // 时钟模糊 drawable 登记表：仅用于识别「是不是时钟的模糊 drawable」。
+    // 必须用弱引用，否则会随每次时钟重建累积并拖住其回调的 View 树，造成内存泄漏。
+    private static final java.util.WeakHashMap<Object, Boolean> sClockBlurDrawables =
+            new java.util.WeakHashMap<Object, Boolean>();
     public static void registerBlurDrawable(Object bd) {
         if (bd == null) return;
         synchronized (sClockBlurDrawables) {
-            for (Object o : sClockBlurDrawables) { if (o == bd) return; }
-            sClockBlurDrawables.add(bd);
+            sClockBlurDrawables.put(bd, Boolean.TRUE);
         }
     }
     public static boolean isClockBlurDrawable(Object bd) {
         if (bd == null) return false;
         synchronized (sClockBlurDrawables) {
-            for (Object o : sClockBlurDrawables) { if (o == bd) return true; }
+            return sClockBlurDrawables.containsKey(bd);
         }
-        return false;
     }
     private static final class IconCacheEntry {
         final int fp;
@@ -84,16 +99,12 @@ public class GlyphBlurRenderer {
         sScreenOn = on;
         if (!changed) return;
         try {
-            synchronized (sRunners) {
-                for (ClockBlurStateMachine pr : new java.util.ArrayList<ClockBlurStateMachine>(sRunners.values())) pr.onScreenStateChanged();
-            }
+            for (ClockBlurStateMachine pr : runnersSnapshot()) pr.onScreenStateChanged();
         } catch (Throwable t) { ModuleLog.e("GB", "screenStateChanged fail", t); }
     }
     public static void notifyContentMaybeChangedAll() {
         try {
-            java.util.List<ClockBlurStateMachine> list;
-            synchronized (sRunners) { list = new java.util.ArrayList<ClockBlurStateMachine>(sRunners.values()); }
-            for (ClockBlurStateMachine pr : list) pr.onContentChanged();
+            for (ClockBlurStateMachine pr : runnersSnapshot()) pr.onContentChanged();
         } catch (Throwable t) { ModuleLog.e("GB", "kickAll fail", t); }
     }
     public static void attachGlyphBlur(final View container, final ClassLoader cl) {
@@ -514,9 +525,10 @@ public class GlyphBlurRenderer {
     private static void installRefreshPoller(final View container, final Object blurDrawable) {
         ClockBlurStateMachine pr;
         synchronized (sRunners) {
-            if (sRunners.containsKey(container)) { return; }
+            java.lang.ref.WeakReference<ClockBlurStateMachine> ref = sRunners.get(container);
+            if (ref != null && ref.get() != null) { return; }
             pr = new ClockBlurStateMachine(container, blurDrawable);
-            sRunners.put(container, pr);
+            sRunners.put(container, new java.lang.ref.WeakReference<>(pr));
         }
         pr.start();
     }
@@ -643,6 +655,15 @@ public class GlyphBlurRenderer {
             sHandler.postDelayed(fallbackTask, FALLBACK_HIDDEN_PROBE_MS);
         }
         private synchronized void fallbackCheck() {
+            // 容器已脱离窗口（时钟被移除/重建）时终止轮询，
+            // 否则静态 Handler 会一直持有本状态机（进而持有 View）造成泄漏。
+            if (!container.isAttachedToWindow()) {
+                state = IDLE;
+                sHandler.removeCallbacks(rebuildTask);
+                sHandler.removeCallbacks(fallbackTask);
+                synchronized (sRunners) { sRunners.remove(container); }
+                return;
+            }
             if (!sScreenOn) { state = PAUSED; return; }
             if (!ViewUtils.isReallyVisible(container)) { scheduleFallbackSoon(); return; }
             try {

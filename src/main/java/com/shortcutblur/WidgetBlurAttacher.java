@@ -7,9 +7,22 @@ public class WidgetBlurAttacher {
     private static final long ATTACH_RETRY_MS = 200L;
     private static final int ATTACH_MAX_RETRY = 16;
     private static final java.util.WeakHashMap<View, Boolean> sDone = new java.util.WeakHashMap<View, Boolean>();
-    private static final java.util.WeakHashMap<View, View> sDoneHost = new java.util.WeakHashMap<View, View>();
+    // host -> container：container 是 host 的子孙，持有 parent 引用会反向强引用 host，
+    // 因此 value 也必须用弱引用，否则 WeakHashMap 的 entry 永远无法回收（View 树泄漏）。
+    private static final java.util.WeakHashMap<View, java.lang.ref.WeakReference<View>> sDoneHost =
+            new java.util.WeakHashMap<View, java.lang.ref.WeakReference<View>>();
     private static final java.util.WeakHashMap<View, Boolean> sGaveUp = new java.util.WeakHashMap<View, Boolean>();
     private static final java.util.WeakHashMap<View, Boolean> sEverHit = new java.util.WeakHashMap<View, Boolean>();
+
+    private static View doneHostOf(View host) {
+        java.lang.ref.WeakReference<View> ref;
+        synchronized (sDoneHost) { ref = sDoneHost.get(host); }
+        return ref == null ? null : ref.get();
+    }
+
+    private static void putDoneHost(View host, View container) {
+        synchronized (sDoneHost) { sDoneHost.put(host, new java.lang.ref.WeakReference<>(container)); }
+    }
 
     public static void attach(final String tag, final View root, final ClassLoader cl) {
         attach(tag, root, cl, 0);
@@ -33,7 +46,7 @@ public class WidgetBlurAttacher {
             View host = ViewUtils.ancestorOfType(root, "AppWidgetHostView");
             if (host == null) { ModuleLog.e("BW", tag + " host not found", null); return; }
             synchronized (sDoneHost) {
-                View bound = sDoneHost.get(host);
+                View bound = doneHostOf(host);
                 if (bound != null && Boolean.TRUE.equals(sDone.get(bound))) {
                     return;
                 }
@@ -92,12 +105,12 @@ public class WidgetBlurAttacher {
                 container = promoted;
             }
             synchronized (sDone) {
-                View bound = sDoneHost.get(host);
+                View bound = doneHostOf(host);
                 if (bound == container || Boolean.TRUE.equals(sDone.get(container))) {
                     return;
                 }
                 sDone.put(container, Boolean.TRUE);
-                sDoneHost.put(host, container);
+                putDoneHost(host, container);
             }
             ModuleLog.d("BW", "container=" + container.getClass().getName() + " " + container.getWidth() + "x" + container.getHeight());
             try { container.setTag("OplusBlurBg"); } catch (Throwable t) { ModuleLog.e("BW", "setTag fail", t); }
