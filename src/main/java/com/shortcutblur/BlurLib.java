@@ -40,10 +40,14 @@ public final class BlurLib {
     public static boolean isOverviewState(Object state) {
         if (state == null) return false;
         try {
+
             Object overview = readStaticState("OVERVIEW");
-            if (overview != null && state == overview) return true;
-            Object ui = Reflect.readField(state, "overviewUi");
-            if (ui instanceof Boolean) return (Boolean) ui;
+            if (overview != null) return state == overview;
+        } catch (Throwable ignore) {}
+
+        try {
+            String cn = state.getClass().getSimpleName();
+            return cn.contains("Overview") && !cn.contains("Background");
         } catch (Throwable ignore) {}
         return false;
     }

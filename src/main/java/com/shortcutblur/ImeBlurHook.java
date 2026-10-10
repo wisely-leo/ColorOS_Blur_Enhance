@@ -40,9 +40,10 @@ public final class ImeBlurHook {
     private static Method sSetBlurRadius;
     private static Method sSetColor;
     private static Method sSetCornerRadius;
-
     private static volatile int sLastUiMode = -1;
     private static volatile boolean sLastDark = false;
+
+    private static volatile android.content.Context sImeContext = null;
 
     private static volatile boolean sFloatProbeReady = false;
     private static volatile ClassLoader sHostCl = null;
@@ -356,14 +357,93 @@ public final class ImeBlurHook {
 
             installKeyColorOverride(mod, cl);
 
+            installConfigChangeWatch(mod, cl);
+
         } catch (Throwable t) {
             ModuleLog.e(TAG, "install failed", t);
         }
     }
 
-    private static final int KEY_OVERLAY_COLOR = 0xCCffffff;
+    private static void installConfigChangeWatch(final BlurEnhanceModule mod, final ClassLoader cl) {
+        try {
+            Class<?> ims;
+            try {
+                ims = Class.forName("android.inputmethodservice.InputMethodService", false, cl);
+            } catch (Throwable t) {
+                ims = null;
+            }
+            if (ims == null) {
+                ModuleLog.d(TAG, "InputMethodService not found, skip config watch");
+                return;
+            }
+            Method onCfg = null;
+            for (Method m : ims.getDeclaredMethods()) {
+                if ("onConfigurationChanged".equals(m.getName()) && m.getParameterCount() == 1) {
+                    onCfg = m;
+                    break;
+                }
+            }
+            if (onCfg == null) {
+                ModuleLog.d(TAG, "onConfigurationChanged not found, skip config watch");
+                return;
+            }
+            mod.hook(onCfg)
+                    .setId("ime.configchange")
+                    .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                    .intercept(new XposedInterface.Hooker() {
+                        @Override
+                        public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                            Object r = chain.proceed();
+                            try {
+
+                                sLastUiMode = -1;
+                                reapply();
+                                View v = sLastView == null ? null : sLastView.get();
+                                if (v != null) {
+                                    final View rv = v;
+                                    rv.postDelayed(new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            rv.invalidate();
+                                        }
+                                    }, 120);
+                                }
+                            } catch (Throwable t) {
+                                ModuleLog.d(TAG, "config change reapply fail: " + t);
+                            }
+                            return r;
+                        }
+                    });
+            ModuleLog.d(TAG, "config change watch installed (InputMethodService.onConfigurationChanged)");
+        } catch (Throwable t) {
+            ModuleLog.d(TAG, "install config change watch failed: " + t);
+        }
+    }
+
+    private static final int KEY_OVERLAY_COLOR_LIGHT = 0xCCffffff;
+    private static final int KEY_OVERLAY_COLOR_DARK = 0xCC1C1C1E;
 
     private static final String[] KEY_OVERLAY_METHODS = { "e", "d", "k" };
+
+    private static int keyOverlayColor() {
+        return isDarkCached() ? KEY_OVERLAY_COLOR_DARK : KEY_OVERLAY_COLOR_LIGHT;
+    }
+
+    private static boolean isDarkCached() {
+        try {
+            android.content.Context ctx = sImeContext;
+            if (ctx != null) {
+                int mode = ctx.getResources().getConfiguration().uiMode
+                        & android.content.res.Configuration.UI_MODE_NIGHT_MASK;
+                if (mode == sLastUiMode) return sLastDark;
+                boolean dark = (mode == android.content.res.Configuration.UI_MODE_NIGHT_YES);
+                sLastUiMode = mode;
+                sLastDark = dark;
+                return dark;
+            }
+        } catch (Throwable ignored) {}
+        return sLastDark;
+    }
 
     private static void installKeyColorOverride(final BlurEnhanceModule mod, final ClassLoader cl) {
         final String[] impls = {
@@ -389,7 +469,7 @@ public final class ImeBlurHook {
                                 @Override
                                 public Object intercept(XposedInterface.Chain chain) throws Throwable {
                                     chain.proceed();
-                                    return KEY_OVERLAY_COLOR;
+                                    return keyOverlayColor();
                                 }
                             });
                     hooked++;
@@ -397,13 +477,20 @@ public final class ImeBlurHook {
             }
         }
         ModuleLog.d(TAG, "key color override installed, hooked=" + hooked
-                + " color=0x" + Integer.toHexString(KEY_OVERLAY_COLOR));
+                + " light=0x" + Integer.toHexString(KEY_OVERLAY_COLOR_LIGHT)
+                + " dark=0x" + Integer.toHexString(KEY_OVERLAY_COLOR_DARK));
     }
 
     private static void applyBlur(final View v) {
         if (v == null) return;
 
         sLastView = new java.lang.ref.WeakReference<>(v);
+
+        try {
+            android.content.Context ctx = v.getContext();
+            if (ctx != null) sImeContext = ctx.getApplicationContext() != null
+                    ? ctx.getApplicationContext() : ctx;
+        } catch (Throwable ignored) {}
 
         synchronized (sPendingLock) {
             if (sPendingView.get() == v) {

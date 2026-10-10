@@ -19,7 +19,8 @@ final class RecentsBlur {
     private static HookApi API;
     private static volatile boolean sStateInOverview = false;
     private static volatile float RECENTS_BLUR_MAX = 64.0f;
-    private static volatile float sScaleClampMin = 0.96f;
+
+    private static volatile float sScaleClampMin = 0.92f;
     private static volatile long sConfLastRead = 0L;
     private static final String CONF_PATH = "/sdcard/Download/ColorOSBlurEnhance.conf";
     private static volatile boolean sAnchorUseWorkspace = false;
@@ -40,30 +41,22 @@ final class RecentsBlur {
     private static final android.os.Handler sRecentsHandler =
             new android.os.Handler(android.os.Looper.getMainLooper());
     private static Runnable sPendingClear = null;
-    private static final long EXIT_DEBOUNCE_MS = 120L;
-    private static final long ENTER_DEBOUNCE_MS = 80L;
     private static volatile Runnable sPendingEnter = null;
-    private static volatile boolean sDescentEnterEnabled = false;
-    private static volatile float sMinScaleSeen = 1.0f;
-    private static volatile boolean sScaleExitEnabled = true;
+
+    private static volatile long sWzLastLogMs = 0L;
+
+    private static volatile boolean sWallpaperJudgeEnabled = true;
+
+    private static volatile long sLastWallpaperHandledMs = 0L;
+    private static final long WALLPAPER_MAIN_WINDOW_MS = 400L;
+
+    private static final long STATE_FALLBACK_DELAY_MS = 250L;
     private static volatile boolean sTintEnabled = false;
-    private static volatile boolean sGtsEnabled = true;
     private static volatile java.lang.ref.WeakReference<View> sLastAnchor = null;
     private static volatile boolean sDiagEnabled = false;
     private static volatile java.lang.ref.WeakReference<View> sCachedDragLayer = null;
-    private static volatile boolean sVisExitEnabled = false;
-    private static volatile boolean sScaleEnterEnabled = true;
-    private static volatile float sEnterScale = 1.0f;
-    private static volatile float sLastScale = 1.0f;
-    private static volatile boolean sVisEnterEnabled = false;
     private static volatile Runnable sPendingExit = null;
-    private static volatile float sLastAlphaIn = -1.0f;
-    private static volatile float sMinAlphaIn = 1.0f;
-    private static volatile boolean sSawAlphaDescent = false;
     private static volatile boolean sSelfAlphaCall = false;
-    private static volatile boolean sAlphaExitEnabled = false;
-    private static volatile String sLastVisKey = "";
-    private static volatile String sLastFxKey = "";
     private static volatile boolean sForceIconBlur = false;
 
     private static final java.util.List<java.lang.ref.WeakReference<View>> sBlurTargets =
@@ -235,29 +228,44 @@ final class RecentsBlur {
     }
     private static int installEarlySignalProbes(ClassLoader loader) {
         int n = 0;
-        String[] sms = {"com.android.launcher3.statemanager.StateManager",
-                        "com.android.launcher3.statemanager.StateManagerImpl"};
-        for (String sn : sms) {
-            try {
-                Class<?> sm = Reflect.loadClass(sn, loader);
-                if (sm == null) { ModuleLog.d("EARLY", "[miss] " + sn); continue; }
+
+        try {
+            Class<?> odc = Reflect.loadClass(
+                    "com.android.launcher3.uioverrides.states.OplusDepthController", loader);
+            if (odc == null) {
+                ModuleLog.d("WZOOM", "[miss] OplusDepthController");
+            } else {
                 int c = 0;
-                for (java.lang.reflect.Method m : sm.getDeclaredMethods()) {
-                    if (!m.getName().equals("goToState")) continue;
+                for (java.lang.reflect.Method m : odc.getDeclaredMethods()) {
+                    if (!m.getName().equals("startWallpaperAnimation")) continue;
+                    Class<?>[] pt = m.getParameterTypes();
+                    if (pt.length != 2 || pt[0] != boolean.class
+                            || pt[1] != String.class) continue;
                     Reflect.setAccessible(m);
-                    API.hook("early.goToState", (Executable) m, new XposedInterface.Hooker() {
+                    API.hook("probe.wallpaperAnim", (Executable) m, new XposedInterface.Hooker() {
                                 @Override public Object intercept(XposedInterface.Chain chain) throws Throwable {
                                     try {
                                         Object[] a = chain.getArgs().toArray();
-                                        Object st = (a.length > 0) ? a[0] : null;
-                                        ModuleLog.d("EARLY", "goToState n=" + a.length + " to=" + stateName(st));
-                                        if (sGtsEnabled && st != null) {
-                                            Object gSelf = chain.getThisObject();
-                                            if (isOverviewState(st)) {
-                                                cancelPendingExit();
-                                                enterOverviewFrom(gSelf, "gts:overview");
-                                            } else if (isNormalState(st)) {
-                                                exitOverviewFrom(gSelf, "gts:normal");
+                                        String type = (a.length > 1 && a[1] != null)
+                                                ? String.valueOf(a[1]) : "?";
+
+                                        if (sWallpaperJudgeEnabled) {
+                                            boolean enter = "app_recent_enter".equals(type);
+                                            boolean exit = !enter && "app_recent_exit".equals(type);
+                                            if (enter || exit) {
+                                                long now = android.os.SystemClock.uptimeMillis();
+                                                ModuleLog.d("WZOOM", "startWallpaperAnim type=" + type
+                                                        + " inOverview=" + sStateInOverview
+                                                        + " dt=" + (now - sWzLastLogMs) + "ms");
+                                                sWzLastLogMs = now;
+                                                sLastWallpaperHandledMs = now;
+                                                if (enter) {
+                                                    cancelPendingExit();
+                                                    enterOverviewFrom(chain.getThisObject(), "wzoom:enter");
+                                                } else {
+                                                    cancelPendingEnter();
+                                                    exitOverviewFrom(chain.getThisObject(), "wzoom:exit");
+                                                }
                                             }
                                         }
                                     } catch (Throwable ignore) {}
@@ -266,64 +274,10 @@ final class RecentsBlur {
                             });
                     c++; n++;
                 }
-                ModuleLog.d("EARLY", "[hook] " + sn + ".goToState x" + c);
-            } catch (Throwable t) {
-                ModuleLog.e("EARLY", "hook " + sn + " failed", t);
-            }
-        }
-        try {
-            Class<?> anim = Reflect.loadClass("com.oplus.quickstep.anim.SwipeUpIconBlurAnim", loader);
-            if (anim == null) {
-                ModuleLog.d("EARLY", "[miss] SwipeUpIconBlurAnim");
-            } else {
-                int c = 0;
-                for (java.lang.reflect.Constructor<?> ct : anim.getDeclaredConstructors()) {
-                    Reflect.setAccessible(ct);
-                    API.hook("early.swipeUpBlurAnim", (Executable) ct, new XposedInterface.Hooker() {
-                                @Override public Object intercept(XposedInterface.Chain chain) throws Throwable {
-                                    try { ModuleLog.d("EARLY", "SwipeUpIconBlurAnim ctor"); } catch (Throwable ignore) {}
-                                    return chain.proceed();
-                                }
-                            });
-                    c++; n++;
-                }
-                ModuleLog.d("EARLY", "[hook] SwipeUpIconBlurAnim ctors x" + c);
+                ModuleLog.d("WZOOM", "[hook] OplusDepthController.startWallpaperAnimation(Z,String) x" + c);
             }
         } catch (Throwable t) {
-            ModuleLog.e("EARLY", "hook SwipeUpIconBlurAnim failed", t);
-        }
-        try {
-            java.lang.reflect.Method va = Reflect.method(android.view.View.class, "onVisibilityAggregated", boolean.class);
-            if (va != null) {
-                Reflect.setAccessible(va);
-                API.hook("early.visAgg", (Executable) va, new XposedInterface.Hooker() {
-                            @Override public Object intercept(XposedInterface.Chain chain) throws Throwable {
-                                try {
-                                    Object self = chain.getThisObject();
-                                    if (self != null) {
-                                        String cn = self.getClass().getName();
-                                        if (cn.contains("Recents") || cn.contains("Overview")) {
-                                            Object[] a = chain.getArgs().toArray();
-                                            String v = (a.length > 0 && a[0] instanceof Boolean)
-                                                    ? String.valueOf(a[0]) : "?";
-                                            String key = cn + ":" + v;
-                                            if (!key.equals(sLastVisKey)) {
-                                                sLastVisKey = key;
-                                                ModuleLog.d("EARLY", "visibilityAggregated " + cn + " visible=" + v);
-                                            }
-                                        }
-                                    }
-                                } catch (Throwable ignore) {}
-                                return chain.proceed();
-                            }
-                        });
-                n++;
-                ModuleLog.d("EARLY", "[hook] View.onVisibilityAggregated (Recents/Overview filter)");
-            } else {
-                ModuleLog.d("EARLY", "[miss] onVisibilityAggregated");
-            }
-        } catch (Throwable t) {
-            ModuleLog.e("EARLY", "hook visAgg failed", t);
+            ModuleLog.e("WZOOM", "hook startWallpaperAnimation failed", t);
         }
         return n;
     }
@@ -346,26 +300,10 @@ final class RecentsBlur {
             return;
         }
         sStateInOverview = true;
-        sMinAlphaIn = 1.0f;
-        sSawAlphaDescent = false;
-        sMinScaleSeen = 1.0f;
         ModuleLog.d("STATEBLUR", "ENTER overview (" + why + ") -> startEnterFadeIn anchor=" + anchorName(anchor));
         cancelPendingRecentsClear();
         sRecentsPhase = 1;
         startEnterFadeIn(anchor);
-    }
-    private static void scheduleEnterDebounced(final String why) {
-        cancelPendingEnter();
-        if (sStateInOverview) return;
-        sPendingEnter = new Runnable() {
-            @Override public void run() {
-                sPendingEnter = null;
-                if (sStateInOverview) return;
-                ModuleLog.d("STATEBLUR", "enter debounce(" + ENTER_DEBOUNCE_MS + "ms) fired -> " + why);
-                enterOverviewFrom(null, why);
-            }
-        };
-        try { sRecentsHandler.postDelayed(sPendingEnter, ENTER_DEBOUNCE_MS); } catch (Throwable ignore) {}
     }
     private static void cancelPendingEnter() {
         Runnable r = sPendingEnter;
@@ -374,25 +312,63 @@ final class RecentsBlur {
             sPendingEnter = null;
         }
     }
-    private static void scheduleExitDebounced(final String why) {
-        cancelPendingExit();
-        if (!sStateInOverview) return;
-        sPendingExit = new Runnable() {
-            @Override public void run() {
-                sPendingExit = null;
-                if (!sStateInOverview) return;
-                ModuleLog.d("STATEBLUR", "exit debounce(" + EXIT_DEBOUNCE_MS + "ms) fired -> " + why);
-                exitOverviewFrom(null, why);
-            }
-        };
-        try { sRecentsHandler.postDelayed(sPendingExit, EXIT_DEBOUNCE_MS); } catch (Throwable ignore) {}
-    }
     private static void cancelPendingExit() {
         Runnable r = sPendingExit;
         if (r != null) {
             try { sRecentsHandler.removeCallbacks(r); } catch (Throwable ignore) {}
             sPendingExit = null;
         }
+    }
+
+    private static void stateFallbackEnter(Object lrvSelf) {
+        if (sStateInOverview) return;
+        final java.lang.ref.WeakReference<Object> ref = new java.lang.ref.WeakReference<>(lrvSelf);
+        long since = android.os.SystemClock.uptimeMillis() - sLastWallpaperHandledMs;
+        if (since < WALLPAPER_MAIN_WINDOW_MS) {
+            ModuleLog.d("STATEBLUR", "state-enter skipped (wallpaper handled " + since + "ms ago)");
+            return;
+        }
+        cancelPendingEnter();
+        Runnable r = new Runnable() {
+            @Override public void run() {
+                sPendingEnter = null;
+                if (sStateInOverview) return;
+                long s2 = android.os.SystemClock.uptimeMillis() - sLastWallpaperHandledMs;
+                if (s2 < WALLPAPER_MAIN_WINDOW_MS) {
+                    ModuleLog.d("STATEBLUR", "state-enter fallback skipped (wallpaper took over)");
+                    return;
+                }
+                ModuleLog.d("STATEBLUR", "state-enter fallback fired");
+                enterOverviewFrom(ref.get(), "state-fallback:enter");
+            }
+        };
+        sPendingEnter = r;
+        try { sRecentsHandler.postDelayed(r, STATE_FALLBACK_DELAY_MS); } catch (Throwable ignore) {}
+    }
+    private static void stateFallbackExit(Object lrvSelf, final String why) {
+        if (!sStateInOverview) return;
+        final java.lang.ref.WeakReference<Object> ref = new java.lang.ref.WeakReference<>(lrvSelf);
+        long since = android.os.SystemClock.uptimeMillis() - sLastWallpaperHandledMs;
+        if (since < WALLPAPER_MAIN_WINDOW_MS) {
+            ModuleLog.d("STATEBLUR", "state-exit skipped (wallpaper handled " + since + "ms ago) why=" + why);
+            return;
+        }
+        cancelPendingExit();
+        Runnable r = new Runnable() {
+            @Override public void run() {
+                sPendingExit = null;
+                if (!sStateInOverview) return;
+                long s2 = android.os.SystemClock.uptimeMillis() - sLastWallpaperHandledMs;
+                if (s2 < WALLPAPER_MAIN_WINDOW_MS) {
+                    ModuleLog.d("STATEBLUR", "state-exit fallback skipped (wallpaper took over) why=" + why);
+                    return;
+                }
+                ModuleLog.d("STATEBLUR", "state-exit fallback fired why=" + why);
+                exitOverviewFrom(ref.get(), "state-fallback:" + why);
+            }
+        };
+        sPendingExit = r;
+        try { sRecentsHandler.postDelayed(r, STATE_FALLBACK_DELAY_MS); } catch (Throwable ignore) {}
     }
     private static void cancelPendingRecentsClear() {
         Runnable r = sPendingClear;
@@ -533,40 +509,13 @@ final class RecentsBlur {
             ModuleLog.e("BLURAPPLY", "setRenderEffect failed r=" + rApplied, t);
         }
     }
+
     private static volatile boolean sProbesInstalled = false;
     private static int installRecentsIconBlurProbe(ClassLoader loader) {
         if (sProbesInstalled) return 0;
         sProbesInstalled = true;
         int n = 0;
         installEarlySignalProbes(loader);
-        try {
-            java.lang.reflect.Method fx = Reflect.method(android.view.View.class, "setRenderEffect",
-                    android.graphics.RenderEffect.class);
-            if (fx != null) {
-                Reflect.setAccessible(fx);
-                API.hook("fx.setRenderEffect", (Executable) fx, new XposedInterface.Hooker() {
-                            @Override public Object intercept(XposedInterface.Chain chain) throws Throwable {
-                                try {
-                                    Object self = chain.getThisObject();
-                                    Object[] a = chain.getArgs().toArray();
-                                    boolean isSet = (a.length > 0 && a[0] != null);
-                                    String cn = (self == null) ? "?" : self.getClass().getSimpleName();
-                                    String key = cn + (isSet ? ":set" : ":null");
-                                    if (!key.equals(sLastFxKey)) {
-                                        sLastFxKey = key;
-                                        ModuleLog.d("FX", "setRenderEffect on=" + cn + " effect=" + (isSet ? "set" : "null"));
-                                    }
-                                } catch (Throwable ignore) {}
-                                return chain.proceed();
-                            }
-                        });
-                ModuleLog.d("FX", "[hook] View.setRenderEffect -> trace");
-            } else {
-                ModuleLog.d("FX", "[miss] View.setRenderEffect");
-            }
-        } catch (Throwable t) {
-            ModuleLog.e("FX", "hook setRenderEffect failed", t);
-        }
         try {
             Class<?> cls = Reflect.loadClass(CLS_WORKSPACE_SCRIM, loader);
             if (cls == null) {
@@ -612,37 +561,19 @@ final class RecentsBlur {
                                     Object[] args = chain.getArgs().toArray();
                                     float a = (args.length > 0 && args[0] instanceof Number)
                                             ? ((Number) args[0]).floatValue() : 1.0f;
-                                    float prevA = sLastAlphaIn;
-                                    if (!sSelfAlphaCall) {
-                                        sLastAlphaIn = a;
-                                        if (sStateInOverview) {
-                                            if (a < sMinAlphaIn) sMinAlphaIn = a;
-                                            if (a < prevA - 0.02f) sSawAlphaDescent = true;
-                                            if (sAlphaExitEnabled && sSawAlphaDescent && a > 0.25f && a > sMinAlphaIn + 0.15f) {
-                                                ModuleLog.d("STATEBLUR", "alpha rising (min=" + sMinAlphaIn + " -> " + a + ") -> early exit");
-                                                cancelPendingExit();
-                                                exitOverviewFrom(null, "alphaRise");
-                                            }
-                                        }
-                                    }
-                                    if (!sSelfAlphaCall && !sStateInOverview && sDescentEnterEnabled
-                                            && prevA >= 0.95f && a < 0.95f) {
-                                        ModuleLog.d("STATEBLUR", "alpha falling (" + prevA + " -> " + a + ") -> early enter");
-                                        cancelPendingExit();
-                                        enterOverviewFrom(null, "alphaFall");
-                                    }
                                     try {
                                         if (self instanceof View) {
                                             View v = (View) self;
                                             sCachedDragLayer = new java.lang.ref.WeakReference<>(v);
-                                            float cur = v.getAlpha();
-                                            ModuleLog.dv("DRAGALPHA", "setAlpha a=" + a + " cur=" + cur);
                                             if (a < 0.999f) {
-                                                ModuleLog.dv("DRAGALPHA", "setAlpha descent -> clamp1.0 (keep DragLayer opaque)");
+
+                                                if (ModuleLog.VERBOSE) {
+                                                    ModuleLog.dv("DRAGALPHA", "setAlpha a=" + a
+                                                            + " cur=" + v.getAlpha()
+                                                            + " -> clamp1.0 (keep DragLayer opaque)");
+                                                }
                                                 args[0] = 1.0f;
                                                 return chain.proceed(args);
-                                            } else {
-                                                ModuleLog.dv("DRAGALPHA", "alpha>=1 (log only)");
                                             }
                                         }
                                     } catch (Throwable t) {
@@ -657,51 +588,6 @@ final class RecentsBlur {
             }
         } catch (Throwable t) {
             ModuleLog.e("RECENTS", "hook dragLayer alpha failed", t);
-        }
-        try {
-            Class<?> sh = Reflect.loadClass("com.android.quickstep.touch.SwipeToRecentAnimationHelper", loader);
-            if (sh == null) {
-                ModuleLog.d("ENTERHOOK", "[miss] SwipeToRecentAnimationHelper");
-            } else {
-                int c = 0;
-                for (Method m : sh.getDeclaredMethods()) {
-                    if (!m.getName().equals("goOverviewAnimation")) continue;
-                    if (m.getParameterTypes().length != 0) continue;
-                    Reflect.setAccessible(m);
-                    API.hook("recents.enter.goOverview", (Executable) m, new XposedInterface.Hooker() {
-                                @Override public Object intercept(XposedInterface.Chain chain) throws Throwable {
-                                    try {
-                                        Object self = chain.getThisObject();
-                                        ModuleLog.d("ENTERHOOK", "goOverviewAnimation() called -> enter");
-                                        if (self != null) {
-                                            Field f = null;
-                                            Class<?> cc = self.getClass();
-                                            while (cc != null && f == null) {
-                                                try { f = cc.getDeclaredField("mDragLayer"); }
-                                                catch (Throwable ignore2) { cc = cc.getSuperclass(); }
-                                            }
-                                            if (f != null) {
-                                                f.setAccessible(true);
-                                                Object dl = f.get(self);
-                                                if (dl instanceof View) {
-                                                    enterOverviewFrom(dl, "goOverview");
-                                                } else {
-                                                    ModuleLog.d("ENTERHOOK", "mDragLayer not a View");
-                                                }
-                                            } else {
-                                                ModuleLog.d("ENTERHOOK", "mDragLayer field not found");
-                                            }
-                                        }
-                                    } catch (Throwable ignore) {}
-                                    return chain.proceed();
-                                }
-                            });
-                    c++; n++;
-                }
-                ModuleLog.d("ENTERHOOK", "[hook] SwipeToRecentAnimationHelper.goOverviewAnimation x" + c);
-            }
-        } catch (Throwable t) {
-            ModuleLog.e("ENTERHOOK", "hook goOverviewAnimation failed", t);
         }
         try {
             Class<?> dls = Reflect.loadClass(CLS_OPLUS_DRAGLAYER, loader);
@@ -722,24 +608,13 @@ final class RecentsBlur {
                                         if (a.length > 0 && a[0] instanceof Number) {
                                             float f = ((Number) a[0]).floatValue();
                                             reloadConfigIfStale();
-                                            if (f < sMinScaleSeen) sMinScaleSeen = f;
-                                            if (sScaleExitEnabled && sStateInOverview && sMinScaleSeen < 0.96f && f >= 0.988f) {
-                                                ModuleLog.d("STATEBLUR", "scale rose to " + f + " (min seen " + sMinScaleSeen
-                                                        + ") -> early exit (scaleRise)");
-                                                exitOverviewFrom(self, "scaleRise");
-                                            }
-                                            float prevScale = sLastScale;
-                                            sLastScale = f;
-                                            if (sScaleEnterEnabled && !sStateInOverview
-                                                    && prevScale >= sEnterScale && f < sEnterScale - 0.001f) {
-                                                ModuleLog.d("STATEBLUR", "scale " + prevScale + " -> " + f
-                                                        + " (crossed " + sEnterScale + ") -> enter (scaleFall, low-prio)");
-                                                enterOverviewFrom(self, "scaleFall");
-                                            }
                                             float clamped = sClampEnabled ? Math.max(f, sScaleClampMin) : f;
                                             if (clamped != f) {
+
+                                                if (ModuleLog.VERBOSE) {
+                                                    ModuleLog.dv("SCALECLAMP", tag + " " + f + " -> " + clamped);
+                                                }
                                                 a[0] = Float.valueOf(clamped);
-                                                ModuleLog.dv("SCALECLAMP", tag + " " + f + " -> " + clamped);
                                             }
                                             return chain.proceed(a);
                                         }
@@ -754,128 +629,12 @@ final class RecentsBlur {
         } catch (Throwable t) {
             ModuleLog.e("RECENTS", "hook scale clamp failed", t);
         }
-        for (String rn : new String[]{"resetGaussianAnimState", "resetViewsProperty"}) {
-            try {
-                Class<?> dl2 = Reflect.loadClass(CLS_OPLUS_DRAGLAYER, loader);
-                if (dl2 == null) break;
-                for (Method rm : dl2.getDeclaredMethods()) {
-                    if (!rm.getName().equals(rn)) continue;
-                    Reflect.setAccessible(rm);
-                    final String rid = rn;
-                    API.hook("recents.reset." + rn, (Executable) rm, new XposedInterface.Hooker() {
-                                @Override
-                                public Object intercept(XposedInterface.Chain chain) throws Throwable {
-                                    Object self = chain.getThisObject();
-                                    ModuleLog.d("EXITPROBE", "reset(" + rid + ") radius=" + sRecentsLastRadius);
-                                    if (self instanceof View) {
-                                        ModuleLog.d("EXITPROBE", "reset(" + rid + ") [diag only]");
-                                    }
-                                    return chain.proceed();
-                                }
-                            });
-                    n++;
-                    ModuleLog.d("RECENTS", "[hook] OplusDragLayer." + rn + " -> clear");
-                }
-            } catch (Throwable t) {
-                ModuleLog.e("RECENTS", "hook " + rn + " failed", t);
-            }
-        }
-        try {
-            Class<?> dl3 = Reflect.loadClass(CLS_OPLUS_DRAGLAYER, loader);
-            if (dl3 != null) {
-                for (Method vm : dl3.getDeclaredMethods()) {
-                    String mn = vm.getName();
-                    boolean isVis = mn.equals("onWindowVisibilityChanged");
-                    boolean isAbtv = mn.equals("setAlphaByTaskView");
-                    if (!isVis && !isAbtv) continue;
-                    Class<?>[] pt = vm.getParameterTypes();
-                    if (isVis && (pt.length != 1 || pt[0] != int.class)) continue;
-                    if (isAbtv && (pt.length != 1 || pt[0] != float.class)) continue;
-                    Reflect.setAccessible(vm);
-                    final boolean visCall = isVis;
-                    API.hook("recents.fallback." + mn, (Executable) vm, new XposedInterface.Hooker() {
-                                @Override
-                                public Object intercept(XposedInterface.Chain chain) throws Throwable {
-                                    Object self = chain.getThisObject();
-                                    Object[] args = chain.getArgs().toArray();
-                                    try {
-                                        if (visCall) {
-                                            int vis = (args.length > 0 && args[0] instanceof Number)
-                                                    ? ((Number) args[0]).intValue() : -1;
-                                            ModuleLog.d("EXITPROBE", "onWindowVisibilityChanged vis=" + vis + " radius=" + sRecentsLastRadius);
-                                            if (vis == View.VISIBLE && self instanceof View && sRecentsLastRadius >= 0.0f) {
-                                                ModuleLog.d("EXITPROBE", "windowVisible [diag only]");
-                                            }
-                                        } else {
-                                            float a = (args.length > 0 && args[0] instanceof Number)
-                                                    ? ((Number) args[0]).floatValue() : 1.0f;
-                                            ModuleLog.d("EXITPROBE", "setAlphaByTaskView a=" + a + " radius=" + sRecentsLastRadius);
-                                            if (a >= 0.999f && self instanceof View && sRecentsLastRadius >= 0.0f) {
-                                                ModuleLog.d("EXITPROBE", "alphaByTaskView>=1 [diag only]");
-                                            }
-                                        }
-                                    } catch (Throwable t) {
-                                        ModuleLog.e("RECENTS", "fallback body failed", t);
-                                    }
-                                    return chain.proceed();
-                                }
-                            });
-                    n++;
-                    ModuleLog.d("RECENTS", "[hook] fallback " + mn);
-                }
-            }
-        } catch (Throwable t) {
-            ModuleLog.e("RECENTS", "hook fallback failed", t);
-        }
         } catch (Throwable t) {
             ModuleLog.e("RECENTS", "installRecentsIconBlurProbe failed", t);
         }
-        try {
-            Class<?> dlf = Reflect.loadClass(CLS_OPLUS_DRAGLAYER, loader);
-            if (dlf != null) {
-                for (Method fm : dlf.getDeclaredMethods()) {
-                    if (!fm.getName().equals("startFadeInAnim")) continue;
-                    if (fm.getParameterTypes().length != 0) continue;
-                    Reflect.setAccessible(fm);
-                    API.hook("recents.exit.fadeIn", (Executable) fm, new XposedInterface.Hooker() {
-                                @Override
-                                public Object intercept(XposedInterface.Chain chain) throws Throwable {
-                                    Object self = chain.getThisObject();
-                                    ModuleLog.d("EXITPROBE", "startFadeInAnim (log only) radius=" + sRecentsLastRadius + " phase=" + sRecentsPhase);
-                                    return chain.proceed();
-                                }
-                            });
-                    n++;
-                    ModuleLog.d("RECENTS", "[hook] startFadeInAnim -> exit clear");
-                }
-            }
-        } catch (Throwable t) {
-            ModuleLog.e("EXITPROBE", "hook startFadeInAnim failed", t);
-        }
-        try {
-            Class<?> lc = Reflect.loadClass(CLS_LAUNCHER, loader);
-            if (lc != null) {
-                for (Method rm : lc.getDeclaredMethods()) {
-                    if (!rm.getName().equals("onResume")) continue;
-                    if (rm.getParameterTypes().length != 0) continue;
-                    Reflect.setAccessible(rm);
-                    API.hook("recents.exit.launcherResume", (Executable) rm, new XposedInterface.Hooker() {
-                                @Override
-                                public Object intercept(XposedInterface.Chain chain) throws Throwable {
-                                    Object self = chain.getThisObject();
-                                    ModuleLog.d("EXITPROBE", "Launcher.onResume (log only) radius=" + sRecentsLastRadius + " phase=" + sRecentsPhase);
-                                    return chain.proceed();
-                                }
-                            });
-                    n++;
-                    ModuleLog.d("RECENTS", "[hook] Launcher.onResume -> exit clear");
-                }
-            }
-        } catch (Throwable t) {
-            ModuleLog.e("EXITPROBE", "hook Launcher.onResume failed", t);
-        }
         return n;
     }
+
     private static volatile boolean sStateHooksInstalled = false;
     private static int installRecentsStateBlurHooks(ClassLoader loader) {
         if (sStateHooksInstalled) return 0;
@@ -905,53 +664,17 @@ final class RecentsBlur {
                                 ModuleLog.d("STATEBLUR", "onStateTransitionStart toState="
                                         + stateName(toState) + " toOverview=" + toOverview
                                         + " toNormal=" + toNormal);
+
                                 if (toOverview) {
-                                    cancelPendingExit();
-                                    enterOverviewFrom(self, "stateStart");
+                                    stateFallbackEnter(self);
                                 } else if (toNormal) {
-                                    cancelPendingExit();
-                                    exitOverviewFrom(self, "stateStart:NORMAL");
+                                    stateFallbackExit(self, "stateStart:NORMAL");
                                 }
                                 return chain.proceed();
                             }
                         });
                 n++;
                 ModuleLog.d("STATEBLUR", "[hook] LRV.onStateTransitionStart");
-            try {
-                final Class<?> lrvCls = lrv;
-                java.lang.reflect.Method va = Reflect.method(android.view.View.class,
-                        "onVisibilityAggregated", boolean.class);
-                if (va != null && lrvCls != null) {
-                    Reflect.setAccessible(va);
-                    API.hook("recents.visAgg", (Executable) va, new XposedInterface.Hooker() {
-                                @Override public Object intercept(XposedInterface.Chain chain) throws Throwable {
-                                    try {
-                                        Object self = chain.getThisObject();
-                                        if (self != null && lrvCls.isInstance(self)) {
-                                            Object[] a = chain.getArgs().toArray();
-                                            boolean vis = (a.length > 0 && a[0] instanceof Boolean)
-                                                    && ((Boolean) a[0]).booleanValue();
-                                            ModuleLog.d("STATEBLUR", "LRV.onVisibilityAggregated visible=" + vis);
-                                            if (vis) {
-                                                cancelPendingExit();
-                                                if (sVisEnterEnabled) scheduleEnterDebounced("recentsVisible");
-                                            } else {
-                                                cancelPendingEnter();
-                                                if (sVisExitEnabled) scheduleExitDebounced("recentsHidden");
-                                            }
-                                        }
-                                    } catch (Throwable ignore) {}
-                                    return chain.proceed();
-                                }
-                            });
-                    n++;
-                    ModuleLog.d("STATEBLUR", "[hook] LRV.onVisibilityAggregated -> enter trigger");
-                } else {
-                    ModuleLog.d("STATEBLUR", "[miss] onVisibilityAggregated / LRV");
-                }
-            } catch (Throwable t) {
-                ModuleLog.e("STATEBLUR", "hook visAgg failed", t);
-            }
             }
             for (Method m : lrv.getDeclaredMethods()) {
                 if (!m.getName().equals(M_ON_STATE_TRANSITION_COMPLETE)) continue;
@@ -966,15 +689,11 @@ final class RecentsBlur {
                                 Object finalState = (a.length > 0) ? a[0] : null;
                                 boolean toNormal = isNormalState(finalState);
                                 ModuleLog.d("STATEBLUR", "onStateTransitionComplete finalState="
-                                        + stateName(finalState) + " toNormal=" + toNormal);
+                                        + stateName(finalState) + " toNormal=" + toNormal
+                                        + " inOverview=" + sStateInOverview);
+
                                 if (toNormal && sStateInOverview) {
-                                    sStateInOverview = false;
-                                    View anchor = resolveBlurAnchor(self);
-                                    ModuleLog.d("STATEBLUR", "EXIT overview(complete-fallback) -> startExitFadeOut anchor=" + anchorName(anchor));
-                                    cancelPendingRecentsClear();
-                                    if (anchor != null) {
-                                        startExitFadeOut(anchor, "stateComplete:NORMAL");
-                                    }
+                                    stateFallbackExit(self, "stateComplete:NORMAL");
                                 }
                                 return chain.proceed();
                             }
@@ -992,13 +711,9 @@ final class RecentsBlur {
                             public Object intercept(XposedInterface.Chain chain) throws Throwable {
                                 Object self = chain.getThisObject();
                                 ModuleLog.d("STATEBLUR", "onStateTransitionCancel inOverview=" + sStateInOverview);
+
                                 if (sStateInOverview) {
-                                    sStateInOverview = false;
-                                    View anchor = resolveBlurAnchor(self);
-                                    ModuleLog.d("STATEBLUR", "CANCEL -> startExitFadeOut anchor=" + anchorName(anchor));
-                                    if (anchor != null) {
-                                        startExitFadeOut(anchor, "stateCancel");
-                                    }
+                                    stateFallbackExit(self, "stateCancel");
                                 }
                                 return chain.proceed();
                             }
@@ -1084,26 +799,13 @@ final class RecentsBlur {
             if (md != null && md.trim().length() > 0) { sBlurMode = md.trim(); anchorChanged = true; }
             String clv = i.getStringExtra("clamp");
             if (clv != null) sClampEnabled = !clv.trim().equalsIgnoreCase("off");
-            String ax = i.getStringExtra("alphaexit");
-            if (ax != null) sAlphaExitEnabled = !ax.trim().equalsIgnoreCase("off");
-            String de = i.getStringExtra("descententer");
-            if (de != null) sDescentEnterEnabled = !de.trim().equalsIgnoreCase("off");
-            String se = i.getStringExtra("scaleenter");
-            if (se != null) sScaleEnterEnabled = !se.trim().equalsIgnoreCase("off");
-            String esv = i.getStringExtra("enterscale");
-            if (esv != null) { try { sEnterScale = Float.parseFloat(esv.trim()); } catch (Throwable ignore) {} }
-            String sx = i.getStringExtra("scaleexit");
-            if (sx != null) sScaleExitEnabled = !sx.trim().equalsIgnoreCase("off");
             String tn = i.getStringExtra("tint");
             if (tn != null) sTintEnabled = !tn.trim().equalsIgnoreCase("off");
-            String gt = i.getStringExtra("gts");
-            if (gt != null) sGtsEnabled = !gt.trim().equalsIgnoreCase("off");
-            String vx = i.getStringExtra("visexit");
-            if (vx != null) sVisExitEnabled = !vx.trim().equalsIgnoreCase("off");
-            String ve = i.getStringExtra("visenter");
-            if (ve != null) sVisEnterEnabled = !ve.trim().equalsIgnoreCase("off");
             String dg = i.getStringExtra("diag");
             if (dg != null) sDiagEnabled = !dg.trim().equalsIgnoreCase("off");
+
+            String wj = i.getStringExtra("walljudge");
+            if (wj != null) sWallpaperJudgeEnabled = !wj.trim().equalsIgnoreCase("off");
             if (anchorChanged) {
                 View old = sRecentsBlurView == null ? null : sRecentsBlurView.get();
                 sRecentsBlurView = null;
@@ -1117,12 +819,11 @@ final class RecentsBlur {
         }
     }
     static String describe() {
-        return " | enter: scale=" + sScaleEnterEnabled + "(<" + sEnterScale + ")"
-                + " vis=" + sVisEnterEnabled + " alphaFall=" + sDescentEnterEnabled + " state=on"
-                + " | exit: state=on vis=" + sVisExitEnabled + " alphaRise=" + sAlphaExitEnabled + " gts=" + sGtsEnabled
-                + " | tint=" + sTintEnabled + " scaleexit=" + sScaleExitEnabled + " iconblur=" + sForceIconBlur
-                + " | verbose=" + ModuleLog.VERBOSE + " diag=" + sDiagEnabled
-                + " | deb enter=" + ENTER_DEBOUNCE_MS + " exit=" + EXIT_DEBOUNCE_MS;
+        return " | judge: walljudge=" + sWallpaperJudgeEnabled
+                + " (main) state-fallback (delay=" + STATE_FALLBACK_DELAY_MS + "ms)"
+                + " | clamp=" + sClampEnabled + "(>=" + sScaleClampMin + ")"
+                + " | tint=" + sTintEnabled + " iconblur=" + sForceIconBlur
+                + " | verbose=" + ModuleLog.VERBOSE + " diag=" + sDiagEnabled;
     }
     private static void reloadConfigIfStale() {
         long now = android.os.SystemClock.uptimeMillis();

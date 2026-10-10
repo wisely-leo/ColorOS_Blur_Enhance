@@ -30,7 +30,7 @@ public class SettingsActivity extends Activity {
     private static final int MAX_BG_MB = 15;
     private static final long MAX_BG_BYTES = MAX_BG_MB * 1024L * 1024L;
 
-    private static final String LOG_TAG_VER = "v45.1";
+    private static final String LOG_TAG_VER = "v45.2";
     static void lg(String s) {
         if (!App.logEnabled()) return;
         android.util.Log.i("SoftUi", s);
@@ -315,7 +315,14 @@ private SettingsStore store;
     }
 
     private static final String CHANGELOG =
-            "v45.1\n"
+            "v45.2\n"
+            + "· 最近任务模糊判据重构：改用系统壁纸缩放信号（app_recent_enter/exit）驱动进出\n"
+            + "  · 进出响应更快、更稳；状态机降级为延迟兜底（壁纸信号缺失时补位）\n"
+            + "· 修复从应用返回桌面时偶发误判「进入最近任务」导致的假模糊\n"
+            + "· 键盘按键配色跟随系统深浅色切换（深色下自动适配）\n"
+            + "· 内部清理与优化：移除大量无用代码，降低内存与体积\n"
+            + "\n"
+            + "v45.1\n"
             + "· 键盘按键配色优化：按键背景改为「半透明白玻璃」观感（仿 iOS）\n"
             + "  · 回车键保持系统强调色（原生行为）\n"
             + "· 稳定性与内存优化\n"
@@ -592,13 +599,6 @@ private SettingsStore store;
             View sampleRow = SoftUi.slider(this, "采样倍率",
                     store.getSampleScale() * 100f, 0, 100, "%",
                     v -> store.setSampleScale(v / 100f));
-            SoftUi.Card cardFunc = SoftUi.card(this,
-                    SoftUi.toggle(this, "Shortcut 实时模糊", store.isShortcut(),
-                            v -> store.setShortcut(v)),
-                    SoftUi.toggle(this, "下拉搜索实时模糊", store.isQsProbe(),
-                            v -> store.setQsProbe(v)),
-                    SoftUi.toggle(this, "相册强制白色主题", store.isGalleryLight(),
-                            v -> store.setGalleryLight(v)));
 
             View imeRadiusRow = SoftUi.slider(this, "模糊程度", store.getImeBlurRadius(), 0f, 350f, "",
                     v -> store.setImeBlurRadius(v));
@@ -637,7 +637,7 @@ private SettingsStore store;
             SoftUi.Card cardImeBlur = SoftUi.card(this, imeRows[0], imeRows[1]);
 
             final SoftUi.Row recentsRow = SoftUi.toggle(this,
-                    "最近任务模糊增强（实验性）", store.isRecents(), null, 0f, false);
+                    "最近任务模糊增强", store.isRecents(), null, 0f, false);
             recentsRow.setOnToggle(v -> {
                 final SoftUi.Switch sw = recentsRow.switchView();
                 if (!v) {
@@ -647,19 +647,26 @@ private SettingsStore store;
                 }
 
                 SoftUi.confirm(shell,
-                        "启用实验性功能",
-                        "「最近任务模糊增强」经过多次版本更迭验证为不稳定，"
-                                + "部分 bug 难以修复（如快速上滑时模糊突变为衰减、"
-                                + "偶发不生效等）。\n\n确定启用吗？",
+                        "启用提示",
+                        "该功能仅在作者设备上测试通过稳定性测验，其他设备请自测。\n\n确定启用吗？",
                         "确定启用", "取消",
                         () -> {
-                            lg("experimental recents ENABLED by user");
+                            lg("recents ENABLED by user");
                             store.setRecents(true);
                         },
                         () -> {
                             if (sw != null) sw.setCheckedImmediate(false);
                         });
             });
+
+            SoftUi.Card cardFunc = SoftUi.card(this,
+                    SoftUi.toggle(this, "Shortcut 实时模糊", store.isShortcut(),
+                            v -> store.setShortcut(v)),
+                    SoftUi.toggle(this, "下拉搜索实时模糊", store.isQsProbe(),
+                            v -> store.setQsProbe(v)),
+                    SoftUi.toggle(this, "相册强制白色主题", store.isGalleryLight(),
+                            v -> store.setGalleryLight(v)),
+                    recentsRow);
 
             View clockAlphaRow = SoftUi.slider(this, "时钟透明度",
                     store.getClockIconAlpha() * 100f, 0, 100, "%",
@@ -783,7 +790,6 @@ private SettingsStore store;
                 SoftUi.setRowEnabled(clockAlphaRow, false);
                 SoftUi.setRowEnabled(clockBrightRow, false);
             }
-            SoftUi.Card cardExperimental = SoftUi.card(this, recentsRow);
             View[] pePair = SoftUi.toggleWithDependents(this, "posteffect 模糊采样率",
                     store.isPostEffect(), v -> store.setPostEffect(v), sampleRow);
             SoftUi.Card cardPost = SoftUi.card(this, pePair[0], pePair[1]);
@@ -918,7 +924,7 @@ private SettingsStore store;
                     SoftUi.infoBlock(this, "Shizuku API",
                             "RikkaApps  ·  Apache-2.0",
                             () -> openUrl("https://github.com/RikkaApps/Shizuku-API")));
-            SoftUi.Card[] cards = { cardFunc, cardImeBlur, cardClock, cardPost, cardOther, cardExperimental,
+            SoftUi.Card[] cards = { cardFunc, cardImeBlur, cardClock, cardPost, cardOther,
                                     cardAdb, cardScope, cardUpdate, cardPerm, cardAbout, cardFiles, cardNote, cardOss };
             SoftUi.stack(pageSettings,
                 SoftUi.group(this, "功能"),
@@ -927,8 +933,6 @@ private SettingsStore store;
                 cardImeBlur,
                 SoftUi.group(this, "时钟组件模糊"),
                 cardClock,
-                SoftUi.group(this, "实验性功能"),
-                cardExperimental,
                 SoftUi.group(this, "posteffect 模糊采样率"),
                 cardPost,
                 SoftUi.group(this, "其他"),
