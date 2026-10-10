@@ -30,7 +30,7 @@ public class SettingsActivity extends Activity {
     private static final int MAX_BG_MB = 15;
     private static final long MAX_BG_BYTES = MAX_BG_MB * 1024L * 1024L;
 
-    private static final String LOG_TAG_VER = "v44.3";
+    private static final String LOG_TAG_VER = "v45.1";
     static void lg(String s) {
         if (!App.logEnabled()) return;
         android.util.Log.i("SoftUi", s);
@@ -315,7 +315,17 @@ private SettingsStore store;
     }
 
     private static final String CHANGELOG =
-            "v45\n"
+            "v45.1\n"
+            + "· 键盘按键配色优化：按键背景改为「半透明白玻璃」观感（仿 iOS）\n"
+            + "  · 回车键保持系统强调色（原生行为）\n"
+            + "· 稳定性与内存优化\n"
+            + "  · 修复多处内存泄漏与资源未释放问题，降低长时间使用后的内存占用\n"
+            + "  · 修复网络请求、日志读取等场景下的资源泄漏\n"
+            + "· 日志文件不再无限增长（自动轮转，单个上限 2MB）\n"
+            + "  · 界面侧日志改为常驻写入，减少反复读写带来的卡顿\n"
+            + "· 键盘模糊圆角固定为安全值，避免偶发崩溃\n"
+            + "\n"
+            + "v45\n"
             + "· 新增「输入法键盘模糊」（仅适配语燕输入法）\n"
             + "  · 让输入法键盘背景呈现高斯模糊，与系统其他模糊区域观感统一\n"
             + "  · 可调：模糊程度 / 键盘圆角 / 白灰蒙版强度\n"
