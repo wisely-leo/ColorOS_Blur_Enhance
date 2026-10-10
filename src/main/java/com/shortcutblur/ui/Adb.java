@@ -38,6 +38,21 @@ public final class Adb {
         if (st == NO_PERM) return "未授权 · 点此申请";
         return "未连接（请先启动 Shizuku）";
     }
+    // 持有当前已注册的权限回调监听器：Shizuku 的监听器注册表是静态的，
+// 匿名内部类会闭包持有 Activity 与 done Runnable。若在回调触发前 Activity
+// 被销毁（用户申请后立刻返回），旧监听器会一直钉住已销毁的 Activity。
+// 因此：注册新监听前先移除旧的；Activity.onDestroy 时调用 removePending 兜底。
+    private static volatile rikka.shizuku.Shizuku.OnRequestPermissionResultListener sPendingListener = null;
+
+    /** Activity 销毁时调用：移除可能残留的权限监听器，防止泄漏已销毁的 Activity。 */
+    public static void removePending() {
+        rikka.shizuku.Shizuku.OnRequestPermissionResultListener l = sPendingListener;
+        sPendingListener = null;
+        if (l != null) {
+            try { rikka.shizuku.Shizuku.removeRequestPermissionResultListener(l); } catch (Throwable ignored) {}
+        }
+    }
+
     public static void request(final Activity a, final Runnable done) {
         try {
             if (!alive()) {
@@ -45,17 +60,29 @@ public final class Adb {
                 if (done != null) a.runOnUiThread(done);
                 return;
             }
+            // 先清掉上一次可能残留的监听器，避免叠加/泄漏。
+            removePending();
             final rikka.shizuku.Shizuku.OnRequestPermissionResultListener l =
                     new rikka.shizuku.Shizuku.OnRequestPermissionResultListener() {
                         @Override public void onRequestPermissionResult(int requestCode, int grantResult) {
                             try {
                                 rikka.shizuku.Shizuku.removeRequestPermissionResultListener(this);
                             } catch (Throwable ignored) {}
+                            if (sPendingListener == this) sPendingListener = null;
                             SettingsActivity.lg("ADB 权限回调: requestCode=" + requestCode
                                     + " grantResult=" + grantResult);
-                            if (done != null) a.runOnUiThread(done);
+                            // Activity 可能已销毁：runOnUiThread 在销毁后仍会 post，
+                            // 这里判空 isFinishing/isDestroyed 规避无意义回调。
+                            if (done != null) {
+                                try {
+                                    if (!a.isFinishing() && !a.isDestroyed()) {
+                                        a.runOnUiThread(done);
+                                    }
+                                } catch (Throwable ignored) {}
+                            }
                         }
                     };
+            sPendingListener = l;
             rikka.shizuku.Shizuku.addRequestPermissionResultListener(l);
             SettingsActivity.lg("申请 ADB 权限…");
             rikka.shizuku.Shizuku.requestPermission(0);

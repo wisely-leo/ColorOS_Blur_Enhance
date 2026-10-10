@@ -22,17 +22,7 @@ public class App extends Application {
     public static void lg(String s) {
         if (sApp != null && !logEnabled()) return;
         android.util.Log.i("BlurUI", s);
-        try {
-            java.io.File dir = new java.io.File("/storage/emulated/0/Download");
-            if (dir.exists() && dir.canWrite()) {
-                java.io.FileOutputStream fo =
-                        new java.io.FileOutputStream(new java.io.File(dir, "UiStartup.log"), true);
-                java.io.OutputStreamWriter w = new java.io.OutputStreamWriter(fo, "UTF-8");
-                w.write(s);
-                w.write((char) 10);
-                w.flush();
-                w.close();
-            }
-        } catch (Throwable ignored) {}
+        // 统一走 UiLog：持久 Writer + 2MB 轮转，避免每条日志 open/close 抖动与无限增长。
+        UiLog.write(s);
     }
 }

@@ -1072,7 +1072,9 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
     }
     static final class Backdrop {
         static android.graphics.Bitmap src;
-        static View anchor;
+        // anchor 必须弱引用：它是从 Activity/View 树传入的 View，
+        // 若强引用会在 Activity 销毁后仍钉住整棵旧 View 树（静态字段 = GC root）。
+        static java.lang.ref.WeakReference<View> anchor;
         static final float[] MAP = new float[3];
         private Backdrop() {}
         static void setSource(android.graphics.Bitmap b, View anchorView) {
@@ -1082,13 +1084,13 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
                           + " id=" + Integer.toHexString(System.identityHashCode(b))));
             }
             src = b;
-            if (anchorView != null) anchor = anchorView;
+            if (anchorView != null) anchor = new java.lang.ref.WeakReference<>(anchorView);
         }
         static boolean ready() {
             return src != null && !src.isRecycled();
         }
         static boolean mapping() {
-            View a = anchor;
+            View a = anchor == null ? null : anchor.get();
             if (a == null || !ready()) return false;
             int aw = a.getWidth(), ah = a.getHeight();
             if (aw <= 0 || ah <= 0) return false;
@@ -1131,6 +1133,11 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
     }
     public static void clearBackdrop() {
         Backdrop.setSource(null, null);
+    }
+
+    /** 供宿主 Activity 在销毁时调用：解除 GlassSync 的静态滚动监听与 View 引用。 */
+    public static void GlassSyncUnhook() {
+        try { GlassSync.unhookIfDetached(); } catch (Throwable ignored) {}
     }
     public static abstract class GlassView extends android.widget.FrameLayout {
         final float radiusDp;
@@ -1215,7 +1222,7 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         }
         final void cacheLocation() {
             try {
-                View bd = Backdrop.anchor;
+                View bd = Backdrop.anchor == null ? null : Backdrop.anchor.get();
                 if (bd == null) return;
                 getLocationInWindow(GlassSync.LOC2);
                 bd.getLocationInWindow(GlassSync.LOC1);
@@ -1305,7 +1312,10 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         private static final java.util.WeakHashMap<View, Boolean> WATCHED =
                 new java.util.WeakHashMap<>();
         private static android.view.ViewTreeObserver hookedTvo;
-        private static View hooked;
+        // hooked / hookListener 都是静态 GC root，必须保证 Activity 销毁后能被解开：
+        //   - hooked 用弱引用（原先强引用会钉住最后一个 ScrollView → 整棵 View 树）
+        //   - hookListener 会在 detach 时显式 remove 并置空（见 unhook()）
+        private static java.lang.ref.WeakReference<View> hooked;
         private static android.view.ViewTreeObserver.OnScrollChangedListener hookListener;
         private static boolean pending;
         private static long pendingAt;
@@ -1324,19 +1334,46 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
             if (WATCHED.put(sc, Boolean.TRUE) == null) {
                 sc.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
                     @Override public void onViewAttachedToWindow(View v) { hook(v); }
-                    @Override public void onViewDetachedFromWindow(View v) { }
+                    @Override public void onViewDetachedFromWindow(View v) {
+                        // 当前观察的 View 脱离窗口 → 解除静态监听与引用，避免泄漏 View 树。
+                        View cur = hooked == null ? null : hooked.get();
+                        if (cur == v) unhook();
+                    }
                 });
             }
         }
+        /** 解除当前挂载的滚动监听并清空静态引用（Activity 销毁/detach 时调用）。 */
+        static void unhook() {
+            if (hookedTvo != null && hookListener != null) {
+                try { hookedTvo.removeOnScrollChangedListener(hookListener); } catch (Throwable ignored) {}
+            }
+            hookListener = null;
+            hookedTvo = null;
+            hooked = null;
+            pending = false;
+            ticks = 0;
+        }
+
+        /**
+         * 仅当"当前观察的 View 已脱离窗口"时才解除。
+         * 用于 Activity.onDestroy 兜底：避免旧 Activity 的 onDestroy 误清新 Activity
+         * （recreate 时新 Activity 已先 attach）刚挂上的监听。
+         */
+        static void unhookIfDetached() {
+            View cur = hooked == null ? null : hooked.get();
+            if (cur == null) return;                 // 已被 GC/清空，无需处理
+            if (!cur.isAttachedToWindow()) unhook(); // 只有真的脱离才解
+        }
         private static void hook(final View sc) {
             android.view.ViewTreeObserver tvo = sc.getViewTreeObserver();
-            if (hooked == sc && hookedTvo == tvo) return;
+            View cur = hooked == null ? null : hooked.get();
+            if (cur == sc && hookedTvo == tvo) return;
             if (hookedTvo != null && hookListener != null) {
                 try { hookedTvo.removeOnScrollChangedListener(hookListener); } catch (Throwable ignored) {}
             }
             pending = false;
             hookListener = null;
-            hooked = sc;
+            hooked = new java.lang.ref.WeakReference<>(sc);
             hookedTvo = tvo;
             hookListener = () -> {
                 long now = android.os.SystemClock.uptimeMillis();
@@ -1360,9 +1397,10 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
                 alive++;
             }
             if (ticks <= 3 || ticks % 120 == 0) {
+                View h = hooked == null ? null : hooked.get();
                 Effects.logDiag("tick#" + ticks + " 层数=" + alive + " scrollY="
-                        + (hooked instanceof android.widget.ScrollView
-                            ? ((android.widget.ScrollView) hooked).getScrollY() : -1));
+                        + (h instanceof android.widget.ScrollView
+                            ? ((android.widget.ScrollView) h).getScrollY() : -1));
             }
         }
         static void refresh() {

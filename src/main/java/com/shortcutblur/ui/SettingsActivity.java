@@ -34,27 +34,30 @@ public class SettingsActivity extends Activity {
     static void lg(String s) {
         if (!App.logEnabled()) return;
         android.util.Log.i("SoftUi", s);
-        try {
-            for (String d : new String[]{
-                    "/storage/emulated/0/Download",
-                    "/sdcard/Download",
-                    "/storage/emulated/0"}) {
-                File dir = new File(d);
-                if (!dir.exists() || !dir.canWrite()) continue;
-                FileOutputStream fo = new FileOutputStream(
-                        new File(dir, "UiStartup.log"), true);
-                OutputStreamWriter w = new OutputStreamWriter(fo, "UTF-8");
-                w.write(s + "\n");
-                w.flush();
-                w.close();
-                return;
-            }
-        } catch (Throwable ignored) {}
+        // 统一走 UiLog：持久 Writer + 2MB 轮转，避免每条日志 open/close 抖动与无限增长。
+        UiLog.write(s);
     }
-    private SettingsStore store;
+private SettingsStore store;
     private View shell;
 
     private android.view.ViewGroup uiRoot;
+
+    // 生命周期兜底：在途后台线程完成后回主线程时，若 Activity 已销毁则不再操作 UI。
+    private volatile boolean destroyed = false;
+
+    @Override
+    protected void onDestroy() {
+        destroyed = true;
+        // 断开静态/长生命周期引用，帮助 GC 回收 Activity 与其 View 树。
+        try { SoftUi.clearBackdrop(); } catch (Throwable ignored) {}
+        try { SoftUi.GlassSyncUnhook(); } catch (Throwable ignored) {}
+        // 移除可能残留的 Shizuku 权限回调监听器（它静态持有本 Activity）。
+        try { Adb.removePending(); } catch (Throwable ignored) {}
+        shell = null;
+        uiRoot = null;
+        store = null;
+        super.onDestroy();
+    }
 
     private static int themeIndex(int mode) {
         if (mode == SettingsStore.THEME_LIGHT) return 0;
@@ -177,6 +180,7 @@ public class SettingsActivity extends Activity {
                 r = Adb.restartScope(SettingsActivity.this, one);
             }
             runOnUiThread(() -> {
+                if (destroyed) return;
                 android.widget.Toast.makeText(SettingsActivity.this,
                         pkg + " -> " + (r.startsWith("!") ? "失败" : "已重启"),
                         android.widget.Toast.LENGTH_SHORT).show();
@@ -193,6 +197,7 @@ public class SettingsActivity extends Activity {
                 r = Adb.restartScope(SettingsActivity.this, pkgs);
             }
             runOnUiThread(() -> {
+                if (destroyed) return;
                 android.widget.Toast.makeText(SettingsActivity.this,
                         "重启全部 -> " + (r.startsWith("!") ? "失败（见日志）" : "已重启"),
                         android.widget.Toast.LENGTH_SHORT).show();
@@ -387,11 +392,13 @@ public class SettingsActivity extends Activity {
         }
     }
     private void checkUpdate(final android.widget.TextView status) {
+        final SettingsStore st = store;   // 捕获局部引用，避免 onDestroy 置 null 后 NPE
         new Thread(() -> {
             String msg;
+            HttpURLConnection conn = null;
             try {
                 String api = "https://api.github.com/repos/wisely-leo/ColorOS_Blur_Enhance/releases/latest";
-                HttpURLConnection conn = (HttpURLConnection) new URL(api).openConnection();
+                conn = (HttpURLConnection) new URL(api).openConnection();
                 conn.setRequestMethod("GET");
                 conn.setConnectTimeout(10000);
                 conn.setReadTimeout(10000);
@@ -401,20 +408,26 @@ public class SettingsActivity extends Activity {
                 if (code != 200) {
                     msg = "!HTTP " + code;
                 } else {
-                    BufferedReader br = new BufferedReader(
-                            new InputStreamReader(conn.getInputStream(), "UTF-8"));
-                    StringBuilder sb = new StringBuilder();
-                    String line;
-                    while ((line = br.readLine()) != null) sb.append(line);
-                    br.close();
-                    String body = sb.toString();
+                    BufferedReader br = null;
+                    String body;
+                    try {
+                        br = new BufferedReader(
+                                new InputStreamReader(conn.getInputStream(), "UTF-8"));
+                        StringBuilder sb = new StringBuilder();
+                        String line;
+                        while ((line = br.readLine()) != null) sb.append(line);
+                        body = sb.toString();
+                    } finally {
+                        // finally 关闭：中途抛异常时也要释放连接流。
+                        if (br != null) { try { br.close(); } catch (Throwable ignored) {} }
+                    }
                     String tag = jsonStr(body, "tag_name");
                     if (tag == null || tag.length() == 0) {
                         msg = "!无法解析版本";
                     } else {
-                        long localCode = store.versionCode();
+                        long localCode = (st == null) ? 0 : st.versionCode();
                         long remoteCode = tagToCode(tag);
-                        String localName = store.versionName();
+                        String localName = (st == null) ? "?" : st.versionName();
                         if (remoteCode <= 0) {
                             msg = tag.equalsIgnoreCase(localName)
                                     ? ("已是最新 " + localName)
@@ -427,13 +440,16 @@ public class SettingsActivity extends Activity {
                         }
                     }
                 }
-                conn.disconnect();
             } catch (Throwable t) {
                 lg("checkUpdate fail: " + t);
                 msg = "!网络错误";
+            } finally {
+                // 无论成功/异常都断开连接，避免 socket 滞留。
+                if (conn != null) { try { conn.disconnect(); } catch (Throwable ignored) {} }
             }
             final String m = msg;
             runOnUiThread(() -> {
+                if (destroyed) return;
                 status.setText(m);
                 lg("checkUpdate -> " + m);
             });
@@ -577,14 +593,14 @@ public class SettingsActivity extends Activity {
 
             View imeRadiusRow = SoftUi.slider(this, "模糊程度", store.getImeBlurRadius(), 0f, 350f, "",
                     v -> store.setImeBlurRadius(v));
-            View imeCornerRow = SoftUi.slider(this, "键盘圆角", store.getImeBlurCornerDp(), 0f, 48f, "dp",
-                    v -> store.setImeBlurCorner(v));
+            // 键盘圆角固定 25dp（见 FeatureFlags.IME_BLUR_CORNER_DP 注释）：
+            // 系统模糊圆角 >25dp 会触发 native 崩溃，故不再提供自定义滑块。
             View imeMaskRow = SoftUi.slider(this, "白灰蒙版强度", store.getImeBlurMask() * 100f, 0f, 100f, "%",
                     v -> store.setImeBlurMask(v / 100f));
 
             View[] imeRows = SoftUi.toggleWithDependents(this, "输入法键盘模糊",
                     store.isImeBlur(), null,
-                    imeRadiusRow, imeCornerRow, imeMaskRow);
+                    imeRadiusRow, imeMaskRow);
             final SoftUi.Row imeToggleRow = (SoftUi.Row) imeRows[0];
             final View imeFoldHolder = imeRows[1];
             imeToggleRow.setOnToggle(v -> {

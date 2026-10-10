@@ -20,12 +20,18 @@ public class ScopeService extends Service {
                 ByteArrayOutputStream bo = new ByteArrayOutputStream();
                 byte[] buf = new byte[4096];
                 int n;
-                InputStream is = p.getInputStream();
-                while ((n = is.read(buf)) > 0) bo.write(buf, 0, n);
-                is.close();
-                InputStream es = p.getErrorStream();
-                while ((n = es.read(buf)) > 0) bo.write(buf, 0, n);
-                es.close();
+                InputStream is = null;
+                InputStream es = null;
+                try {
+                    is = p.getInputStream();
+                    while ((n = is.read(buf)) > 0) bo.write(buf, 0, n);
+                    es = p.getErrorStream();
+                    while ((n = es.read(buf)) > 0) bo.write(buf, 0, n);
+                } finally {
+                    // finally 关闭：读取过程中抛异常也要释放 fd（否则长期运行会耗 fd）。
+                    if (is != null) { try { is.close(); } catch (Throwable ignored) {} }
+                    if (es != null) { try { es.close(); } catch (Throwable ignored) {} }
+                }
                 rc = p.waitFor();
                 out = bo.toString("UTF-8");
             } catch (Throwable t) {
