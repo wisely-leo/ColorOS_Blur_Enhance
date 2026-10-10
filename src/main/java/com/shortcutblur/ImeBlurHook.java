@@ -28,11 +28,10 @@ public final class ImeBlurHook {
 
     private static volatile boolean sReflReady = false;
 
-    // ---- 内侧发光描边 ----
-    // 颜色：白，alpha 70%（半透明）；宽度 2.5dp；模糊 5dp（内侧发光）
+    // ---- 亮色描边 ----
+    // 颜色：白，alpha 70%（半透明）；宽度 2.5dp。
     private static final int GLOW_COLOR = 0xB3FFFFFF;
     private static final float GLOW_STROKE_DP = 2.5f;
-    private static final float GLOW_BLUR_DP = 5f;
 
     // 系统模糊 drawable 按 View 缓存（必须复用：每次新建会导致 Aggregator
     // Add/Remove 抖动并与系统动画抢绘制）。用弱引用，避免泄漏 View。
@@ -473,23 +472,30 @@ public final class ImeBlurHook {
 
             // 圆角：仅「悬浮键盘」需要（悬浮时四角可见）；非悬浮（贴底）键盘不设圆角。
             // 判据来自语燕自身的 keyboard_mode_float 设置，不随上滑动画变化，故不会抖动。
+            // 注意：必须显式下发 0 —— mgr 是缓存复用的，悬浮时设过圆角后若不重置，
+            // 切回非悬浮会残留旧圆角（表现为「遗留圆角」）。
             float cornerDp = FeatureFlags.IME_BLUR_CORNER_DP;
             float cornerPx = 0f;
             boolean floating = isFloatKeyboard(v);
-            if (cornerDp > 0f && sSetCornerRadius != null && floating) {
-                cornerPx = cornerDp * v.getResources().getDisplayMetrics().density;
+            if (cornerDp > 0f && sSetCornerRadius != null) {
+                cornerPx = floating
+                        ? cornerDp * v.getResources().getDisplayMetrics().density
+                        : 0f;
                 try {
                     sSetCornerRadius.invoke(mgr, cornerPx);
                 } catch (Throwable ignored) {}
             }
 
-            // 内侧发光描边：叠在模糊背景之上；因整体作为 View 的 background，
+            // 亮色描边：叠在模糊背景之上；因整体作为 View 的 background，
             // 绘制顺序仍在键盘子 View 之下，不会遮挡按键 / 候选栏。
+            // 悬浮键盘四边环绕；非悬浮键盘只保留顶部一条线。
             // 描边层 / 合成层不缓存：它们只持有复用的 d，不会触发 Aggregator 抖动；
             // 缓存它们反而会因 Drawable 持有 View 回调而阻止 View 回收。
             float density = v.getResources().getDisplayMetrics().density;
             ImeGlowStrokeDrawable glow = new ImeGlowStrokeDrawable(
-                    GLOW_COLOR, GLOW_STROKE_DP * density, GLOW_BLUR_DP * density, cornerPx);
+                    GLOW_COLOR, GLOW_STROKE_DP * density, cornerPx);
+            glow.setMode(floating ? ImeGlowStrokeDrawable.MODE_ALL
+                                  : ImeGlowStrokeDrawable.MODE_TOP_ONLY);
             android.graphics.drawable.LayerDrawable layer =
                     new android.graphics.drawable.LayerDrawable(new Drawable[] { d, glow });
 
