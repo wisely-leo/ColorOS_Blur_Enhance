@@ -267,6 +267,8 @@ public class GlyphBlurRenderer {
     }
     private static void retry(final View container, final ClassLoader cl, final int attempt, final String why) {
         if (attempt >= MAX_RETRY) { ModuleLog.e("GB", "give up: " + why, null); return; }
+        // 已脱离窗口说明该 View 不会再展示，重试无意义，直接停。
+        try { if (!container.isAttachedToWindow()) return; } catch (Throwable ignore) {}
         if (attempt == 0 || attempt == MAX_RETRY - 1) ModuleLog.d("GB", "retry(" + attempt + "): " + why);
         container.postDelayed(new Runnable() {
             @Override public void run() { tryAttachOnce(container, cl, attempt + 1); }
@@ -304,8 +306,15 @@ public class GlyphBlurRenderer {
             android.graphics.Bitmap out = android.graphics.Bitmap.createBitmap(
                     w, h, android.graphics.Bitmap.Config.ARGB_8888);
             android.graphics.Canvas c = new android.graphics.Canvas(out);
-            d.setBounds(0, 0, w, h);
-            d.draw(c);
+            // 保存/恢复 bounds：d 是 ImageView 自己的 drawable，
+            // 直接改 bounds 会破坏它的后续绘制（图标错位/拉伸）。
+            android.graphics.Rect oldBounds = d.copyBounds();
+            try {
+                d.setBounds(0, 0, w, h);
+                d.draw(c);
+            } finally {
+                d.setBounds(oldBounds);
+            }
             return out;
         } catch (Throwable t) {
             ModuleLog.e("GB", "drawableToBitmap fail cls=" + (d == null ? "null" : d.getClass().getName()), t);
@@ -340,7 +349,13 @@ public class GlyphBlurRenderer {
                 int bh = Math.max(1, bmp.getHeight() * bw / bmp.getWidth());
                 android.graphics.Bitmap small = android.graphics.Bitmap.createScaledBitmap(bmp, bw, bh, true);
                 int[] px = new int[bw * bh];
-                small.getPixels(px, 0, bw, 0, 0, bw, bh);
+                try {
+                    small.getPixels(px, 0, bw, 0, 0, bw, bh);
+                } finally {
+                    // small 一定是本方法新建的（createScaledBitmap），用完立刻回收，降低 GC 压力。
+                    // 注意：bmp 可能是 ImageView 自己的 BitmapDrawable 位图，绝不能 recycle。
+                    try { small.recycle(); } catch (Throwable ignore) {}
+                }
                 android.graphics.Region region = new android.graphics.Region();
                 int alphaThreshold = ICON_ALPHA_THRESHOLD;
                 for (int y = 0; y < bh; y++) {

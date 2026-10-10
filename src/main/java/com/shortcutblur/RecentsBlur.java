@@ -47,9 +47,9 @@ final class RecentsBlur {
     private static volatile boolean sScaleExitEnabled = true;
     private static volatile boolean sTintEnabled = false;
     private static volatile boolean sGtsEnabled = true;
-    private static volatile View sLastAnchor = null;
+    private static volatile java.lang.ref.WeakReference<View> sLastAnchor = null;
     private static volatile boolean sDiagEnabled = false;
-    private static volatile View sCachedDragLayer = null;
+    private static volatile java.lang.ref.WeakReference<View> sCachedDragLayer = null;
     private static volatile boolean sVisExitEnabled = false;
     private static volatile boolean sScaleEnterEnabled = true;
     private static volatile float sEnterScale = 1.0f;
@@ -614,7 +614,7 @@ final class RecentsBlur {
                                     try {
                                         if (self instanceof View) {
                                             View v = (View) self;
-                                            sCachedDragLayer = v;
+                                            sCachedDragLayer = new java.lang.ref.WeakReference<>(v);
                                             float cur = v.getAlpha();
                                             ModuleLog.dv("DRAGALPHA", "setAlpha a=" + a + " cur=" + cur);
                                             if (a < 0.999f) {
@@ -697,7 +697,7 @@ final class RecentsBlur {
                                     @Override
                                     public Object intercept(XposedInterface.Chain chain) throws Throwable {
                                         Object self = chain.getThisObject();
-                                        if (self instanceof View) sCachedDragLayer = (View) self;
+                                        if (self instanceof View) sCachedDragLayer = new java.lang.ref.WeakReference<>((View) self);
                                         Object[] a = chain.getArgs().toArray();
                                         if (a.length > 0 && a[0] instanceof Number) {
                                             float f = ((Number) a[0]).floatValue();
@@ -989,14 +989,14 @@ final class RecentsBlur {
         return n;
     }
     private static View useAnchor(View v) {
-        if (v != null) sLastAnchor = v;
+        if (v != null) sLastAnchor = new java.lang.ref.WeakReference<>(v);
         return v;
     }
     private static View resolveBlurAnchor(Object lrvSelf) {
         try {
             View cached = sRecentsBlurView;
             if (cached != null) return useAnchor(cached);
-            View last = sLastAnchor;
+            View last = anchoredOf(sLastAnchor);
             if (last != null) {
                 try {
                     if (last.isAttachedToWindow()) return last;
@@ -1023,15 +1023,19 @@ final class RecentsBlur {
                 if (v.getParent() instanceof View) return useAnchor((View) v.getParent());
                 return useAnchor(v);
             }
-            View cdl = sCachedDragLayer;
+            View cdl = anchoredOf(sCachedDragLayer);
             if (cdl != null) {
                 try { if (cdl.isAttachedToWindow()) return useAnchor(cdl); } catch (Throwable ignore) {}
             }
         } catch (Throwable ignore) {}
         ModuleLog.d("ANCHOR", "[v21] resolveBlurAnchor FAILED lrvSelf="
                 + (lrvSelf == null ? "null" : lrvSelf.getClass().getSimpleName())
-                + " lastAnchor=" + (sLastAnchor == null ? "null" : "detached"));
+                + " lastAnchor=" + (anchoredOf(sLastAnchor) == null ? "null" : "detached"));
         return null;
+    }
+    /** 安全读取锚点弱引用（已回收返回 null）。 */
+    private static View anchoredOf(java.lang.ref.WeakReference<View> ref) {
+        return ref == null ? null : ref.get();
     }
     static int installProbes(ClassLoader loader, HookApi api) {
         API = api;
