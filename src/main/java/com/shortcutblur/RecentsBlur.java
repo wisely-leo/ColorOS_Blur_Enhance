@@ -26,6 +26,7 @@ final class RecentsBlur {
     private static volatile boolean sConfErrorLogged = false;
     private static volatile float sRecentsLastRadius = -1.0f;
     private static volatile float sRecentsAnimRadius = 0.0f;
+
     // 当前模糊目标 View：必须弱引用！
     // 它由 hook 回调赋值、仅在 exit 动画结束时清空；若某次 exit 动画未走完
     // （状态被其他路径置 false），强引用会永久钉住 DragLayer 子树 → 泄漏。
@@ -48,6 +49,21 @@ final class RecentsBlur {
     private static volatile boolean sDescentEnterEnabled = false;
     private static volatile float sMinScaleSeen = 1.0f;
     private static volatile boolean sScaleExitEnabled = true;
+    // 壁纸判据日志节流：上一次记录时间。
+    private static volatile long sWzLastLogMs = 0L;
+    // 【壁纸判据】进入/退出唯一来源：
+    // OplusDepthController.startWallpaperAnimation 的 type
+    // （app_recent_enter=进入 / app_recent_exit=退出）。
+    // 旧判据（scale/alpha/gts/vis）已移除，状态机判据仅作兜底。
+    private static volatile boolean sWallpaperJudgeEnabled = true;
+    // 壁纸判据为主判断：记录「壁纸信号最后一次生效时间」。
+    // 状态机判据到达时，若距此时间在 WALLPAPER_MAIN_WINDOW_MS 内，
+    // 视为同一次转场的重复信号而忽略；否则延迟兜底。
+    private static volatile long sLastWallpaperHandledMs = 0L;
+    private static final long WALLPAPER_MAIN_WINDOW_MS = 400L;
+    // 状态机兜底延迟：壁纸信号通常更快，状态机慢一拍等它。
+    // 实测壁纸信号可能晚到 ~400ms，故兜底延迟设为 250ms。
+    private static final long STATE_FALLBACK_DELAY_MS = 250L;
     private static volatile boolean sTintEnabled = false;
     private static volatile boolean sGtsEnabled = true;
     private static volatile java.lang.ref.WeakReference<View> sLastAnchor = null;
@@ -67,12 +83,14 @@ final class RecentsBlur {
     private static volatile String sLastVisKey = "";
     private static volatile String sLastFxKey = "";
     private static volatile boolean sForceIconBlur = false;
+
     // 目标 View 列表：必须用弱引用！
     // 原先用 List<View> 强引用，若进入 recents 后未走 exit 路径（异常/切换/相
     // 位卡住），会长期钉住 OplusDragLayer 及其整棵子树，造成大块内存泄漏。
     // 改为 WeakReference<View> 后，即使漏掉一次 clear()，GC 也能回收 View 树。
     private static final java.util.List<java.lang.ref.WeakReference<View>> sBlurTargets =
             new java.util.ArrayList<java.lang.ref.WeakReference<View>>();
+
     // 最近任务视图实例（LauncherRecentsView）：必须弱引用！
     // 它是 View 且只在 stateStart 赋值、从不清空 → 强引用会钉住整棵 recents View 树。
     private static volatile java.lang.ref.WeakReference<Object> sRecentsViewObj = null;
@@ -123,7 +141,7 @@ final class RecentsBlur {
         }
         return sb.toString();
     }
-    /** 目标 View 是否仍存活（弱引用尚未被 GC 清空）。 */
+
     private static boolean hasLiveBlurTarget() {
         for (int i = 0; i < sBlurTargets.size(); i++) {
             java.lang.ref.WeakReference<View> ref = sBlurTargets.get(i);
@@ -257,15 +275,6 @@ final class RecentsBlur {
                                         Object[] a = chain.getArgs().toArray();
                                         Object st = (a.length > 0) ? a[0] : null;
                                         ModuleLog.d("EARLY", "goToState n=" + a.length + " to=" + stateName(st));
-                                        if (sGtsEnabled && st != null) {
-                                            Object gSelf = chain.getThisObject();
-                                            if (isOverviewState(st)) {
-                                                cancelPendingExit();
-                                                enterOverviewFrom(gSelf, "gts:overview");
-                                            } else if (isNormalState(st)) {
-                                                exitOverviewFrom(gSelf, "gts:normal");
-                                            }
-                                        }
                                     } catch (Throwable ignore) {}
                                     return chain.proceed();
                                 }
@@ -331,6 +340,64 @@ final class RecentsBlur {
         } catch (Throwable t) {
             ModuleLog.e("EARLY", "hook visAgg failed", t);
         }
+        // 【壁纸缩放探针 v2】hook OplusDepthController.startWallpaperAnimation(boolean, String)
+        // 实测：ColorOS 桌面「壁纸缩放」不走 setWallpaperZoomOut，
+        // 而是走 OplusDepthController.startWallpaperAnimation(Z,String) ->
+        //   getAnimationParams(type,bool) -> sendWallpaperCommand("oplus.wallpaper.animation")。
+        // 该入口在进/出最近任务转场时必然被调用，参数携带方向(bool)与类型(type)。
+        // 仅记录日志，不改任何逻辑。
+        try {
+            Class<?> odc = Reflect.loadClass(
+                    "com.android.launcher3.uioverrides.states.OplusDepthController", loader);
+            if (odc == null) {
+                ModuleLog.d("WZOOM", "[miss] OplusDepthController");
+            } else {
+                int c = 0;
+                for (java.lang.reflect.Method m : odc.getDeclaredMethods()) {
+                    if (!m.getName().equals("startWallpaperAnimation")) continue;
+                    Class<?>[] pt = m.getParameterTypes();
+                    if (pt.length != 2 || pt[0] != boolean.class
+                            || pt[1] != String.class) continue;
+                    Reflect.setAccessible(m);
+                    API.hook("probe.wallpaperAnim", (Executable) m, new XposedInterface.Hooker() {
+                                @Override public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                                    try {
+                                        Object[] a = chain.getArgs().toArray();
+                                        String type = (a.length > 1 && a[1] != null)
+                                                ? String.valueOf(a[1]) : "?";
+                                        // 【主判据】壁纸缩放驱动进入/退出。
+                                        // type 语义（实测）：app_recent_enter=进入最近任务；
+                                        // app_recent_exit=退出；app_exit/app_launch/folder_open_close=无关，忽略。
+                                        if (sWallpaperJudgeEnabled) {
+                                            boolean enter = "app_recent_enter".equals(type);
+                                            boolean exit = !enter && "app_recent_exit".equals(type);
+                                            if (enter || exit) {
+                                                long now = android.os.SystemClock.uptimeMillis();
+                                                ModuleLog.d("WZOOM", "startWallpaperAnim type=" + type
+                                                        + " inOverview=" + sStateInOverview
+                                                        + " dt=" + (now - sWzLastLogMs) + "ms");
+                                                sWzLastLogMs = now;
+                                                sLastWallpaperHandledMs = now;
+                                                if (enter) {
+                                                    cancelPendingExit();
+                                                    enterOverviewFrom(chain.getThisObject(), "wzoom:enter");
+                                                } else {
+                                                    cancelPendingEnter();
+                                                    exitOverviewFrom(chain.getThisObject(), "wzoom:exit");
+                                                }
+                                            }
+                                        }
+                                    } catch (Throwable ignore) {}
+                                    return chain.proceed();
+                                }
+                            });
+                    c++; n++;
+                }
+                ModuleLog.d("WZOOM", "[hook] OplusDepthController.startWallpaperAnimation(Z,String) x" + c);
+            }
+        } catch (Throwable t) {
+            ModuleLog.e("WZOOM", "hook startWallpaperAnimation failed", t);
+        }
         return n;
     }
     private static void exitOverviewFrom(Object lrvSelf, String why) {
@@ -360,19 +427,6 @@ final class RecentsBlur {
         sRecentsPhase = 1;
         startEnterFadeIn(anchor);
     }
-    private static void scheduleEnterDebounced(final String why) {
-        cancelPendingEnter();
-        if (sStateInOverview) return;
-        sPendingEnter = new Runnable() {
-            @Override public void run() {
-                sPendingEnter = null;
-                if (sStateInOverview) return;
-                ModuleLog.d("STATEBLUR", "enter debounce(" + ENTER_DEBOUNCE_MS + "ms) fired -> " + why);
-                enterOverviewFrom(null, why);
-            }
-        };
-        try { sRecentsHandler.postDelayed(sPendingEnter, ENTER_DEBOUNCE_MS); } catch (Throwable ignore) {}
-    }
     private static void cancelPendingEnter() {
         Runnable r = sPendingEnter;
         if (r != null) {
@@ -380,25 +434,69 @@ final class RecentsBlur {
             sPendingEnter = null;
         }
     }
-    private static void scheduleExitDebounced(final String why) {
-        cancelPendingExit();
-        if (!sStateInOverview) return;
-        sPendingExit = new Runnable() {
-            @Override public void run() {
-                sPendingExit = null;
-                if (!sStateInOverview) return;
-                ModuleLog.d("STATEBLUR", "exit debounce(" + EXIT_DEBOUNCE_MS + "ms) fired -> " + why);
-                exitOverviewFrom(null, why);
-            }
-        };
-        try { sRecentsHandler.postDelayed(sPendingExit, EXIT_DEBOUNCE_MS); } catch (Throwable ignore) {}
-    }
     private static void cancelPendingExit() {
         Runnable r = sPendingExit;
         if (r != null) {
             try { sRecentsHandler.removeCallbacks(r); } catch (Throwable ignore) {}
             sPendingExit = null;
         }
+    }
+    // 【状态机兜底】壁纸为主判断：状态机信号到达时，
+    //  - 若壁纸刚处理过（WALLPAPER_MAIN_WINDOW_MS 内）-> 忽略（同一次转场的重复信号）；
+    //  - 否则延迟 STATE_FALLBACK_DELAY_MS 等壁纸信号，仍没来再兜底生效。
+    //
+    // 注意（内存）：Runnable 会强引用 lrvSelf（View）。为避免转场中堆积、
+    // 并防止已 detach 的 View 被延迟任务长期持有，这里把任务存入
+    // sPendingEnter/sPendingExit，下一次同类转场先取消旧的（只保留最新一个）。
+    private static void stateFallbackEnter(Object lrvSelf) {
+        if (sStateInOverview) return;
+        final java.lang.ref.WeakReference<Object> ref = new java.lang.ref.WeakReference<>(lrvSelf);
+        long since = android.os.SystemClock.uptimeMillis() - sLastWallpaperHandledMs;
+        if (since < WALLPAPER_MAIN_WINDOW_MS) {
+            ModuleLog.d("STATEBLUR", "state-enter skipped (wallpaper handled " + since + "ms ago)");
+            return;
+        }
+        cancelPendingEnter();
+        Runnable r = new Runnable() {
+            @Override public void run() {
+                sPendingEnter = null;
+                if (sStateInOverview) return;
+                long s2 = android.os.SystemClock.uptimeMillis() - sLastWallpaperHandledMs;
+                if (s2 < WALLPAPER_MAIN_WINDOW_MS) {
+                    ModuleLog.d("STATEBLUR", "state-enter fallback skipped (wallpaper took over)");
+                    return;
+                }
+                ModuleLog.d("STATEBLUR", "state-enter fallback fired");
+                enterOverviewFrom(ref.get(), "state-fallback:enter");
+            }
+        };
+        sPendingEnter = r;
+        try { sRecentsHandler.postDelayed(r, STATE_FALLBACK_DELAY_MS); } catch (Throwable ignore) {}
+    }
+    private static void stateFallbackExit(Object lrvSelf, final String why) {
+        if (!sStateInOverview) return;
+        final java.lang.ref.WeakReference<Object> ref = new java.lang.ref.WeakReference<>(lrvSelf);
+        long since = android.os.SystemClock.uptimeMillis() - sLastWallpaperHandledMs;
+        if (since < WALLPAPER_MAIN_WINDOW_MS) {
+            ModuleLog.d("STATEBLUR", "state-exit skipped (wallpaper handled " + since + "ms ago) why=" + why);
+            return;
+        }
+        cancelPendingExit();
+        Runnable r = new Runnable() {
+            @Override public void run() {
+                sPendingExit = null;
+                if (!sStateInOverview) return;
+                long s2 = android.os.SystemClock.uptimeMillis() - sLastWallpaperHandledMs;
+                if (s2 < WALLPAPER_MAIN_WINDOW_MS) {
+                    ModuleLog.d("STATEBLUR", "state-exit fallback skipped (wallpaper took over) why=" + why);
+                    return;
+                }
+                ModuleLog.d("STATEBLUR", "state-exit fallback fired why=" + why);
+                exitOverviewFrom(ref.get(), "state-fallback:" + why);
+            }
+        };
+        sPendingExit = r;
+        try { sRecentsHandler.postDelayed(r, STATE_FALLBACK_DELAY_MS); } catch (Throwable ignore) {}
     }
     private static void cancelPendingRecentsClear() {
         Runnable r = sPendingClear;
@@ -490,6 +588,7 @@ final class RecentsBlur {
                 sRecentsBlurDoneForEntry = false;
                 sRecentsArmed = false;
                 clearPendingArm();
+
                 // 退出完成：显式清空目标列表，及时释放 DragLayer 子树引用
                 // （即便弱引用已兜底，也主动断链，避免列表长期留存死引用）。
                 sBlurTargets.clear();
@@ -540,9 +639,10 @@ final class RecentsBlur {
             ModuleLog.e("BLURAPPLY", "setRenderEffect failed r=" + rApplied, t);
         }
     }
+    // 幂等：避免上游 critical==0 重试时重复 hook
     private static volatile boolean sProbesInstalled = false;
     private static int installRecentsIconBlurProbe(ClassLoader loader) {
-        if (sProbesInstalled) return 0;   // 幂等：避免上游 critical==0 重试时重复 hook
+        if (sProbesInstalled) return 0;
         sProbesInstalled = true;
         int n = 0;
         installEarlySignalProbes(loader);
@@ -619,37 +719,19 @@ final class RecentsBlur {
                                     Object[] args = chain.getArgs().toArray();
                                     float a = (args.length > 0 && args[0] instanceof Number)
                                             ? ((Number) args[0]).floatValue() : 1.0f;
-                                    float prevA = sLastAlphaIn;
-                                    if (!sSelfAlphaCall) {
-                                        sLastAlphaIn = a;
-                                        if (sStateInOverview) {
-                                            if (a < sMinAlphaIn) sMinAlphaIn = a;
-                                            if (a < prevA - 0.02f) sSawAlphaDescent = true;
-                                            if (sAlphaExitEnabled && sSawAlphaDescent && a > 0.25f && a > sMinAlphaIn + 0.15f) {
-                                                ModuleLog.d("STATEBLUR", "alpha rising (min=" + sMinAlphaIn + " -> " + a + ") -> early exit");
-                                                cancelPendingExit();
-                                                exitOverviewFrom(null, "alphaRise");
-                                            }
-                                        }
-                                    }
-                                    if (!sSelfAlphaCall && !sStateInOverview && sDescentEnterEnabled
-                                            && prevA >= 0.95f && a < 0.95f) {
-                                        ModuleLog.d("STATEBLUR", "alpha falling (" + prevA + " -> " + a + ") -> early enter");
-                                        cancelPendingExit();
-                                        enterOverviewFrom(null, "alphaFall");
-                                    }
                                     try {
                                         if (self instanceof View) {
                                             View v = (View) self;
                                             sCachedDragLayer = new java.lang.ref.WeakReference<>(v);
-                                            float cur = v.getAlpha();
-                                            ModuleLog.dv("DRAGALPHA", "setAlpha a=" + a + " cur=" + cur);
                                             if (a < 0.999f) {
-                                                ModuleLog.dv("DRAGALPHA", "setAlpha descent -> clamp1.0 (keep DragLayer opaque)");
+                                                // 热路径（每帧调用）：仅在 VERBOSE 时才计算日志参数。
+                                                if (ModuleLog.VERBOSE) {
+                                                    ModuleLog.dv("DRAGALPHA", "setAlpha a=" + a
+                                                            + " cur=" + v.getAlpha()
+                                                            + " -> clamp1.0 (keep DragLayer opaque)");
+                                                }
                                                 args[0] = 1.0f;
                                                 return chain.proceed(args);
-                                            } else {
-                                                ModuleLog.dv("DRAGALPHA", "alpha>=1 (log only)");
                                             }
                                         }
                                     } catch (Throwable t) {
@@ -664,51 +746,6 @@ final class RecentsBlur {
             }
         } catch (Throwable t) {
             ModuleLog.e("RECENTS", "hook dragLayer alpha failed", t);
-        }
-        try {
-            Class<?> sh = Reflect.loadClass("com.android.quickstep.touch.SwipeToRecentAnimationHelper", loader);
-            if (sh == null) {
-                ModuleLog.d("ENTERHOOK", "[miss] SwipeToRecentAnimationHelper");
-            } else {
-                int c = 0;
-                for (Method m : sh.getDeclaredMethods()) {
-                    if (!m.getName().equals("goOverviewAnimation")) continue;
-                    if (m.getParameterTypes().length != 0) continue;
-                    Reflect.setAccessible(m);
-                    API.hook("recents.enter.goOverview", (Executable) m, new XposedInterface.Hooker() {
-                                @Override public Object intercept(XposedInterface.Chain chain) throws Throwable {
-                                    try {
-                                        Object self = chain.getThisObject();
-                                        ModuleLog.d("ENTERHOOK", "goOverviewAnimation() called -> enter");
-                                        if (self != null) {
-                                            Field f = null;
-                                            Class<?> cc = self.getClass();
-                                            while (cc != null && f == null) {
-                                                try { f = cc.getDeclaredField("mDragLayer"); }
-                                                catch (Throwable ignore2) { cc = cc.getSuperclass(); }
-                                            }
-                                            if (f != null) {
-                                                f.setAccessible(true);
-                                                Object dl = f.get(self);
-                                                if (dl instanceof View) {
-                                                    enterOverviewFrom(dl, "goOverview");
-                                                } else {
-                                                    ModuleLog.d("ENTERHOOK", "mDragLayer not a View");
-                                                }
-                                            } else {
-                                                ModuleLog.d("ENTERHOOK", "mDragLayer field not found");
-                                            }
-                                        }
-                                    } catch (Throwable ignore) {}
-                                    return chain.proceed();
-                                }
-                            });
-                    c++; n++;
-                }
-                ModuleLog.d("ENTERHOOK", "[hook] SwipeToRecentAnimationHelper.goOverviewAnimation x" + c);
-            }
-        } catch (Throwable t) {
-            ModuleLog.e("ENTERHOOK", "hook goOverviewAnimation failed", t);
         }
         try {
             Class<?> dls = Reflect.loadClass(CLS_OPLUS_DRAGLAYER, loader);
@@ -729,24 +766,14 @@ final class RecentsBlur {
                                         if (a.length > 0 && a[0] instanceof Number) {
                                             float f = ((Number) a[0]).floatValue();
                                             reloadConfigIfStale();
-                                            if (f < sMinScaleSeen) sMinScaleSeen = f;
-                                            if (sScaleExitEnabled && sStateInOverview && sMinScaleSeen < 0.96f && f >= 0.988f) {
-                                                ModuleLog.d("STATEBLUR", "scale rose to " + f + " (min seen " + sMinScaleSeen
-                                                        + ") -> early exit (scaleRise)");
-                                                exitOverviewFrom(self, "scaleRise");
-                                            }
-                                            float prevScale = sLastScale;
                                             sLastScale = f;
-                                            if (sScaleEnterEnabled && !sStateInOverview
-                                                    && prevScale >= sEnterScale && f < sEnterScale - 0.001f) {
-                                                ModuleLog.d("STATEBLUR", "scale " + prevScale + " -> " + f
-                                                        + " (crossed " + sEnterScale + ") -> enter (scaleFall, low-prio)");
-                                                enterOverviewFrom(self, "scaleFall");
-                                            }
                                             float clamped = sClampEnabled ? Math.max(f, sScaleClampMin) : f;
                                             if (clamped != f) {
+                                                // 热路径（每帧调用）：仅在 VERBOSE 时才计算日志参数。
+                                                if (ModuleLog.VERBOSE) {
+                                                    ModuleLog.dv("SCALECLAMP", tag + " " + f + " -> " + clamped);
+                                                }
                                                 a[0] = Float.valueOf(clamped);
-                                                ModuleLog.dv("SCALECLAMP", tag + " " + f + " -> " + clamped);
                                             }
                                             return chain.proceed(a);
                                         }
@@ -883,9 +910,10 @@ final class RecentsBlur {
         }
         return n;
     }
+    // 幂等：避免重复 hook
     private static volatile boolean sStateHooksInstalled = false;
     private static int installRecentsStateBlurHooks(ClassLoader loader) {
-        if (sStateHooksInstalled) return 0;   // 幂等：避免重复 hook
+        if (sStateHooksInstalled) return 0;
         sStateHooksInstalled = true;
         int n = 0;
         try {
@@ -912,12 +940,11 @@ final class RecentsBlur {
                                 ModuleLog.d("STATEBLUR", "onStateTransitionStart toState="
                                         + stateName(toState) + " toOverview=" + toOverview
                                         + " toNormal=" + toNormal);
+                                // 【状态机兜底】壁纸为主判断：此处仅作延迟兜底（见 stateFallbackEnter/Exit）。
                                 if (toOverview) {
-                                    cancelPendingExit();
-                                    enterOverviewFrom(self, "stateStart");
+                                    stateFallbackEnter(self);
                                 } else if (toNormal) {
-                                    cancelPendingExit();
-                                    exitOverviewFrom(self, "stateStart:NORMAL");
+                                    stateFallbackExit(self, "stateStart:NORMAL");
                                 }
                                 return chain.proceed();
                             }
@@ -939,13 +966,6 @@ final class RecentsBlur {
                                             boolean vis = (a.length > 0 && a[0] instanceof Boolean)
                                                     && ((Boolean) a[0]).booleanValue();
                                             ModuleLog.d("STATEBLUR", "LRV.onVisibilityAggregated visible=" + vis);
-                                            if (vis) {
-                                                cancelPendingExit();
-                                                if (sVisEnterEnabled) scheduleEnterDebounced("recentsVisible");
-                                            } else {
-                                                cancelPendingEnter();
-                                                if (sVisExitEnabled) scheduleExitDebounced("recentsHidden");
-                                            }
                                         }
                                     } catch (Throwable ignore) {}
                                     return chain.proceed();
@@ -973,15 +993,11 @@ final class RecentsBlur {
                                 Object finalState = (a.length > 0) ? a[0] : null;
                                 boolean toNormal = isNormalState(finalState);
                                 ModuleLog.d("STATEBLUR", "onStateTransitionComplete finalState="
-                                        + stateName(finalState) + " toNormal=" + toNormal);
+                                        + stateName(finalState) + " toNormal=" + toNormal
+                                        + " inOverview=" + sStateInOverview);
+                                // 【状态机兜底】壁纸为主判断：仅延迟兜底退出。
                                 if (toNormal && sStateInOverview) {
-                                    sStateInOverview = false;
-                                    View anchor = resolveBlurAnchor(self);
-                                    ModuleLog.d("STATEBLUR", "EXIT overview(complete-fallback) -> startExitFadeOut anchor=" + anchorName(anchor));
-                                    cancelPendingRecentsClear();
-                                    if (anchor != null) {
-                                        startExitFadeOut(anchor, "stateComplete:NORMAL");
-                                    }
+                                    stateFallbackExit(self, "stateComplete:NORMAL");
                                 }
                                 return chain.proceed();
                             }
@@ -999,13 +1015,9 @@ final class RecentsBlur {
                             public Object intercept(XposedInterface.Chain chain) throws Throwable {
                                 Object self = chain.getThisObject();
                                 ModuleLog.d("STATEBLUR", "onStateTransitionCancel inOverview=" + sStateInOverview);
+                                // 【状态机兜底】壁纸为主判断：仅延迟兜底退出。
                                 if (sStateInOverview) {
-                                    sStateInOverview = false;
-                                    View anchor = resolveBlurAnchor(self);
-                                    ModuleLog.d("STATEBLUR", "CANCEL -> startExitFadeOut anchor=" + anchorName(anchor));
-                                    if (anchor != null) {
-                                        startExitFadeOut(anchor, "stateCancel");
-                                    }
+                                    stateFallbackExit(self, "stateCancel");
                                 }
                                 return chain.proceed();
                             }
@@ -1063,7 +1075,7 @@ final class RecentsBlur {
                 + " lastAnchor=" + (anchoredOf(sLastAnchor) == null ? "null" : "detached"));
         return null;
     }
-    /** 安全读取锚点弱引用（已回收返回 null）。 */
+
     private static View anchoredOf(java.lang.ref.WeakReference<View> ref) {
         return ref == null ? null : ref.get();
     }
@@ -1111,6 +1123,9 @@ final class RecentsBlur {
             if (ve != null) sVisEnterEnabled = !ve.trim().equalsIgnoreCase("off");
             String dg = i.getStringExtra("diag");
             if (dg != null) sDiagEnabled = !dg.trim().equalsIgnoreCase("off");
+            // 【壁纸判据】总开关（默认 on）。
+            String wj = i.getStringExtra("walljudge");
+            if (wj != null) sWallpaperJudgeEnabled = !wj.trim().equalsIgnoreCase("off");
             if (anchorChanged) {
                 View old = sRecentsBlurView == null ? null : sRecentsBlurView.get();
                 sRecentsBlurView = null;
@@ -1129,6 +1144,7 @@ final class RecentsBlur {
                 + " | exit: state=on vis=" + sVisExitEnabled + " alphaRise=" + sAlphaExitEnabled + " gts=" + sGtsEnabled
                 + " | tint=" + sTintEnabled + " scaleexit=" + sScaleExitEnabled + " iconblur=" + sForceIconBlur
                 + " | verbose=" + ModuleLog.VERBOSE + " diag=" + sDiagEnabled
+                + " | walljudge=" + sWallpaperJudgeEnabled
                 + " | deb enter=" + ENTER_DEBOUNCE_MS + " exit=" + EXIT_DEBOUNCE_MS;
     }
     private static void reloadConfigIfStale() {

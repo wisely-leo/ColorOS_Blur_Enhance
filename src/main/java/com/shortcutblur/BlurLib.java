@@ -40,10 +40,16 @@ public final class BlurLib {
     public static boolean isOverviewState(Object state) {
         if (state == null) return false;
         try {
+            // 首选：精确匹配 LauncherState.OVERVIEW 静态单例。
             Object overview = readStaticState("OVERVIEW");
-            if (overview != null && state == overview) return true;
-            Object ui = Reflect.readField(state, "overviewUi");
-            if (ui instanceof Boolean) return (Boolean) ui;
+            if (overview != null) return state == overview;
+        } catch (Throwable ignore) {}
+        // 兜底：按类名判断。
+        // 注意：不能再用 overviewUi 布尔字段——Background 态的 overviewUi 也为 true，
+        //      会把「应用退到桌面」误判成「进入最近任务」。
+        try {
+            String cn = state.getClass().getSimpleName();
+            return cn.contains("Overview") && !cn.contains("Background");
         } catch (Throwable ignore) {}
         return false;
     }
