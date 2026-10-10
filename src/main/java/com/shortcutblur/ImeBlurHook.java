@@ -29,10 +29,10 @@ public final class ImeBlurHook {
     private static volatile boolean sReflReady = false;
 
     // ---- 亮色描边 ----
-    // 颜色：白，alpha 40%（半透明）；线宽 2.5dp；向内渐隐深度 6dp（越靠内越浅）。
+    // 颜色：白，alpha 40%（半透明）；由外向内渐隐深度 8dp，无独立线宽
+    // （整条描边带本身就是渐变，最外侧即最亮处，不存在"粗线"）。
     private static final int GLOW_COLOR = 0x66FFFFFF;
-    private static final float GLOW_STROKE_DP = 2.5f;
-    private static final float GLOW_FEATHER_DP = 6f;
+    private static final float GLOW_FEATHER_DP = 8f;
 
     // 系统模糊 drawable 按 View 缓存（必须复用：每次新建会导致 Aggregator
     // Add/Remove 抖动并与系统动画抢绘制）。用弱引用，避免泄漏 View。
@@ -554,8 +554,7 @@ public final class ImeBlurHook {
             // 缓存它们反而会因 Drawable 持有 View 回调而阻止 View 回收。
             float density = v.getResources().getDisplayMetrics().density;
             ImeGlowStrokeDrawable glow = new ImeGlowStrokeDrawable(
-                    GLOW_COLOR, GLOW_STROKE_DP * density,
-                    GLOW_FEATHER_DP * density, cornerPx);
+                    GLOW_COLOR, GLOW_FEATHER_DP * density, cornerPx);
             glow.setMode(floating ? ImeGlowStrokeDrawable.MODE_ALL
                                   : ImeGlowStrokeDrawable.MODE_TOP_ONLY);
             android.graphics.drawable.LayerDrawable layer =
