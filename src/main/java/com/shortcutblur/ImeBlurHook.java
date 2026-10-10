@@ -370,9 +370,58 @@ public final class ImeBlurHook {
                 ModuleLog.d(TAG, "hook " + sThemeBgName + ".u failed: " + t);
             }
 
-            } catch (Throwable t) {
+            // ★ 键盘按键配色覆盖：把按键背景色改成"半透明白玻璃"（仿 iOS）。
+            // 已定位（实测）：e=字母键背景，d=空格键背景，k=回车键底色。
+            //
+            // ⚠️ 重要限制：
+            //   - b 是强调色，被"回车 + 选择高亮"等多处复用 → 改 b 会误伤高亮，故不碰。
+            //   - k 只改底色；回车若显示绿色，说明其绿色来自 b 的二次着色，改 k 去不掉。
+            //   - 若把 k 也改白后回车仍发绿，属正常现象（绿来自 b）。
+            installKeyColorOverride(mod, cl);
+
+        } catch (Throwable t) {
             ModuleLog.e(TAG, "install failed", t);
         }
+    }
+
+    // 按键覆盖目标色：80% 白。alpha/色值调这里即可。
+    private static final int KEY_OVERLAY_COLOR = 0xCCffffff;
+    // 要覆盖的 Theme 方法（e=字母键, d=空格, k=回车底色）。不含 b（避免误伤高亮）。
+    private static final String[] KEY_OVERLAY_METHODS = { "e", "d", "k" };
+
+    private static void installKeyColorOverride(final BlurEnhanceModule mod, final ClassLoader cl) {
+        final String[] impls = {
+                "com.yuyan.imemodule.data.theme.Theme$Builtin",
+                "com.yuyan.imemodule.data.theme.Theme$Custom"
+        };
+        int hooked = 0;
+        for (String cls : impls) {
+            Class<?> c = null;
+            try {
+                c = Class.forName(cls, false, cl);
+            } catch (Throwable t) {
+                continue;
+            }
+            for (final String mname : KEY_OVERLAY_METHODS) {
+                try {
+                    Method m = c.getDeclaredMethod(mname);
+                    if (m.getReturnType() != int.class) continue;
+                    mod.hook(m)
+                            .setId("ime.keycolor." + mname)
+                            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                            .intercept(new XposedInterface.Hooker() {
+                                @Override
+                                public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                                    chain.proceed();
+                                    return KEY_OVERLAY_COLOR;
+                                }
+                            });
+                    hooked++;
+                } catch (Throwable ignored) {}
+            }
+        }
+        ModuleLog.d(TAG, "key color override installed, hooked=" + hooked
+                + " color=0x" + Integer.toHexString(KEY_OVERLAY_COLOR));
     }
 
     private static void applyBlur(final View v) {
@@ -486,6 +535,10 @@ public final class ImeBlurHook {
 
     private static void doBlur(final View v, final int retry) {
         if (v == null || !FeatureFlags.IME_BLUR) return;
+        // 键盘 View 已脱离窗口时，重试无意义（且会白白持有 View 到超时）。
+        if (retry > 0) {
+            try { if (!v.isAttachedToWindow()) return; } catch (Throwable ignore) {}
+        }
         if (!ensureReflection()) {
             ModuleLog.d(TAG, "doBlur: reflection not ready, abort");
             return;
@@ -542,6 +595,27 @@ public final class ImeBlurHook {
                 cornerPx = floating
                         ? cornerDp * v.getResources().getDisplayMetrics().density
                         : 0f;
+                // ★ 安全 clamp：半径不得超过绘制区域短边的一半。
+                //   系统 BackgroundBlurDrawable 在半径越界时会触发 native
+                //   路径构建崩溃（且崩溃后需 pm clear 输入法数据）。
+                //   即便圆角已固定 25dp，此处仍兜底，防止横屏/矮键盘等
+                //   短边较小的场景越界。View 尚未测量(w/h<=0)时保守不发圆角。
+                if (cornerPx > 0f) {
+                    int w = v.getWidth();
+                    int h = v.getHeight();
+                    if (w > 0 && h > 0) {
+                        float maxSafe = Math.min(w, h) / 2f - 2f;
+                        if (maxSafe < 0f) maxSafe = 0f;
+                        if (cornerPx > maxSafe) {
+                            ModuleLog.d(TAG, "corner clamped " + cornerPx + " -> " + maxSafe
+                                    + " (view " + w + "x" + h + ")");
+                            cornerPx = maxSafe;
+                        }
+                    } else {
+                        ModuleLog.d(TAG, "corner fallback 0 (view not measured)");
+                        cornerPx = 0f;
+                    }
+                }
                 try {
                     sSetCornerRadius.invoke(mgr, cornerPx);
                 } catch (Throwable ignored) {}
