@@ -26,9 +26,7 @@ final class RecentsBlur {
     private static volatile boolean sConfErrorLogged = false;
     private static volatile float sRecentsLastRadius = -1.0f;
     private static volatile float sRecentsAnimRadius = 0.0f;
-    // 当前模糊目标 View：必须弱引用！
-    // 它由 hook 回调赋值、仅在 exit 动画结束时清空；若某次 exit 动画未走完
-    // （状态被其他路径置 false），强引用会永久钉住 DragLayer 子树 → 泄漏。
+
     private static volatile java.lang.ref.WeakReference<View> sRecentsBlurView = null;
     private static volatile float sRecentsTargetRadius = -1.0f;
     private static volatile int sRecentsPhase = 0;
@@ -67,14 +65,10 @@ final class RecentsBlur {
     private static volatile String sLastVisKey = "";
     private static volatile String sLastFxKey = "";
     private static volatile boolean sForceIconBlur = false;
-    // 目标 View 列表：必须用弱引用！
-    // 原先用 List<View> 强引用，若进入 recents 后未走 exit 路径（异常/切换/相
-    // 位卡住），会长期钉住 OplusDragLayer 及其整棵子树，造成大块内存泄漏。
-    // 改为 WeakReference<View> 后，即使漏掉一次 clear()，GC 也能回收 View 树。
+
     private static final java.util.List<java.lang.ref.WeakReference<View>> sBlurTargets =
             new java.util.ArrayList<java.lang.ref.WeakReference<View>>();
-    // 最近任务视图实例（LauncherRecentsView）：必须弱引用！
-    // 它是 View 且只在 stateStart 赋值、从不清空 → 强引用会钉住整棵 recents View 树。
+
     private static volatile java.lang.ref.WeakReference<Object> sRecentsViewObj = null;
     private static volatile String sBlurMode = "draglayer";
     private static volatile boolean sClampEnabled = true;
@@ -123,7 +117,7 @@ final class RecentsBlur {
         }
         return sb.toString();
     }
-    /** 目标 View 是否仍存活（弱引用尚未被 GC 清空）。 */
+
     private static boolean hasLiveBlurTarget() {
         for (int i = 0; i < sBlurTargets.size(); i++) {
             java.lang.ref.WeakReference<View> ref = sBlurTargets.get(i);
@@ -490,8 +484,7 @@ final class RecentsBlur {
                 sRecentsBlurDoneForEntry = false;
                 sRecentsArmed = false;
                 clearPendingArm();
-                // 退出完成：显式清空目标列表，及时释放 DragLayer 子树引用
-                // （即便弱引用已兜底，也主动断链，避免列表长期留存死引用）。
+
                 sBlurTargets.clear();
                 if (v != null) { try { v.setRenderEffect(null); } catch (Throwable ignore) {} }
                 ModuleLog.d("DRAGALPHA", why + " -> exit fade-out done (phase=IDLE)");
@@ -542,7 +535,7 @@ final class RecentsBlur {
     }
     private static volatile boolean sProbesInstalled = false;
     private static int installRecentsIconBlurProbe(ClassLoader loader) {
-        if (sProbesInstalled) return 0;   // 幂等：避免上游 critical==0 重试时重复 hook
+        if (sProbesInstalled) return 0;
         sProbesInstalled = true;
         int n = 0;
         installEarlySignalProbes(loader);
@@ -885,7 +878,7 @@ final class RecentsBlur {
     }
     private static volatile boolean sStateHooksInstalled = false;
     private static int installRecentsStateBlurHooks(ClassLoader loader) {
-        if (sStateHooksInstalled) return 0;   // 幂等：避免重复 hook
+        if (sStateHooksInstalled) return 0;
         sStateHooksInstalled = true;
         int n = 0;
         try {
@@ -1063,7 +1056,7 @@ final class RecentsBlur {
                 + " lastAnchor=" + (anchoredOf(sLastAnchor) == null ? "null" : "detached"));
         return null;
     }
-    /** 安全读取锚点弱引用（已回收返回 null）。 */
+
     private static View anchoredOf(java.lang.ref.WeakReference<View> ref) {
         return ref == null ? null : ref.get();
     }
@@ -1170,8 +1163,7 @@ final class RecentsBlur {
                 }
                 sConfErrorLogged = false;
             } finally {
-                // 必须 finally 关闭：若上面 parseFloat 抛异常，原先的 br.close()
-                // 会被跳过 → 每 2 秒重试一次即泄漏一个 fd，最终 "Too many open files"。
+
                 if (br != null) { try { br.close(); } catch (Throwable ignored) {} }
             }
         } catch (Throwable t) {

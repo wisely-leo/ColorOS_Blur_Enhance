@@ -22,7 +22,7 @@ public class App extends Application {
     public static void lg(String s) {
         if (sApp != null && !logEnabled()) return;
         android.util.Log.i("BlurUI", s);
-        // 统一走 UiLog：持久 Writer + 2MB 轮转，避免每条日志 open/close 抖动与无限增长。
+
         UiLog.write(s);
     }
 }

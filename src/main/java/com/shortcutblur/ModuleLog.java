@@ -51,8 +51,6 @@ public final class ModuleLog {
         d("INFO", detail);
     }
 
-    // 持久输出流：避免每条日志都 open/write/close（高频日志时是严重 IO 抖动）。
-    // 用 BufferedWriter 聚合，按行 flush；超过 MAX_LOG_BYTES 后截断重开，防无限增长。
     private static final long MAX_LOG_BYTES = 2L * 1024 * 1024;
     private static Writer logWriter = null;
     private static long logBytes = 0L;
@@ -68,7 +66,7 @@ public final class ModuleLog {
                 if (logFile == null) { broken = true; return; }
                 logBytes = logFile.length();
             }
-            // 超限轮转：截断重开（单文件封顶，避免累积占满空间）
+
             if (logBytes > MAX_LOG_BYTES) {
                 closeQuietly();
                 try { new FileOutputStream(logFile, false).close(); } catch (Throwable ignore) {}
@@ -86,7 +84,6 @@ public final class ModuleLog {
         }
     }
 
-    /** 走持久缓冲流写一行，不 close。 */
     private static void rawLine(String s) {
         try {
             if (logWriter == null) {

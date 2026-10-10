@@ -34,7 +34,7 @@ public class SettingsActivity extends Activity {
     static void lg(String s) {
         if (!App.logEnabled()) return;
         android.util.Log.i("SoftUi", s);
-        // 统一走 UiLog：持久 Writer + 2MB 轮转，避免每条日志 open/close 抖动与无限增长。
+
         UiLog.write(s);
     }
 private SettingsStore store;
@@ -42,16 +42,15 @@ private SettingsStore store;
 
     private android.view.ViewGroup uiRoot;
 
-    // 生命周期兜底：在途后台线程完成后回主线程时，若 Activity 已销毁则不再操作 UI。
     private volatile boolean destroyed = false;
 
     @Override
     protected void onDestroy() {
         destroyed = true;
-        // 断开静态/长生命周期引用，帮助 GC 回收 Activity 与其 View 树。
+
         try { SoftUi.clearBackdrop(); } catch (Throwable ignored) {}
         try { SoftUi.GlassSyncUnhook(); } catch (Throwable ignored) {}
-        // 移除可能残留的 Shizuku 权限回调监听器（它静态持有本 Activity）。
+
         try { Adb.removePending(); } catch (Throwable ignored) {}
         shell = null;
         uiRoot = null;
@@ -392,7 +391,7 @@ private SettingsStore store;
         }
     }
     private void checkUpdate(final android.widget.TextView status) {
-        final SettingsStore st = store;   // 捕获局部引用，避免 onDestroy 置 null 后 NPE
+        final SettingsStore st = store;
         new Thread(() -> {
             String msg;
             HttpURLConnection conn = null;
@@ -418,7 +417,7 @@ private SettingsStore store;
                         while ((line = br.readLine()) != null) sb.append(line);
                         body = sb.toString();
                     } finally {
-                        // finally 关闭：中途抛异常时也要释放连接流。
+
                         if (br != null) { try { br.close(); } catch (Throwable ignored) {} }
                     }
                     String tag = jsonStr(body, "tag_name");
@@ -444,7 +443,7 @@ private SettingsStore store;
                 lg("checkUpdate fail: " + t);
                 msg = "!网络错误";
             } finally {
-                // 无论成功/异常都断开连接，避免 socket 滞留。
+
                 if (conn != null) { try { conn.disconnect(); } catch (Throwable ignored) {} }
             }
             final String m = msg;
@@ -593,8 +592,7 @@ private SettingsStore store;
 
             View imeRadiusRow = SoftUi.slider(this, "模糊程度", store.getImeBlurRadius(), 0f, 350f, "",
                     v -> store.setImeBlurRadius(v));
-            // 键盘圆角固定 25dp（见 FeatureFlags.IME_BLUR_CORNER_DP 注释）：
-            // 系统模糊圆角 >25dp 会触发 native 崩溃，故不再提供自定义滑块。
+
             View imeMaskRow = SoftUi.slider(this, "白灰蒙版强度", store.getImeBlurMask() * 100f, 0f, 100f, "%",
                     v -> store.setImeBlurMask(v / 100f));
 

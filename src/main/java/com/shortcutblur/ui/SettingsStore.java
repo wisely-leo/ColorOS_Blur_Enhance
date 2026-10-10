@@ -259,7 +259,7 @@ public final class SettingsStore {
 
     public boolean isImeBlur()        { return sp.getBoolean(KEY_IME_BLUR, DEF_IME_BLUR); }
     public float   getImeBlurRadius() { return sp.getFloat(KEY_IME_BLUR_RADIUS, DEF_IME_BLUR_RADIUS); }
-    // 键盘圆角固定 25dp，不再由用户设置（见 FeatureFlags.IME_BLUR_CORNER_DP）。
+
     public float   getImeBlurCornerDp(){ return 25f; }
     public SettingsStore setImeBlur(boolean v)    { sp.edit().putBoolean(KEY_IME_BLUR, v).apply(); syncToHost(); return this; }
     public SettingsStore setImeBlurRadius(float v){ sp.edit().putFloat(KEY_IME_BLUR_RADIUS, v).apply(); syncToHost(); return this; }

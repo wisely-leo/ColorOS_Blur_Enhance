@@ -28,14 +28,9 @@ public final class ImeBlurHook {
 
     private static volatile boolean sReflReady = false;
 
-    // ---- 亮色描边 ----
-    // 颜色：白，alpha 40%（半透明）；由外向内渐隐深度 8dp，无独立线宽
-    // （整条描边带本身就是渐变，最外侧即最亮处，不存在"粗线"）。
     private static final int GLOW_COLOR = 0x66FFFFFF;
     private static final float GLOW_FEATHER_DP = 8f;
 
-    // 系统模糊 drawable 按 View 缓存（必须复用：每次新建会导致 Aggregator
-    // Add/Remove 抖动并与系统动画抢绘制）。用弱引用，避免泄漏 View。
     private static final java.util.WeakHashMap<View, Drawable> sBlurOf =
             new java.util.WeakHashMap<>();
     private static final java.util.WeakHashMap<View, Object> sMgrOf =
@@ -49,9 +44,6 @@ public final class ImeBlurHook {
     private static volatile int sLastUiMode = -1;
     private static volatile boolean sLastDark = false;
 
-    // ---- 悬浮键盘判据（读取语燕自己的设置，稳定、不随动画变化）----
-    // 链路：Lh7;->k(静态单例) -> Lh7;->c:Ld7 -> Ld7;->l/.m:Ljz -> Ljz;->g():Boolean
-    //       l = keyboard_mode_float（竖屏），m = keyboard_mode_float_landscape（横屏）
     private static volatile boolean sFloatProbeReady = false;
     private static volatile ClassLoader sHostCl = null;
     private static java.lang.reflect.Field sFldH7k;
@@ -97,13 +89,10 @@ public final class ImeBlurHook {
 
     private ImeBlurHook() {}
 
-    // ---- 悬浮键盘判据 ----
-    // 读取语燕自身的「键盘悬浮」设置（SharedPreferences 持久化值），
-    // 该值与上滑手势动画无关，天然稳定，不会造成圆角抖动。
     private static synchronized void ensureFloatProbe() {
         if (sFloatProbeReady) return;
         ClassLoader cl = sHostCl;
-        if (cl == null) return;   // 宿主 ClassLoader 尚未记录，下次再试
+        if (cl == null) return;
         try {
             Class<?> clsH7 = Class.forName("h7", false, cl);
             Class<?> clsD7 = Class.forName("d7", false, cl);
@@ -121,7 +110,6 @@ public final class ImeBlurHook {
         ModuleLog.d(TAG, "float probe ready=" + sFloatProbeReady);
     }
 
-    /** 当前是否为「悬浮键盘」模式；取不到时按非悬浮处理（即不设圆角）。 */
     private static boolean isFloatKeyboard(View v) {
         if (!sFloatProbeReady) {
             ensureFloatProbe();
@@ -215,7 +203,7 @@ public final class ImeBlurHook {
 
     private static void installYuyan(final BlurEnhanceModule mod, final ClassLoader cl) {
         try {
-            sHostCl = cl;   // 供悬浮键盘判据反射使用
+            sHostCl = cl;
             Class<?> base = findImvBase(cl);
             if (base == null) {
                 ModuleLog.d(TAG, "imv base class not found (tried " + IMV_BASE_CANDIDATES.length + " candidates)");
@@ -256,10 +244,6 @@ public final class ImeBlurHook {
                     });
             ModuleLog.d(TAG, "hooked " + baseName + ".onAttachedToWindow");
 
-            // 键盘根 View 脱离窗口时清理：把缓存的系统模糊 drawable 作废
-            // （setVisible(false) → Aggregator 自行 remove），并清空缓存。
-            // 否则 drawable 会一直挂在 ViewRootImpl.mBlurRegionAggregator 里，
-            // 连同其 RenderNode 与整棵 View 树引用一起滞留。
             Executable detachTarget = null;
             for (Method m : base.getDeclaredMethods()) {
                 if ("onDetachedFromWindow".equals(m.getName()) && m.getParameterCount() == 0) {
@@ -370,13 +354,6 @@ public final class ImeBlurHook {
                 ModuleLog.d(TAG, "hook " + sThemeBgName + ".u failed: " + t);
             }
 
-            // ★ 键盘按键配色覆盖：把按键背景色改成"半透明白玻璃"（仿 iOS）。
-            // 已定位（实测）：e=字母键背景，d=空格键背景，k=回车键底色。
-            //
-            // ⚠️ 重要限制：
-            //   - b 是强调色，被"回车 + 选择高亮"等多处复用 → 改 b 会误伤高亮，故不碰。
-            //   - k 只改底色；回车若显示绿色，说明其绿色来自 b 的二次着色，改 k 去不掉。
-            //   - 若把 k 也改白后回车仍发绿，属正常现象（绿来自 b）。
             installKeyColorOverride(mod, cl);
 
         } catch (Throwable t) {
@@ -384,9 +361,8 @@ public final class ImeBlurHook {
         }
     }
 
-    // 按键覆盖目标色：80% 白。alpha/色值调这里即可。
     private static final int KEY_OVERLAY_COLOR = 0xCCffffff;
-    // 要覆盖的 Theme 方法（e=字母键, d=空格, k=回车底色）。不含 b（避免误伤高亮）。
+
     private static final String[] KEY_OVERLAY_METHODS = { "e", "d", "k" };
 
     private static void installKeyColorOverride(final BlurEnhanceModule mod, final ClassLoader cl) {
@@ -465,21 +441,14 @@ public final class ImeBlurHook {
     }
 
     public static void clearBlur() {
-        // 1) 主动「作废」每个缓存的系统模糊 drawable。
-        //    背景置 null 只是解除了 View 的引用，但 drawable 仍挂在
-        //    ViewRootImpl.mBlurRegionAggregator.mDrawables 里（因为
-        //    alpha>0 && blurRadius>0 && visible 仍成立），而 Aggregator
-        //    强引用 ViewRootImpl（→ DecorView → 整棵 View 树），同时
-        //    drawable 自身持有 RenderNode（native GPU 资源）。
-        //    setVisible(false) 会触发 onBlurDrawableUpdated → shouldBeDrawn=false
-        //    → 系统自行从 mDrawables 移除，彻底断开这条链。
+
         for (View v : sBlurOf.keySet()) {
             try {
                 Drawable d = sBlurOf.get(v);
                 if (d != null) d.setVisible(false, false);
             } catch (Throwable ignored) {}
         }
-        // 2) 摘下键盘背景。
+
         try {
             View v = sLastView == null ? null : sLastView.get();
             if (v != null) {
@@ -491,8 +460,7 @@ public final class ImeBlurHook {
         } catch (Throwable t) {
             ModuleLog.e(TAG, "clearBlur: detach background fail", t);
         }
-        // 3) 清空缓存：否则 value（ViewRootManager/drawable 链）会继续强引用
-        //    ViewRootImpl，拖慢键盘 View 的回收。
+
         try {
             sBlurOf.clear();
             sMgrOf.clear();
@@ -535,7 +503,7 @@ public final class ImeBlurHook {
 
     private static void doBlur(final View v, final int retry) {
         if (v == null || !FeatureFlags.IME_BLUR) return;
-        // 键盘 View 已脱离窗口时，重试无意义（且会白白持有 View 到超时）。
+
         if (retry > 0) {
             try { if (!v.isAttachedToWindow()) return; } catch (Throwable ignore) {}
         }
@@ -544,10 +512,7 @@ public final class ImeBlurHook {
             return;
         }
         try {
-            // 系统模糊 drawable 只创建一次并复用（缓存在弱键表中）。
-            // 每次新建会挂到 ViewRootImpl 的 BlurRegionAggregator 上造成 Add/Remove
-            // 抖动，与系统动画抢绘制，导致边缘闪烁。
-            // ViewRootManager 与 drawable 必须成对缓存：参数是设置在 mgr 上的。
+
             Drawable d = sBlurOf.get(v);
             Object mgr = sMgrOf.get(v);
             if (d == null || mgr == null) {
@@ -584,10 +549,6 @@ public final class ImeBlurHook {
                 } catch (Throwable ignored) {}
             }
 
-            // 圆角：仅「悬浮键盘」需要（悬浮时四角可见）；非悬浮（贴底）键盘不设圆角。
-            // 判据来自语燕自身的 keyboard_mode_float 设置，不随上滑动画变化，故不会抖动。
-            // 注意：必须显式下发 0 —— mgr 是缓存复用的，悬浮时设过圆角后若不重置，
-            // 切回非悬浮会残留旧圆角（表现为「遗留圆角」）。
             float cornerDp = FeatureFlags.IME_BLUR_CORNER_DP;
             float cornerPx = 0f;
             boolean floating = isFloatKeyboard(v);
@@ -595,11 +556,7 @@ public final class ImeBlurHook {
                 cornerPx = floating
                         ? cornerDp * v.getResources().getDisplayMetrics().density
                         : 0f;
-                // ★ 安全 clamp：半径不得超过绘制区域短边的一半。
-                //   系统 BackgroundBlurDrawable 在半径越界时会触发 native
-                //   路径构建崩溃（且崩溃后需 pm clear 输入法数据）。
-                //   即便圆角已固定 25dp，此处仍兜底，防止横屏/矮键盘等
-                //   短边较小的场景越界。View 尚未测量(w/h<=0)时保守不发圆角。
+
                 if (cornerPx > 0f) {
                     int w = v.getWidth();
                     int h = v.getHeight();
@@ -621,11 +578,6 @@ public final class ImeBlurHook {
                 } catch (Throwable ignored) {}
             }
 
-            // 亮色描边：叠在模糊背景之上；因整体作为 View 的 background，
-            // 绘制顺序仍在键盘子 View 之下，不会遮挡按键 / 候选栏。
-            // 悬浮键盘四边环绕；非悬浮键盘只保留顶部一条线。
-            // 描边层 / 合成层不缓存：它们只持有复用的 d，不会触发 Aggregator 抖动；
-            // 缓存它们反而会因 Drawable 持有 View 回调而阻止 View 回收。
             float density = v.getResources().getDisplayMetrics().density;
             ImeGlowStrokeDrawable glow = new ImeGlowStrokeDrawable(
                     GLOW_COLOR, GLOW_FEATHER_DP * density, cornerPx);

@@ -36,7 +36,7 @@ public final class QuickSearchBlur {
     }
     private static volatile boolean sViewHookInstalled = false;
     private static void installViewHook(BlurEnhanceModule module, ClassLoader loader) throws Throwable {
-        if (sViewHookInstalled) return;   // 幂等：避免 installWindowHook 失败后重试时重复 hook
+        if (sViewHookInstalled) return;
         Method m = View.class.getDeclaredMethod("setBackground", Drawable.class);
         m.setAccessible(true);
         module.hookPublic("qs.view.setBg", (Executable) m, new XposedInterface.Hooker() {
@@ -61,7 +61,7 @@ public final class QuickSearchBlur {
     }
     private static volatile boolean sWindowHookInstalled = false;
     private static void installWindowHook(BlurEnhanceModule module, ClassLoader loader) throws Throwable {
-        if (sWindowHookInstalled) return;   // 幂等
+        if (sWindowHookInstalled) return;
         Method m = Window.class.getDeclaredMethod("setBackgroundDrawable", Drawable.class);
         m.setAccessible(true);
         module.hookPublic("qs.window.setBg", (Executable) m, new XposedInterface.Hooker() {

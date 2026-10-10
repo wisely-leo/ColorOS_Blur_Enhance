@@ -1114,7 +1114,7 @@ public class BlurEnhanceModule extends XposedModule {
     }
     private volatile boolean sRemoteViewsHooked = false;
     private void hookRemoteViewsApply(ClassLoader cl) {
-        if (sRemoteViewsHooked) return;   // 幂等：同进程多次 onPackageReady 不重复 hook
+        if (sRemoteViewsHooked) return;
         sRemoteViewsHooked = true;
         try {
             Method m = RemoteViews.class.getDeclaredMethod("apply", android.content.Context.class, ViewGroup.class);
@@ -1142,7 +1142,7 @@ public class BlurEnhanceModule extends XposedModule {
     }
     private volatile boolean sAhvHooked = false;
     private void hookAppWidgetHostView(ClassLoader cl) {
-        if (sAhvHooked) return;   // 幂等：同进程多次 onPackageReady 不重复 hook
+        if (sAhvHooked) return;
         sAhvHooked = true;
         try {
             Class<?> ahv = Class.forName("android.appwidget.AppWidgetHostView", false, cl);
@@ -1196,7 +1196,7 @@ public class BlurEnhanceModule extends XposedModule {
     }
     private volatile boolean sTextHooked = false;
     private void hookTextViewSetText(ClassLoader cl) {
-        if (sTextHooked) return;   // 幂等：避免上游 critical==0 重试时重复 hook setText
+        if (sTextHooked) return;
         sTextHooked = true;
         try {
             Class<?> tv = Class.forName("android.widget.TextView", false, cl);

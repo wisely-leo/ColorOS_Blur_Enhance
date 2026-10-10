@@ -37,8 +37,7 @@ public class GlyphBlurRenderer {
     }
     private static final java.util.WeakHashMap<View, GlyphSnapshot[]> sSnapsMap = new java.util.WeakHashMap<View, GlyphSnapshot[]>();
     private static volatile boolean sScreenOn = true;
-    // key 弱引用 View，value 也须弱引用：StateMachine 强引用 container，
-// 否则 entry 永远无法回收（值是 key 的持有者）。
+
     private static final java.util.WeakHashMap<View, java.lang.ref.WeakReference<ClockBlurStateMachine>> sRunners =
             new java.util.WeakHashMap<View, java.lang.ref.WeakReference<ClockBlurStateMachine>>();
 
@@ -53,8 +52,6 @@ public class GlyphBlurRenderer {
         return list;
     }
 
-    // 时钟模糊 drawable 登记表：仅用于识别「是不是时钟的模糊 drawable」。
-    // 必须用弱引用，否则会随每次时钟重建累积并拖住其回调的 View 树，造成内存泄漏。
     private static final java.util.WeakHashMap<Object, Boolean> sClockBlurDrawables =
             new java.util.WeakHashMap<Object, Boolean>();
     public static void registerBlurDrawable(Object bd) {
@@ -267,7 +264,7 @@ public class GlyphBlurRenderer {
     }
     private static void retry(final View container, final ClassLoader cl, final int attempt, final String why) {
         if (attempt >= MAX_RETRY) { ModuleLog.e("GB", "give up: " + why, null); return; }
-        // 已脱离窗口说明该 View 不会再展示，重试无意义，直接停。
+
         try { if (!container.isAttachedToWindow()) return; } catch (Throwable ignore) {}
         if (attempt == 0 || attempt == MAX_RETRY - 1) ModuleLog.d("GB", "retry(" + attempt + "): " + why);
         container.postDelayed(new Runnable() {
@@ -306,8 +303,7 @@ public class GlyphBlurRenderer {
             android.graphics.Bitmap out = android.graphics.Bitmap.createBitmap(
                     w, h, android.graphics.Bitmap.Config.ARGB_8888);
             android.graphics.Canvas c = new android.graphics.Canvas(out);
-            // 保存/恢复 bounds：d 是 ImageView 自己的 drawable，
-            // 直接改 bounds 会破坏它的后续绘制（图标错位/拉伸）。
+
             android.graphics.Rect oldBounds = d.copyBounds();
             try {
                 d.setBounds(0, 0, w, h);
@@ -352,8 +348,7 @@ public class GlyphBlurRenderer {
                 try {
                     small.getPixels(px, 0, bw, 0, 0, bw, bh);
                 } finally {
-                    // small 一定是本方法新建的（createScaledBitmap），用完立刻回收，降低 GC 压力。
-                    // 注意：bmp 可能是 ImageView 自己的 BitmapDrawable 位图，绝不能 recycle。
+
                     try { small.recycle(); } catch (Throwable ignore) {}
                 }
                 android.graphics.Region region = new android.graphics.Region();
@@ -670,8 +665,7 @@ public class GlyphBlurRenderer {
             sHandler.postDelayed(fallbackTask, FALLBACK_HIDDEN_PROBE_MS);
         }
         private synchronized void fallbackCheck() {
-            // 容器已脱离窗口（时钟被移除/重建）时终止轮询，
-            // 否则静态 Handler 会一直持有本状态机（进而持有 View）造成泄漏。
+
             if (!container.isAttachedToWindow()) {
                 state = IDLE;
                 sHandler.removeCallbacks(rebuildTask);

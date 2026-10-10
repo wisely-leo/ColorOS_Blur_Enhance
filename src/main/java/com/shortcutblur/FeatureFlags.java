@@ -26,11 +26,6 @@ public final class FeatureFlags {
 
     public static volatile int IME_BLUR_RADIUS = 100;
 
-    // 键盘圆角固定 25dp，不再允许用户自定义。
-    // 原因：系统 BackgroundBlurDrawable.setCornerRadius 在半径超过绘制区域
-    // 短边一半时会触发 native 路径构建越界崩溃（本机实测阈值 ≈25dp@560dpi），
-    // 且崩溃后必须 pm clear 输入法数据才能恢复（代价高）。
-    // 固定为 25dp 以远离临界值。
     public static final float IME_BLUR_CORNER_DP = 25f;
 
     public static volatile int IME_BLUR_COLOR_LIGHT = 0xC0DCDCDC;
@@ -205,8 +200,7 @@ public final class FeatureFlags {
                 break;
             case "ime_blur_corner":
             case "ime_blur_corner_dp":
-                // 圆角已固定为 25dp（IME_BLUR_CORNER_DP 为 final 常量），
-                // 忽略外部传入值，防止越界崩溃。
+
                 break;
             case "ime_blur_color_light":
                 try { IME_BLUR_COLOR_LIGHT = (int) Long.parseLong(v.trim(), 16); } catch (Throwable ignored) {}
