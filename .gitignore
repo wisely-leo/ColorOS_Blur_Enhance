@@ -2,3 +2,10 @@
 *.iml
 .DS_Store
 Thumbs.db
+*.log
+*.log.*
+UiStartup.log
+BlurEnhance.log
+ColorOSBlurEnhance.log
+log/
+logs/
