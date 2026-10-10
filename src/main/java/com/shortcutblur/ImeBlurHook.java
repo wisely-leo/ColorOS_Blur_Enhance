@@ -36,6 +36,17 @@ public final class ImeBlurHook {
     private static volatile int sLastUiMode = -1;
     private static volatile boolean sLastDark = false;
 
+    // ---- 悬浮键盘判据（读取语燕自己的设置，稳定、不随动画变化）----
+    // 链路：Lh7;->k(静态单例) -> Lh7;->c:Ld7 -> Ld7;->l/.m:Ljz -> Ljz;->g():Boolean
+    //       l = keyboard_mode_float（竖屏），m = keyboard_mode_float_landscape（横屏）
+    private static volatile boolean sFloatProbeReady = false;
+    private static volatile ClassLoader sHostCl = null;
+    private static java.lang.reflect.Field sFldH7k;
+    private static java.lang.reflect.Field sFldD7c;
+    private static java.lang.reflect.Field sFldD7l;
+    private static java.lang.reflect.Field sFldD7m;
+    private static Method sMtdJzGet;
+
     private static final java.util.concurrent.ConcurrentHashMap<Class<?>, Method> sSkbRootCache =
             new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -72,6 +83,62 @@ public final class ImeBlurHook {
     }
 
     private ImeBlurHook() {}
+
+    // ---- 悬浮键盘判据 ----
+    // 读取语燕自身的「键盘悬浮」设置（SharedPreferences 持久化值），
+    // 该值与上滑手势动画无关，天然稳定，不会造成圆角抖动。
+    private static synchronized void ensureFloatProbe() {
+        if (sFloatProbeReady) return;
+        ClassLoader cl = sHostCl;
+        if (cl == null) return;   // 宿主 ClassLoader 尚未记录，下次再试
+        try {
+            Class<?> clsH7 = Class.forName("h7", false, cl);
+            Class<?> clsD7 = Class.forName("d7", false, cl);
+            Class<?> clsJz = Class.forName("jz", false, cl);
+            sFldH7k = clsH7.getField("k");
+            sFldD7c = clsH7.getField("c");
+            sFldD7l = clsD7.getField("l");
+            sFldD7m = clsD7.getField("m");
+            sMtdJzGet = clsJz.getMethod("g");
+            sFloatProbeReady = true;
+        } catch (Throwable t) {
+            sFloatProbeReady = false;
+            ModuleLog.d(TAG, "float probe unavailable: " + t);
+        }
+        ModuleLog.d(TAG, "float probe ready=" + sFloatProbeReady);
+    }
+
+    /** 当前是否为「悬浮键盘」模式；取不到时按非悬浮处理（即不设圆角）。 */
+    private static boolean isFloatKeyboard(View v) {
+        if (!sFloatProbeReady) {
+            ensureFloatProbe();
+            if (!sFloatProbeReady) return false;
+        }
+        try {
+            Object h7 = sFldH7k.get(null);
+            if (h7 == null) return false;
+            Object d7 = sFldD7c.get(h7);
+            if (d7 == null) return false;
+            boolean landscape = isLandscape(v);
+            Object jz = (landscape ? sFldD7m : sFldD7l).get(d7);
+            if (jz == null) return false;
+            Object b = sMtdJzGet.invoke(jz);
+            return (b instanceof Boolean) && (Boolean) b;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static boolean isLandscape(View v) {
+        try {
+            android.content.Context ctx = v.getContext();
+            if (ctx == null) return false;
+            return ctx.getResources().getConfiguration().orientation
+                    == android.content.res.Configuration.ORIENTATION_LANDSCAPE;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
 
     private static Class<?> findImvBase(ClassLoader cl) {
         for (String name : IMV_BASE_CANDIDATES) {
@@ -135,6 +202,7 @@ public final class ImeBlurHook {
 
     private static void installYuyan(final BlurEnhanceModule mod, final ClassLoader cl) {
         try {
+            sHostCl = cl;   // 供悬浮键盘判据反射使用
             Class<?> base = findImvBase(cl);
             if (base == null) {
                 ModuleLog.d(TAG, "imv base class not found (tried " + IMV_BASE_CANDIDATES.length + " candidates)");
@@ -381,8 +449,10 @@ public final class ImeBlurHook {
                 } catch (Throwable ignored) {}
             }
 
+            // 圆角：仅「悬浮键盘」需要（悬浮时四角可见）；非悬浮（贴底）键盘不设圆角。
+            // 判据来自语燕自身的 keyboard_mode_float 设置，不随上滑动画变化，故不会抖动。
             float cornerDp = FeatureFlags.IME_BLUR_CORNER_DP;
-            if (cornerDp > 0f && sSetCornerRadius != null) {
+            if (cornerDp > 0f && sSetCornerRadius != null && isFloatKeyboard(v)) {
                 float px = cornerDp * v.getResources().getDisplayMetrics().density;
                 try {
                     sSetCornerRadius.invoke(mgr, px);
