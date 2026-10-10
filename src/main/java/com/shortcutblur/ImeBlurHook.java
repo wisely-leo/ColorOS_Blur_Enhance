@@ -27,6 +27,19 @@ public final class ImeBlurHook {
     private static final String CLS_VRM = "com.oplus.view.ViewRootManager";
 
     private static volatile boolean sReflReady = false;
+
+    // ---- 内侧发光描边 ----
+    // 颜色：白，alpha 70%（半透明）；宽度 2.5dp；模糊 5dp（内侧发光）
+    private static final int GLOW_COLOR = 0xB3FFFFFF;
+    private static final float GLOW_STROKE_DP = 2.5f;
+    private static final float GLOW_BLUR_DP = 5f;
+
+    // 系统模糊 drawable 按 View 缓存（必须复用：每次新建会导致 Aggregator
+    // Add/Remove 抖动并与系统动画抢绘制）。用弱引用，避免泄漏 View。
+    private static final java.util.WeakHashMap<View, Drawable> sBlurOf =
+            new java.util.WeakHashMap<>();
+    private static final java.util.WeakHashMap<View, Object> sMgrOf =
+            new java.util.WeakHashMap<>();
     private static Constructor<?> sCtorViewRootManager;
     private static Method sGetBlurDrawable;
     private static Method sSetBlurRadius;
@@ -418,22 +431,31 @@ public final class ImeBlurHook {
             return;
         }
         try {
-            Object mgr = sCtorViewRootManager.newInstance(v);
-            Drawable d = (Drawable) sGetBlurDrawable.invoke(mgr);
-            if (d == null) {
-
-                if (retry < 5) {
-                    ModuleLog.d(TAG, "doBlur: drawable null, retry#" + (retry + 1));
-                    v.postDelayed(new Runnable() {
-                        @Override
-                        public void run() {
-                            doBlur(v, retry + 1);
-                        }
-                    }, 300);
-                } else {
-                    ModuleLog.d(TAG, "doBlur: drawable still null after retries, give up");
+            // 系统模糊 drawable 只创建一次并复用（缓存在弱键表中）。
+            // 每次新建会挂到 ViewRootImpl 的 BlurRegionAggregator 上造成 Add/Remove
+            // 抖动，与系统动画抢绘制，导致边缘闪烁。
+            // ViewRootManager 与 drawable 必须成对缓存：参数是设置在 mgr 上的。
+            Drawable d = sBlurOf.get(v);
+            Object mgr = sMgrOf.get(v);
+            if (d == null || mgr == null) {
+                mgr = sCtorViewRootManager.newInstance(v);
+                d = (Drawable) sGetBlurDrawable.invoke(mgr);
+                if (d == null) {
+                    if (retry < 5) {
+                        ModuleLog.d(TAG, "doBlur: drawable null, retry#" + (retry + 1));
+                        v.postDelayed(new Runnable() {
+                            @Override
+                            public void run() {
+                                doBlur(v, retry + 1);
+                            }
+                        }, 300);
+                    } else {
+                        ModuleLog.d(TAG, "doBlur: drawable still null after retries, give up");
+                    }
+                    return;
                 }
-                return;
+                sBlurOf.put(v, d);
+                sMgrOf.put(v, mgr);
             }
 
             int radius = FeatureFlags.IME_BLUR_RADIUS;
@@ -452,18 +474,31 @@ public final class ImeBlurHook {
             // 圆角：仅「悬浮键盘」需要（悬浮时四角可见）；非悬浮（贴底）键盘不设圆角。
             // 判据来自语燕自身的 keyboard_mode_float 设置，不随上滑动画变化，故不会抖动。
             float cornerDp = FeatureFlags.IME_BLUR_CORNER_DP;
-            if (cornerDp > 0f && sSetCornerRadius != null && isFloatKeyboard(v)) {
-                float px = cornerDp * v.getResources().getDisplayMetrics().density;
+            float cornerPx = 0f;
+            boolean floating = isFloatKeyboard(v);
+            if (cornerDp > 0f && sSetCornerRadius != null && floating) {
+                cornerPx = cornerDp * v.getResources().getDisplayMetrics().density;
                 try {
-                    sSetCornerRadius.invoke(mgr, px);
+                    sSetCornerRadius.invoke(mgr, cornerPx);
                 } catch (Throwable ignored) {}
             }
 
-            v.setBackground(d);
+            // 内侧发光描边：叠在模糊背景之上；因整体作为 View 的 background，
+            // 绘制顺序仍在键盘子 View 之下，不会遮挡按键 / 候选栏。
+            // 描边层 / 合成层不缓存：它们只持有复用的 d，不会触发 Aggregator 抖动；
+            // 缓存它们反而会因 Drawable 持有 View 回调而阻止 View 回收。
+            float density = v.getResources().getDisplayMetrics().density;
+            ImeGlowStrokeDrawable glow = new ImeGlowStrokeDrawable(
+                    GLOW_COLOR, GLOW_STROKE_DP * density, GLOW_BLUR_DP * density, cornerPx);
+            android.graphics.drawable.LayerDrawable layer =
+                    new android.graphics.drawable.LayerDrawable(new Drawable[] { d, glow });
+
+            v.setBackground(layer);
             v.invalidate();
             ModuleLog.d(TAG, "blur applied r=" + radius
                     + " color=0x" + Integer.toHexString(color)
-                    + " corner=" + cornerDp + "dp");
+                    + " corner=" + cornerDp + "dp"
+                    + " float=" + floating);
         } catch (Throwable t) {
             ModuleLog.e(TAG, "doBlur fail", t);
         }
