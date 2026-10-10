@@ -1112,7 +1112,10 @@ public class BlurEnhanceModule extends XposedModule {
     private ClassLoader currentClassLoader() {
         return cl;
     }
+    private volatile boolean sRemoteViewsHooked = false;
     private void hookRemoteViewsApply(ClassLoader cl) {
+        if (sRemoteViewsHooked) return;   // 幂等：同进程多次 onPackageReady 不重复 hook
+        sRemoteViewsHooked = true;
         try {
             Method m = RemoteViews.class.getDeclaredMethod("apply", android.content.Context.class, ViewGroup.class);
             hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE).intercept(new RemoteViewsApplyHook(cl));
@@ -1137,7 +1140,10 @@ public class BlurEnhanceModule extends XposedModule {
             ModuleLog.e("MERGE", "RemoteViews.reapply hook fail", t);
         }
     }
+    private volatile boolean sAhvHooked = false;
     private void hookAppWidgetHostView(ClassLoader cl) {
+        if (sAhvHooked) return;   // 幂等：同进程多次 onPackageReady 不重复 hook
+        sAhvHooked = true;
         try {
             Class<?> ahv = Class.forName("android.appwidget.AppWidgetHostView", false, cl);
             for (Method m : ahv.getDeclaredMethods()) {
@@ -1188,12 +1194,15 @@ public class BlurEnhanceModule extends XposedModule {
         }
         ModuleLog.i("[merge] hooked TextView.setText event-driven");
     }
+    private volatile boolean sTextHooked = false;
     private void hookTextViewSetText(ClassLoader cl) {
+        if (sTextHooked) return;   // 幂等：避免上游 critical==0 重试时重复 hook setText
+        sTextHooked = true;
         try {
             Class<?> tv = Class.forName("android.widget.TextView", false, cl);
             hookAllSetText(tv);
         } catch (Throwable t) {
-            ModuleLog.e("MERGE", "TextView.setText hook fail", t);
+ModuleLog.e("MERGE", "TextView.setText hook fail", t);
         }
     }
     private static final class RemoteViewsApplyHook implements XposedInterface.Hooker {

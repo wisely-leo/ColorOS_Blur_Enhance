@@ -50,6 +50,13 @@ public final class ModuleLog {
     public static void i(String detail) {
         d("INFO", detail);
     }
+
+    // 持久输出流：避免每条日志都 open/write/close（高频日志时是严重 IO 抖动）。
+    // 用 BufferedWriter 聚合，按行 flush；超过 MAX_LOG_BYTES 后截断重开，防无限增长。
+    private static final long MAX_LOG_BYTES = 2L * 1024 * 1024;
+    private static Writer logWriter = null;
+    private static long logBytes = 0L;
+
     private static synchronized void write(String s) {
         if (!enabled()) return;
         try {
@@ -59,30 +66,50 @@ public final class ModuleLog {
             if (logFile == null) {
                 logFile = open();
                 if (logFile == null) { broken = true; return; }
-                raw("=== log start pid=" + Process.myPid()
-                        + " uid=" + Process.myUid()
-                        + " file=" + logFile.getAbsolutePath() + " ===\n");
+                logBytes = logFile.length();
             }
-            raw(s);
+            // 超限轮转：截断重开（单文件封顶，避免累积占满空间）
+            if (logBytes > MAX_LOG_BYTES) {
+                closeQuietly();
+                try { new FileOutputStream(logFile, false).close(); } catch (Throwable ignore) {}
+                logWriter = new java.io.BufferedWriter(
+                        new java.io.OutputStreamWriter(new FileOutputStream(logFile, true), "UTF-8"), 8192);
+                logBytes = 0L;
+                rawLine("=== log rotated (>" + (MAX_LOG_BYTES / 1024 / 1024) + "MB) pid=" + Process.myPid() + " ===\n");
+            }
+            rawLine(s);
         } catch (Throwable t) {
             broken = true;
+            closeQuietly();
             logFile = null;
             android.util.Log.w(TAG, "write failed: " + t);
         }
     }
-    private static void raw(String s) {
-        if (!enabled()) return;
-        Writer w = null;
+
+    /** 走持久缓冲流写一行，不 close。 */
+    private static void rawLine(String s) {
         try {
-            w = new OutputStreamWriter(new FileOutputStream(logFile, true), "UTF-8");
-            w.write(s);
-            w.flush();
+            if (logWriter == null) {
+                if (logFile == null) return;
+                logWriter = new java.io.BufferedWriter(
+                        new java.io.OutputStreamWriter(new FileOutputStream(logFile, true), "UTF-8"), 8192);
+            }
+            logWriter.write(s);
+            logWriter.flush();
+            logBytes += s.length();
         } catch (Throwable t) {
             broken = true;
-        } finally {
-            if (w != null) {
-                try { w.close(); } catch (Throwable ignored) {}
-            }
+            closeQuietly();
+        }
+    }
+
+    private static synchronized void closeQuietly() {
+        if (logWriter != null) {
+            try { logWriter.close(); } catch (Throwable ignored) {}
+            logWriter = null;
+        }
+        if (logFile != null) {
+            try { logFile = null; } catch (Throwable ignored) {}
         }
     }
     private static String pickFileName() {

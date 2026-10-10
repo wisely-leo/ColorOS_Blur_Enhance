@@ -45,6 +45,10 @@ public class WidgetBlurAttacher {
         try {
             View host = ViewUtils.ancestorOfType(root, "AppWidgetHostView");
             if (host == null) { ModuleLog.e("BW", tag + " host not found", null); return; }
+            // 重试场景下若 root 已脱离窗口，重试无意义（避免持有 View 到超时）。
+            if (attempt > 0) {
+                try { if (!root.isAttachedToWindow()) return; } catch (Throwable ignore) {}
+            }
             synchronized (sDoneHost) {
                 View bound = doneHostOf(host);
                 if (bound != null && Boolean.TRUE.equals(sDone.get(bound))) {

@@ -26,7 +26,10 @@ final class RecentsBlur {
     private static volatile boolean sConfErrorLogged = false;
     private static volatile float sRecentsLastRadius = -1.0f;
     private static volatile float sRecentsAnimRadius = 0.0f;
-    private static volatile View sRecentsBlurView = null;
+    // 当前模糊目标 View：必须弱引用！
+    // 它由 hook 回调赋值、仅在 exit 动画结束时清空；若某次 exit 动画未走完
+    // （状态被其他路径置 false），强引用会永久钉住 DragLayer 子树 → 泄漏。
+    private static volatile java.lang.ref.WeakReference<View> sRecentsBlurView = null;
     private static volatile float sRecentsTargetRadius = -1.0f;
     private static volatile int sRecentsPhase = 0;
     private static volatile boolean sRecentsBlurDoneForEntry = false;
@@ -64,8 +67,15 @@ final class RecentsBlur {
     private static volatile String sLastVisKey = "";
     private static volatile String sLastFxKey = "";
     private static volatile boolean sForceIconBlur = false;
-    private static final java.util.List<View> sBlurTargets = new java.util.ArrayList<View>();
-    private static volatile Object sRecentsViewObj = null;
+    // 目标 View 列表：必须用弱引用！
+    // 原先用 List<View> 强引用，若进入 recents 后未走 exit 路径（异常/切换/相
+    // 位卡住），会长期钉住 OplusDragLayer 及其整棵子树，造成大块内存泄漏。
+    // 改为 WeakReference<View> 后，即使漏掉一次 clear()，GC 也能回收 View 树。
+    private static final java.util.List<java.lang.ref.WeakReference<View>> sBlurTargets =
+            new java.util.ArrayList<java.lang.ref.WeakReference<View>>();
+    // 最近任务视图实例（LauncherRecentsView）：必须弱引用！
+    // 它是 View 且只在 stateStart 赋值、从不清空 → 强引用会钉住整棵 recents View 树。
+    private static volatile java.lang.ref.WeakReference<Object> sRecentsViewObj = null;
     private static volatile String sBlurMode = "draglayer";
     private static volatile boolean sClampEnabled = true;
     private static void armBlurTargets(View anchor) {
@@ -73,17 +83,17 @@ final class RecentsBlur {
         if (anchor == null) return;
         String mode = sBlurMode;
         if ("workspace".equals(mode) || "draglayer".equals(mode) || !(anchor instanceof ViewGroup)) {
-            sBlurTargets.add(anchor);
+            sBlurTargets.add(new java.lang.ref.WeakReference<View>(anchor));
         } else {
             ViewGroup g = (ViewGroup) anchor;
             View rec = findRecentsChildOf(g);
             if (rec == null) {
-                sBlurTargets.add(anchor);
+                sBlurTargets.add(new java.lang.ref.WeakReference<View>(anchor));
             } else {
                 for (int i = 0; i < g.getChildCount(); i++) {
                     View c = g.getChildAt(i);
                     if (c == null || c == rec) continue;
-                    sBlurTargets.add(c);
+                    sBlurTargets.add(new java.lang.ref.WeakReference<View>(c));
                 }
             }
         }
@@ -91,7 +101,7 @@ final class RecentsBlur {
                 + " names=" + blurTargetNames());
     }
     private static View findRecentsChildOf(ViewGroup dragLayer) {
-        Object rv = sRecentsViewObj;
+        Object rv = sRecentsViewObj == null ? null : sRecentsViewObj.get();
         if (!(rv instanceof View)) return null;
         View v = (View) rv;
         Object p = v.getParent();
@@ -107,10 +117,19 @@ final class RecentsBlur {
     private static String blurTargetNames() {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < sBlurTargets.size(); i++) {
-            View t = sBlurTargets.get(i);
+            java.lang.ref.WeakReference<View> ref = sBlurTargets.get(i);
+            View t = ref == null ? null : ref.get();
             sb.append(t == null ? "null" : t.getClass().getSimpleName()).append(' ');
         }
         return sb.toString();
+    }
+    /** 目标 View 是否仍存活（弱引用尚未被 GC 清空）。 */
+    private static boolean hasLiveBlurTarget() {
+        for (int i = 0; i < sBlurTargets.size(); i++) {
+            java.lang.ref.WeakReference<View> ref = sBlurTargets.get(i);
+            if (ref != null && ref.get() != null) return true;
+        }
+        return false;
     }
     private static void dumpDragLayerTree(View anchor) {
         try {
@@ -393,7 +412,7 @@ final class RecentsBlur {
         if (old != null) { try { old.cancel(); } catch (Throwable ignore) {} sRecentsEnterAnim = null; }
         ValueAnimator oldX = sRecentsExitAnim;
         if (oldX != null) { try { oldX.cancel(); } catch (Throwable ignore) {} sRecentsExitAnim = null; }
-        sRecentsBlurView = v;
+        sRecentsBlurView = new java.lang.ref.WeakReference<>(v);
         armBlurTargets(v);
         if (sDiagEnabled) {
             dumpDragLayerTree(v);
@@ -471,6 +490,9 @@ final class RecentsBlur {
                 sRecentsBlurDoneForEntry = false;
                 sRecentsArmed = false;
                 clearPendingArm();
+                // 退出完成：显式清空目标列表，及时释放 DragLayer 子树引用
+                // （即便弱引用已兜底，也主动断链，避免列表长期留存死引用）。
+                sBlurTargets.clear();
                 if (v != null) { try { v.setRenderEffect(null); } catch (Throwable ignore) {} }
                 ModuleLog.d("DRAGALPHA", why + " -> exit fade-out done (phase=IDLE)");
             }
@@ -482,17 +504,19 @@ final class RecentsBlur {
     }
     private static void applySelfBlur(View v, float r) {
         sRecentsTargetRadius = r;
-        if (sBlurTargets.isEmpty()) {
+        if (!hasLiveBlurTarget()) {
             blurOne(v, r);
         } else {
             for (int i = 0; i < sBlurTargets.size(); i++) {
-                blurOne(sBlurTargets.get(i), r);
+                java.lang.ref.WeakReference<View> ref = sBlurTargets.get(i);
+                View t = ref == null ? null : ref.get();
+                if (t != null) blurOne(t, r);
             }
         }
     }
     private static void blurOne(View v, float r) {
         if (v == null) return;
-        sRecentsBlurView = v;
+        sRecentsBlurView = new java.lang.ref.WeakReference<>(v);
         sRecentsTargetRadius = r;
         if (sAnchorUseWorkspace && r > 0.5f) {
             sSelfAlphaCall = true;
@@ -516,7 +540,10 @@ final class RecentsBlur {
             ModuleLog.e("BLURAPPLY", "setRenderEffect failed r=" + rApplied, t);
         }
     }
+    private static volatile boolean sProbesInstalled = false;
     private static int installRecentsIconBlurProbe(ClassLoader loader) {
+        if (sProbesInstalled) return 0;   // 幂等：避免上游 critical==0 重试时重复 hook
+        sProbesInstalled = true;
         int n = 0;
         installEarlySignalProbes(loader);
         try {
@@ -856,7 +883,10 @@ final class RecentsBlur {
         }
         return n;
     }
+    private static volatile boolean sStateHooksInstalled = false;
     private static int installRecentsStateBlurHooks(ClassLoader loader) {
+        if (sStateHooksInstalled) return 0;   // 幂等：避免重复 hook
+        sStateHooksInstalled = true;
         int n = 0;
         try {
             Class<?> lrv = Reflect.loadClass(CLS_LAUNCHER_RECENTS_VIEW, loader);
@@ -876,7 +906,7 @@ final class RecentsBlur {
                                 Object self = chain.getThisObject();
                                 Object[] a = chain.getArgs().toArray();
                                 Object toState = (a.length > 0) ? a[0] : null;
-                                sRecentsViewObj = self;
+                                sRecentsViewObj = new java.lang.ref.WeakReference<>(self);
                                 boolean toOverview = isOverviewState(toState);
                                 boolean toNormal = isNormalState(toState);
                                 ModuleLog.d("STATEBLUR", "onStateTransitionStart toState="
@@ -994,7 +1024,7 @@ final class RecentsBlur {
     }
     private static View resolveBlurAnchor(Object lrvSelf) {
         try {
-            View cached = sRecentsBlurView;
+            View cached = sRecentsBlurView == null ? null : sRecentsBlurView.get();
             if (cached != null) return useAnchor(cached);
             View last = anchoredOf(sLastAnchor);
             if (last != null) {
@@ -1082,7 +1112,7 @@ final class RecentsBlur {
             String dg = i.getStringExtra("diag");
             if (dg != null) sDiagEnabled = !dg.trim().equalsIgnoreCase("off");
             if (anchorChanged) {
-                View old = sRecentsBlurView;
+                View old = sRecentsBlurView == null ? null : sRecentsBlurView.get();
                 sRecentsBlurView = null;
                 if (old != null) { try { applySelfBlur(old, 0f); } catch (Throwable ignore) {} }
             }
@@ -1120,24 +1150,30 @@ final class RecentsBlur {
         try {
             java.io.File f = new java.io.File(CONF_PATH);
             if (!f.exists()) return;
-            java.io.BufferedReader br = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(new java.io.FileInputStream(f), "UTF-8"));
-            String line;
-            while ((line = br.readLine()) != null) {
-                line = line.trim();
-                if (line.startsWith("scaleMin")) {
-                    int i = line.indexOf('=');
-                    if (i > 0) {
-                        float v2 = Float.parseFloat(line.substring(i + 1).trim());
-                        if (v2 > 0.5f && v2 < 1.0f) sScaleClampMin = v2;
+            java.io.BufferedReader br = null;
+            try {
+                br = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(new java.io.FileInputStream(f), "UTF-8"));
+                String line;
+                while ((line = br.readLine()) != null) {
+                    line = line.trim();
+                    if (line.startsWith("scaleMin")) {
+                        int i = line.indexOf('=');
+                        if (i > 0) {
+                            float v2 = Float.parseFloat(line.substring(i + 1).trim());
+                            if (v2 > 0.5f && v2 < 1.0f) sScaleClampMin = v2;
+                        }
+                    } else if (line.startsWith("anchorMode")) {
+                        int i = line.indexOf('=');
+                        if (i > 0) sAnchorUseWorkspace = line.substring(i + 1).trim().equalsIgnoreCase("workspace");
                     }
-                } else if (line.startsWith("anchorMode")) {
-                    int i = line.indexOf('=');
-                    if (i > 0) sAnchorUseWorkspace = line.substring(i + 1).trim().equalsIgnoreCase("workspace");
                 }
+                sConfErrorLogged = false;
+            } finally {
+                // 必须 finally 关闭：若上面 parseFloat 抛异常，原先的 br.close()
+                // 会被跳过 → 每 2 秒重试一次即泄漏一个 fd，最终 "Too many open files"。
+                if (br != null) { try { br.close(); } catch (Throwable ignored) {} }
             }
-            br.close();
-            sConfErrorLogged = false;
         } catch (Throwable t) {
             if (!sConfErrorLogged) {
                 sConfErrorLogged = true;
