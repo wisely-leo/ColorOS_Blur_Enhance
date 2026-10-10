@@ -29,8 +29,8 @@ public final class ImeBlurHook {
     private static volatile boolean sReflReady = false;
 
     // ---- 亮色描边 ----
-    // 颜色：白，alpha 70%（半透明）；宽度 2.5dp。
-    private static final int GLOW_COLOR = 0xB3FFFFFF;
+    // 颜色：白，alpha 40%（半透明）；宽度 2.5dp。
+    private static final int GLOW_COLOR = 0x66FFFFFF;
     private static final float GLOW_STROKE_DP = 2.5f;
 
     // 系统模糊 drawable 按 View 缓存（必须复用：每次新建会导致 Aggregator
@@ -255,6 +255,42 @@ public final class ImeBlurHook {
                     });
             ModuleLog.d(TAG, "hooked " + baseName + ".onAttachedToWindow");
 
+            // 键盘根 View 脱离窗口时清理：把缓存的系统模糊 drawable 作废
+            // （setVisible(false) → Aggregator 自行 remove），并清空缓存。
+            // 否则 drawable 会一直挂在 ViewRootImpl.mBlurRegionAggregator 里，
+            // 连同其 RenderNode 与整棵 View 树引用一起滞留。
+            Executable detachTarget = null;
+            for (Method m : base.getDeclaredMethods()) {
+                if ("onDetachedFromWindow".equals(m.getName()) && m.getParameterCount() == 0) {
+                    detachTarget = m;
+                    break;
+                }
+            }
+            if (detachTarget != null) {
+                mod.hook(detachTarget)
+                        .setId("ime.detach")
+                        .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                        .intercept(new XposedInterface.Hooker() {
+                            @Override
+                            public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                                Object r = chain.proceed();
+                                try {
+                                    Object self = chain.getThisObject();
+                                    if (self instanceof View) {
+                                        ModuleLog.d(TAG, "onDetachedFromWindow -> clearBlur");
+                                        clearBlur();
+                                    }
+                                } catch (Throwable t) {
+                                    ModuleLog.e(TAG, "clearBlur fail", t);
+                                }
+                                return r;
+                            }
+                        });
+                ModuleLog.d(TAG, "hooked " + baseName + ".onDetachedFromWindow");
+            } else {
+                ModuleLog.d(TAG, "onDetachedFromWindow not found, skip");
+            }
+
             Executable visTarget = null;
             for (Method m : base.getDeclaredMethods()) {
                 if ("onVisibilityChanged".equals(m.getName()) && m.getParameterCount() == 2) {
@@ -379,17 +415,41 @@ public final class ImeBlurHook {
     }
 
     public static void clearBlur() {
-        View v = sLastView == null ? null : sLastView.get();
-        if (v == null) return;
-        try {
-            View target = tryGetSkbRoot(v);
-            if (target == null) target = v;
-            target.setBackground(null);
-            target.invalidate();
-            ModuleLog.d(TAG, "clearBlur: removed blur background");
-        } catch (Throwable t) {
-            ModuleLog.e(TAG, "clearBlur fail", t);
+        // 1) 主动「作废」每个缓存的系统模糊 drawable。
+        //    背景置 null 只是解除了 View 的引用，但 drawable 仍挂在
+        //    ViewRootImpl.mBlurRegionAggregator.mDrawables 里（因为
+        //    alpha>0 && blurRadius>0 && visible 仍成立），而 Aggregator
+        //    强引用 ViewRootImpl（→ DecorView → 整棵 View 树），同时
+        //    drawable 自身持有 RenderNode（native GPU 资源）。
+        //    setVisible(false) 会触发 onBlurDrawableUpdated → shouldBeDrawn=false
+        //    → 系统自行从 mDrawables 移除，彻底断开这条链。
+        for (View v : sBlurOf.keySet()) {
+            try {
+                Drawable d = sBlurOf.get(v);
+                if (d != null) d.setVisible(false, false);
+            } catch (Throwable ignored) {}
         }
+        // 2) 摘下键盘背景。
+        try {
+            View v = sLastView == null ? null : sLastView.get();
+            if (v != null) {
+                View target = tryGetSkbRoot(v);
+                if (target == null) target = v;
+                target.setBackground(null);
+                target.invalidate();
+            }
+        } catch (Throwable t) {
+            ModuleLog.e(TAG, "clearBlur: detach background fail", t);
+        }
+        // 3) 清空缓存：否则 value（ViewRootManager/drawable 链）会继续强引用
+        //    ViewRootImpl，拖慢键盘 View 的回收。
+        try {
+            sBlurOf.clear();
+            sMgrOf.clear();
+            sLastView = new java.lang.ref.WeakReference<>(null);
+            sPendingView = new java.lang.ref.WeakReference<>(null);
+        } catch (Throwable ignored) {}
+        ModuleLog.d(TAG, "clearBlur: detached background + invalidated cached drawables");
     }
 
     private static View tryGetSkbRoot(View v) {
