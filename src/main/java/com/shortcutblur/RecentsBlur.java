@@ -19,7 +19,8 @@ final class RecentsBlur {
     private static HookApi API;
     private static volatile boolean sStateInOverview = false;
     private static volatile float RECENTS_BLUR_MAX = 64.0f;
-    private static volatile float sScaleClampMin = 0.96f;
+    // 缩放下限：DragLayer 的 scale 最小到该值为止（最大缩到 0.92），不允许更小。
+    private static volatile float sScaleClampMin = 0.92f;
     private static volatile long sConfLastRead = 0L;
     private static final String CONF_PATH = "/sdcard/Download/ColorOSBlurEnhance.conf";
     private static volatile boolean sAnchorUseWorkspace = false;
