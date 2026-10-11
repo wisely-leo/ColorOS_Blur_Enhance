@@ -7,7 +7,13 @@ public class App extends Application {
     public void onCreate() {
         super.onCreate();
         sApp = this;
-        lg("=== App.onCreate (v42.5-ui) pid=" + android.os.Process.myPid() + " ===");
+        lg("=== App.onCreate (v45.4-ui) pid=" + android.os.Process.myPid() + " ===");
+        try {
+            lg("环境: Android " + android.os.Build.VERSION.RELEASE
+                    + " (SDK " + android.os.Build.VERSION.SDK_INT + ")"
+                    + " | " + android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL
+                    + " | 进程=" + this.getPackageName());
+        } catch (Throwable ignored) {}
     }
     public static Context ctx() {
         return sApp;

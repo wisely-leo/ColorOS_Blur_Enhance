@@ -51,6 +51,11 @@ public final class ClockTextAlphaHook {
                         int id = (Integer) a0;
                         int color = (Integer) a1;
                         if (isClockTextId(id)) {
+                            if (ClockIds.isRealmeLockId(id)) {
+
+                                try { GlyphBlurRenderer.notifyContentMaybeChangedAll(); } catch (Throwable ignored) {}
+                                return chain.proceed();
+                            }
                             int newColor = (color & 0x00FFFFFF) | (targetAlpha() << 24);
                             try { GlyphBlurRenderer.notifyContentMaybeChangedAll(); } catch (Throwable ignored) {}
                             ModuleLog.d("CTCH", "setTextColor id=0x" + Integer.toHexString(id)

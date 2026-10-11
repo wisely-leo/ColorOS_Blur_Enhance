@@ -63,7 +63,7 @@ public class BlurEnhanceModule extends XposedModule {
     private static volatile boolean sScreenReceiverInstalled = false;
     private static volatile boolean sConfReceiverInstalled = false;
     private static final String ACTION_SETCONF = "com.wiselyleo.blurenhance.SETCONF";
-    private static final String BUILD_TAG = "v42.5";
+    private static final String BUILD_TAG = "v45.4";
     private volatile boolean installed = false;
     private final java.util.WeakHashMap<android.view.View, String> sLastClockText = new java.util.WeakHashMap<android.view.View, String>();
     private volatile boolean postEffectInstalled = false;
@@ -1213,9 +1213,10 @@ public class BlurEnhanceModule extends XposedModule {
             Class<?> tv = Class.forName("android.widget.TextView", false, cl);
             hookAllSetText(tv);
         } catch (Throwable t) {
-ModuleLog.e("MERGE", "TextView.setText hook fail", t);
+            ModuleLog.e("MERGE", "TextView.setText hook fail", t);
         }
     }
+
     private static final class RemoteViewsApplyHook implements XposedInterface.Hooker {
         private final ClassLoader cl;
         RemoteViewsApplyHook(ClassLoader c) { this.cl = c; }
@@ -1226,7 +1227,6 @@ ModuleLog.e("MERGE", "TextView.setText hook fail", t);
                 java.util.List<Object> args = chain.getArgs();
                 Object vg = args.size() > 1 ? args.get(1) : null;
                 if (vg instanceof ViewGroup) {
-
                     WidgetBlurAttacher.resetGiveUp((View) vg);
                     WidgetBlurAttacher.attach("[apply]", (View) vg, cl);
                 }
@@ -1248,7 +1248,6 @@ ModuleLog.e("MERGE", "TextView.setText hook fail", t);
                 if (self instanceof View) {
                     View v = (View) self;
                     if (v instanceof ViewGroup) {
-
                         WidgetBlurAttacher.resetGiveUp(v);
                         WidgetBlurAttacher.attach("[ahv]", v, cl);
                     }

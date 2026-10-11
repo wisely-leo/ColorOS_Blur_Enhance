@@ -70,9 +70,10 @@ public final class Adb {
 
                             if (done != null) {
                                 try {
-                                    if (!a.isFinishing() && !a.isDestroyed()) {
-                                        a.runOnUiThread(done);
-                                    }
+                                    a.runOnUiThread(() -> {
+                                        if (a.isFinishing() || a.isDestroyed()) return;
+                                        try { done.run(); } catch (Throwable ignored) {}
+                                    });
                                 } catch (Throwable ignored) {}
                             }
                         }
@@ -83,7 +84,14 @@ public final class Adb {
             rikka.shizuku.Shizuku.requestPermission(0);
         } catch (Throwable t) {
             SettingsActivity.lg("申请 ADB 权限失败: " + t);
-            if (done != null) a.runOnUiThread(done);
+            if (done != null) {
+                try {
+                    a.runOnUiThread(() -> {
+                        if (a.isFinishing() || a.isDestroyed()) return;
+                        try { done.run(); } catch (Throwable ignored) {}
+                    });
+                } catch (Throwable ignored) {}
+            }
         }
     }
     public static String restartScope(Context c, List<String> pkgs) {

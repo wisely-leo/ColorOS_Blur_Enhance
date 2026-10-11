@@ -55,6 +55,20 @@ public class WidgetBlurAttacher {
                 }
             }
             View containerEarly = ViewUtils.findByViewId(root, ClockIds.TARGET_ROOT);
+
+            View rmContainer = ViewUtils.findByViewId(root, ClockIds.RM_CONTAINER);
+            if (rmContainer == null) {
+
+                rmContainer = ViewUtils.findByViewId(root, ClockIds.RM_W_LAYOUT);
+                if (rmContainer != null) {
+                    ModuleLog.d("BW", tag + " realme weather_widget_layout found");
+                }
+            }
+            if (rmContainer != null) {
+                containerEarly = rmContainer;
+                ModuleLog.d("BW", tag + " realme container=0x"
+                        + Integer.toHexString(containerEarly.getId()));
+            }
             boolean hasT = (containerEarly != null);
             if (hasT) {
                 synchronized (sEverHit) { sEverHit.put(root, Boolean.TRUE); }

@@ -463,6 +463,18 @@ public class GlyphBlurRenderer {
                 }
                 if (!(v instanceof TextView)) continue;
                 TextView tv = (TextView) v;
+                if (ClockIds.isRealmeLockId(id)) {
+
+                    float fa = a / 255f;
+                    if (Math.abs(tv.getAlpha() - fa) > 0.01f) {
+                        tv.setAlpha(fa);
+
+                        ModuleLog.dv("TALPHA", "id=0x" + Integer.toHexString(id)
+                                + " cls=" + tv.getClass().getSimpleName()
+                                + " viewAlpha=" + fa);
+                    }
+                    continue;
+                }
                 android.content.res.ColorStateList csl = tv.getTextColors();
                 if (csl == null) continue;
                 int cur = csl.getDefaultColor();
