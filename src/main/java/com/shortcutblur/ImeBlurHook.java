@@ -26,14 +26,15 @@ public final class ImeBlurHook {
 
     private static final String CLS_VRM = "com.oplus.view.ViewRootManager";
 
+    private static volatile boolean sInstalled = false;
     private static volatile boolean sReflReady = false;
 
     private static final int GLOW_COLOR = 0x66FFFFFF;
     private static final float GLOW_FEATHER_DP = 8f;
 
-    private static final java.util.WeakHashMap<View, Drawable> sBlurOf =
+    private static final java.util.WeakHashMap<View, java.lang.ref.WeakReference<Drawable>> sBlurOf =
             new java.util.WeakHashMap<>();
-    private static final java.util.WeakHashMap<View, Object> sMgrOf =
+    private static final java.util.WeakHashMap<View, java.lang.ref.WeakReference<Object>> sMgrOf =
             new java.util.WeakHashMap<>();
     private static Constructor<?> sCtorViewRootManager;
     private static Method sGetBlurDrawable;
@@ -199,6 +200,11 @@ public final class ImeBlurHook {
         final ClassLoader cl = param.getClassLoader();
         if (cl == null) return;
 
+        if (sInstalled) return;
+        synchronized (ImeBlurHook.class) {
+            if (sInstalled) return;
+            sInstalled = true;
+        }
         installYuyan(mod, cl);
     }
 
@@ -531,7 +537,8 @@ public final class ImeBlurHook {
 
         for (View v : sBlurOf.keySet()) {
             try {
-                Drawable d = sBlurOf.get(v);
+                java.lang.ref.WeakReference<Drawable> dr = sBlurOf.get(v);
+                Drawable d = (dr == null) ? null : dr.get();
                 if (d != null) d.setVisible(false, false);
             } catch (Throwable ignored) {}
         }
@@ -600,8 +607,12 @@ public final class ImeBlurHook {
         }
         try {
 
-            Drawable d = sBlurOf.get(v);
-            Object mgr = sMgrOf.get(v);
+            Drawable d = null;
+            Object mgr = null;
+            java.lang.ref.WeakReference<Drawable> dr = sBlurOf.get(v);
+            java.lang.ref.WeakReference<Object> mr = sMgrOf.get(v);
+            if (dr != null) d = dr.get();
+            if (mr != null) mgr = mr.get();
             if (d == null || mgr == null) {
                 mgr = sCtorViewRootManager.newInstance(v);
                 d = (Drawable) sGetBlurDrawable.invoke(mgr);
@@ -619,8 +630,8 @@ public final class ImeBlurHook {
                     }
                     return;
                 }
-                sBlurOf.put(v, d);
-                sMgrOf.put(v, mgr);
+                sBlurOf.put(v, new java.lang.ref.WeakReference<>(d));
+                sMgrOf.put(v, new java.lang.ref.WeakReference<>(mgr));
             }
 
             int radius = FeatureFlags.IME_BLUR_RADIUS;

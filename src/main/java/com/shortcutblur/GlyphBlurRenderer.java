@@ -94,12 +94,14 @@ public class GlyphBlurRenderer {
     public static void setScreenOn(boolean on) {
         boolean changed = (sScreenOn != on);
         sScreenOn = on;
-        if (!changed) return;
+
+        if (!changed && !on) return;
         try {
             for (ClockBlurStateMachine pr : runnersSnapshot()) pr.onScreenStateChanged();
         } catch (Throwable t) { ModuleLog.e("GB", "screenStateChanged fail", t); }
     }
     public static void notifyContentMaybeChangedAll() {
+
         try {
             for (ClockBlurStateMachine pr : runnersSnapshot()) pr.onContentChanged();
         } catch (Throwable t) { ModuleLog.e("GB", "kickAll fail", t); }
@@ -300,13 +302,20 @@ public class GlyphBlurRenderer {
             }
             if (w <= 0) w = 1;
             if (h <= 0) h = 1;
+
+            final int MAX_DIM = 192;
+            int cw = w, ch = h;
+            if (w > MAX_DIM || h > MAX_DIM) {
+                if (w >= h) { cw = MAX_DIM; ch = Math.max(1, h * MAX_DIM / w); }
+                else { ch = MAX_DIM; cw = Math.max(1, w * MAX_DIM / h); }
+            }
             android.graphics.Bitmap out = android.graphics.Bitmap.createBitmap(
-                    w, h, android.graphics.Bitmap.Config.ARGB_8888);
+                    cw, ch, android.graphics.Bitmap.Config.ARGB_8888);
             android.graphics.Canvas c = new android.graphics.Canvas(out);
 
             android.graphics.Rect oldBounds = d.copyBounds();
             try {
-                d.setBounds(0, 0, w, h);
+                d.setBounds(0, 0, cw, ch);
                 d.draw(c);
             } finally {
                 d.setBounds(oldBounds);
@@ -319,6 +328,8 @@ public class GlyphBlurRenderer {
     }
     private static void appendWeatherIconSnapshots(View container, View base, java.util.ArrayList<GlyphSnapshot> list) {
         int[] iconIds = ClockIds.ICON_IDS;
+
+        final android.graphics.Rect reuseRect = new android.graphics.Rect();
         for (int id : iconIds) {
             try {
                 View v = container.findViewById(id);
@@ -360,10 +371,17 @@ public class GlyphBlurRenderer {
                         if (a > alphaThreshold) {
                             if (runStart < 0) runStart = x;
                         } else {
-                            if (runStart >= 0) { region.op(new android.graphics.Rect(runStart, y, x, y + 1), android.graphics.Region.Op.UNION); runStart = -1; }
+                            if (runStart >= 0) {
+                                reuseRect.set(runStart, y, x, y + 1);
+                                region.op(reuseRect, android.graphics.Region.Op.UNION);
+                                runStart = -1;
+                            }
                         }
                     }
-                    if (runStart >= 0) region.op(new android.graphics.Rect(runStart, y, bw, y + 1), android.graphics.Region.Op.UNION);
+                    if (runStart >= 0) {
+                        reuseRect.set(runStart, y, bw, y + 1);
+                        region.op(reuseRect, android.graphics.Region.Op.UNION);
+                    }
                 }
                 if (region.isEmpty()) continue;
                 Path iconPath = new Path();
@@ -496,6 +514,7 @@ public class GlyphBlurRenderer {
                 list.add(new GlyphSnapshot(localPath, dx, dy));
             }
             appendWeatherIconSnapshots(container, base, list);
+
             sSnapsMap.put(container, list.isEmpty() ? null : list.toArray(new GlyphSnapshot[0]));
             applyIconAlpha(container);
             applyTextAlpha(container);
@@ -543,6 +562,8 @@ public class GlyphBlurRenderer {
         pr.start();
     }
     private static final long FALLBACK_CHECK_MS = 2000L;
+    private static final long FALLBACK_SCREENOFF_MS = 8000L;
+
     private static final long FALLBACK_HIDDEN_PROBE_MS = 250L;
     private static final long REBUILD_SETTLE_MS = 50L;
     private static final class ClockBlurStateMachine {
@@ -552,16 +573,20 @@ public class GlyphBlurRenderer {
         private static final int PAUSED = 3;
         private final View container;
         private final Object blurDrawable;
-        private volatile int state = IDLE;
+
+        private int state = IDLE;
         private String lastStateSig = null;
         private String lastFingerprint = null;
         private final StringBuilder sb = new StringBuilder(128);
+        private final StringBuilder sb2 = new StringBuilder(128);
         private final Runnable rebuildTask = new Runnable() {
             @Override public void run() { performRebuild(); }
         };
         private final Runnable fallbackTask = new Runnable() {
             @Override public void run() { fallbackCheck(); }
         };
+
+        private android.view.ViewTreeObserver.OnPreDrawListener pendingPreDrawListener = null;
         ClockBlurStateMachine(View container, Object blurDrawable) {
             this.container = container;
             this.blurDrawable = blurDrawable;
@@ -569,26 +594,37 @@ public class GlyphBlurRenderer {
         void start() {
             transitionToDirty();
         }
-        void onContentChanged() {
+        synchronized void onContentChanged() {
+
             if (!sScreenOn) return;
             transitionToDirty();
         }
         synchronized void onScreenStateChanged() {
             if (sScreenOn) {
-                if (state == PAUSED) transitionToDirty();
+
+                if (state == DIRTY || state == REBUILDING) {
+
+                    state = IDLE;
+                }
+                transitionToDirty();
             } else {
                 state = PAUSED;
-                sHandler.removeCallbacks(rebuildTask);
+                container.removeCallbacks(rebuildTask);
+
                 sHandler.removeCallbacks(fallbackTask);
+                sHandler.postDelayed(fallbackTask, FALLBACK_SCREENOFF_MS);
             }
         }
         private long lastRebuildAt = 0L;
+
+        private volatile boolean pendingRebuild = false;
         private static final long MIN_REBUILD_INTERVAL_MS = 100L;
         private synchronized void transitionToDirty() {
             if (state == PAUSED && !sScreenOn) return;
             if (state == DIRTY || state == REBUILDING) return;
             state = DIRTY;
-            sHandler.removeCallbacks(rebuildTask);
+
+            container.removeCallbacks(rebuildTask);
             sHandler.removeCallbacks(fallbackTask);
             long now = android.os.SystemClock.uptimeMillis();
             long since = now - lastRebuildAt;
@@ -600,10 +636,17 @@ public class GlyphBlurRenderer {
             }
         }
         private synchronized void performRebuild() {
-            sHandler.removeCallbacks(rebuildTask);
+            container.removeCallbacks(rebuildTask);
             if (state == PAUSED && !sScreenOn) return;
-            if (!sScreenOn) { state = PAUSED; return; }
+            if (!sScreenOn) {
+
+                state = PAUSED;
+                scheduleScreenOffProbe();
+                return;
+            }
             if (!ViewUtils.isReallyVisible(container)) {
+
+                pendingRebuild = true;
                 state = IDLE;
                 scheduleFallbackSoon();
                 return;
@@ -611,12 +654,15 @@ public class GlyphBlurRenderer {
             state = REBUILDING;
             final android.view.ViewTreeObserver vto = container.getViewTreeObserver();
             if (vto != null && vto.isAlive()) {
-                vto.addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener() {
+                final android.view.ViewTreeObserver.OnPreDrawListener l =
+                        new android.view.ViewTreeObserver.OnPreDrawListener() {
                     @Override public boolean onPreDraw() {
                         final android.view.ViewTreeObserver cur = container.getViewTreeObserver();
                         if (cur != null && cur.isAlive()) cur.removeOnPreDrawListener(this);
+                        pendingPreDrawListener = null;
                         synchronized (ClockBlurStateMachine.this) {
-                            if (state == PAUSED) return true;
+
+                            if (state != REBUILDING) return true;
                             try {
                                 doRebuild();
                                 applyClockBrighten(container);
@@ -626,7 +672,9 @@ public class GlyphBlurRenderer {
                         }
                         return true;
                     }
-                });
+                };
+                pendingPreDrawListener = l;
+                vto.addOnPreDrawListener(l);
                 container.invalidate();
             } else {
                 try {
@@ -664,17 +712,43 @@ public class GlyphBlurRenderer {
             sHandler.removeCallbacks(fallbackTask);
             sHandler.postDelayed(fallbackTask, FALLBACK_HIDDEN_PROBE_MS);
         }
+        private void scheduleScreenOffProbe() {
+            sHandler.removeCallbacks(fallbackTask);
+            sHandler.postDelayed(fallbackTask, FALLBACK_SCREENOFF_MS);
+        }
         private synchronized void fallbackCheck() {
 
             if (!container.isAttachedToWindow()) {
                 state = IDLE;
-                sHandler.removeCallbacks(rebuildTask);
+                container.removeCallbacks(rebuildTask);
                 sHandler.removeCallbacks(fallbackTask);
+
+                if (pendingPreDrawListener != null) {
+                    try {
+                        android.view.ViewTreeObserver vo = container.getViewTreeObserver();
+                        if (vo != null && vo.isAlive()) vo.removeOnPreDrawListener(pendingPreDrawListener);
+                    } catch (Throwable ignored) {}
+                    pendingPreDrawListener = null;
+                }
                 synchronized (sRunners) { sRunners.remove(container); }
+
+                try { sSnapsMap.remove(container); } catch (Throwable ignored) {}
+                try { sIconCache.remove(container); } catch (Throwable ignored) {}
                 return;
             }
-            if (!sScreenOn) { state = PAUSED; return; }
+            if (!sScreenOn) {
+
+                state = PAUSED;
+                scheduleScreenOffProbe();
+                return;
+            }
             if (!ViewUtils.isReallyVisible(container)) { scheduleFallbackSoon(); return; }
+
+            if (pendingRebuild) {
+                pendingRebuild = false;
+                transitionToDirty();
+                return;
+            }
             try {
                 String cur = computeFallbackFingerprint();
                 if (lastFingerprint == null || !lastFingerprint.equals(cur)) {
@@ -739,11 +813,44 @@ public class GlyphBlurRenderer {
             }
             return sb.toString();
         }
+
+        private void computeBoth(StringBuilder sigOut, StringBuilder fpOut) {
+            sigOut.setLength(0);
+            fpOut.setLength(0);
+            int[] ids = ClockIds.TEXT_IDS;
+            for (int id : ids) {
+                View v = container.findViewById(id);
+                if (!(v instanceof TextView)) {
+                    View root = ViewUtils.descendantJustBelow(container, "AppWidgetHostView");
+                    if (root != null) v = root.findViewById(id);
+                }
+                if (!(v instanceof TextView)) { sigOut.append('-').append('|'); fpOut.append('-').append('|'); continue; }
+                CharSequence cs = ((TextView) v).getText();
+                String t = (cs == null ? "" : cs.toString());
+                fpOut.append(t).append('|');
+                sigOut.append(t).append('@').append((int) localOffsetX(v, container))
+                      .append(',').append((int) localOffsetY(v, container)).append('|');
+            }
+            for (int id : ClockIds.ICON_IDS) {
+                View v = container.findViewById(id);
+                if (!(v instanceof View)) {
+                    View root = ViewUtils.descendantJustBelow(container, "AppWidgetHostView");
+                    if (root != null) v = root.findViewById(id);
+                }
+                String sz = (v == null ? "-" : (v.getWidth() + "x" + v.getHeight()));
+                sigOut.append(sz).append('|');
+                fpOut.append(sz).append('|');
+            }
+        }
         private void doRebuild() {
             rebuildSnapshots(container);
+
+            pendingRebuild = false;
             try { applyGlassColor(blurDrawable, container.getContext().getClassLoader()); } catch (Throwable ignored) {}
-            lastStateSig = computeSignature();
-            lastFingerprint = computeFallbackFingerprint();
+
+            computeBoth(sb, sb2);
+            lastStateSig = sb.toString();
+            lastFingerprint = sb2.toString();
             Method inv = Reflect.method(blurDrawable.getClass(), "invalidatePath", 0);
             if (inv != null) { try { inv.setAccessible(true); inv.invoke(blurDrawable); } catch (Throwable ignored) {} }
             container.invalidate();

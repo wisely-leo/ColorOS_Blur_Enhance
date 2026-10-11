@@ -944,6 +944,11 @@ public class BlurEnhanceModule extends XposedModule {
                     } catch (Throwable ignore) {}
                 }
             });
+
+            va.addListener(new android.animation.AnimatorListenerAdapter() {
+                @Override public void onAnimationEnd(android.animation.Animator a) { removeAnimation(key); }
+                @Override public void onAnimationCancel(android.animation.Animator a) { removeAnimation(key); }
+            });
             synchronized (iconAnims) {
                 iconAnims.put(key, va);
             }
@@ -1115,12 +1120,14 @@ public class BlurEnhanceModule extends XposedModule {
     private volatile boolean sRemoteViewsHooked = false;
     private void hookRemoteViewsApply(ClassLoader cl) {
         if (sRemoteViewsHooked) return;
-        sRemoteViewsHooked = true;
+
+        boolean ok = true;
         try {
             Method m = RemoteViews.class.getDeclaredMethod("apply", android.content.Context.class, ViewGroup.class);
             hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE).intercept(new RemoteViewsApplyHook(cl));
             ModuleLog.i("[merge] hooked RemoteViews.apply");
         } catch (Throwable t) {
+            ok = false;
             ModuleLog.e("MERGE", "RemoteViews.apply hook fail", t);
         }
         try {
@@ -1137,24 +1144,28 @@ public class BlurEnhanceModule extends XposedModule {
             });
             ModuleLog.i("[merge] hooked RemoteViews.reapply");
         } catch (Throwable t) {
+            ok = false;
             ModuleLog.e("MERGE", "RemoteViews.reapply hook fail", t);
         }
+        if (ok) sRemoteViewsHooked = true;
     }
     private volatile boolean sAhvHooked = false;
     private void hookAppWidgetHostView(ClassLoader cl) {
         if (sAhvHooked) return;
-        sAhvHooked = true;
+        boolean ok = false;
         try {
             Class<?> ahv = Class.forName("android.appwidget.AppWidgetHostView", false, cl);
             for (Method m : ahv.getDeclaredMethods()) {
                 if (m.getName().equals("updateAppWidget")) {
                     hook(m).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE).intercept(new AppWidgetHostViewHook(cl));
+                    ok = true;
                     ModuleLog.i("[merge] hooked AppWidgetHostView.updateAppWidget");
                 }
             }
-} catch (Throwable t) {
+        } catch (Throwable t) {
             ModuleLog.e("MERGE", "AppWidgetHostView hook fail", t);
         }
+        if (ok) sAhvHooked = true;
     }
     private static boolean isClockTextId(int id) {
         for (int tid : ClockIds.TEXT_IDS) {
