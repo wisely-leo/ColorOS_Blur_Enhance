@@ -26,14 +26,18 @@ public final class ImeBlurHook {
 
     private static final String CLS_VRM = "com.oplus.view.ViewRootManager";
 
+    private static volatile boolean sInstalled = false;
     private static volatile boolean sReflReady = false;
 
     private static final int GLOW_COLOR = 0x66FFFFFF;
     private static final float GLOW_FEATHER_DP = 8f;
 
-    private static final java.util.WeakHashMap<View, Drawable> sBlurOf =
+    // 注意：value 必须弱引用！sMgrOf 的 value（ViewRootManager）由 View 构造、强引用该 View，
+    // 若 value 为强引用会导致 WeakHashMap 的 key 永远不可达，entry 永久滞留（典型泄漏）。
+    // 弱引用后若被 GC，doBlur 会按需重建（见 doBlur 里 mgr==null 分支）。
+    private static final java.util.WeakHashMap<View, java.lang.ref.WeakReference<Drawable>> sBlurOf =
             new java.util.WeakHashMap<>();
-    private static final java.util.WeakHashMap<View, Object> sMgrOf =
+    private static final java.util.WeakHashMap<View, java.lang.ref.WeakReference<Object>> sMgrOf =
             new java.util.WeakHashMap<>();
     private static Constructor<?> sCtorViewRootManager;
     private static Method sGetBlurDrawable;
@@ -200,7 +204,13 @@ public final class ImeBlurHook {
                                XposedModuleInterface.PackageReadyParam param) {
         final ClassLoader cl = param.getClassLoader();
         if (cl == null) return;
-
+        // 幂等：避免 onPackageReady(PKG_YUYAN) 被框架重试/多进程多次调用时重复 hook
+        // （重复 hook 会让 onAttachedToWindow 每次触发多次 applyBlur）。
+        if (sInstalled) return;
+        synchronized (ImeBlurHook.class) {
+            if (sInstalled) return;
+            sInstalled = true;
+        }
         installYuyan(mod, cl);
     }
 
@@ -541,7 +551,8 @@ public final class ImeBlurHook {
 
         for (View v : sBlurOf.keySet()) {
             try {
-                Drawable d = sBlurOf.get(v);
+                java.lang.ref.WeakReference<Drawable> dr = sBlurOf.get(v);
+                Drawable d = (dr == null) ? null : dr.get();
                 if (d != null) d.setVisible(false, false);
             } catch (Throwable ignored) {}
         }
@@ -610,8 +621,12 @@ public final class ImeBlurHook {
         }
         try {
 
-            Drawable d = sBlurOf.get(v);
-            Object mgr = sMgrOf.get(v);
+            Drawable d = null;
+            Object mgr = null;
+            java.lang.ref.WeakReference<Drawable> dr = sBlurOf.get(v);
+            java.lang.ref.WeakReference<Object> mr = sMgrOf.get(v);
+            if (dr != null) d = dr.get();
+            if (mr != null) mgr = mr.get();
             if (d == null || mgr == null) {
                 mgr = sCtorViewRootManager.newInstance(v);
                 d = (Drawable) sGetBlurDrawable.invoke(mgr);
@@ -629,8 +644,8 @@ public final class ImeBlurHook {
                     }
                     return;
                 }
-                sBlurOf.put(v, d);
-                sMgrOf.put(v, mgr);
+                sBlurOf.put(v, new java.lang.ref.WeakReference<>(d));
+                sMgrOf.put(v, new java.lang.ref.WeakReference<>(mgr));
             }
 
             int radius = FeatureFlags.IME_BLUR_RADIUS;
