@@ -471,6 +471,22 @@ public class GlyphBlurRenderer {
                 }
                 if (!(v instanceof TextView)) continue;
                 TextView tv = (TextView) v;
+                if (ClockIds.isRealmeLockId(id)) {
+                    // 真我 (realme) 时钟：文字用 View 级 alpha（与天气图标同机制）。
+                    // 原因：时钟 App 会通过 RemoteViews.setTextColor 反复推送"实心白"，
+                    // 单纯改 setTextColor 会被其覆盖（闪成实心白）；
+                    // 而 View.setAlpha 是整层透明度，任何 setTextColor 都无法把它拉回不透明，
+                    // 从而稳定露出容器上的模糊层。
+                    float fa = a / 255f;
+                    if (Math.abs(tv.getAlpha() - fa) > 0.01f) {
+                        tv.setAlpha(fa);
+                        // 真我文字透明度来源唯一（视图级），记录以便排查
+                        ModuleLog.dv("TALPHA", "id=0x" + Integer.toHexString(id)
+                                + " cls=" + tv.getClass().getSimpleName()
+                                + " viewAlpha=" + fa);
+                    }
+                    continue;
+                }
                 android.content.res.ColorStateList csl = tv.getTextColors();
                 if (csl == null) continue;
                 int cur = csl.getDefaultColor();

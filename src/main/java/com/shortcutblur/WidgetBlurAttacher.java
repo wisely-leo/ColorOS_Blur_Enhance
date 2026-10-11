@@ -56,6 +56,21 @@ public class WidgetBlurAttacher {
                 }
             }
             View containerEarly = ViewUtils.findByViewId(root, ClockIds.TARGET_ROOT);
+            // 真我 (realme) 时钟：TARGET_ROOT(0x7f0a017b) 在真我上是 date_week_text（非容器），
+            // 真正的模糊背景容器是 RM_CONTAINER(0x7f0a04b2，bg=widget_top_bg)。优先用它。
+            View rmContainer = ViewUtils.findByViewId(root, ClockIds.RM_CONTAINER);
+            if (rmContainer == null) {
+                // 真我 (realme) 天气/日历横向小组件：根容器 weather_widget_layout
+                rmContainer = ViewUtils.findByViewId(root, ClockIds.RM_W_LAYOUT);
+                if (rmContainer != null) {
+                    ModuleLog.d("BW", tag + " realme weather_widget_layout found");
+                }
+            }
+            if (rmContainer != null) {
+                containerEarly = rmContainer;
+                ModuleLog.d("BW", tag + " realme container=0x"
+                        + Integer.toHexString(containerEarly.getId()));
+            }
             boolean hasT = (containerEarly != null);
             if (hasT) {
                 synchronized (sEverHit) { sEverHit.put(root, Boolean.TRUE); }

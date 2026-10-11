@@ -30,7 +30,7 @@ public class SettingsActivity extends Activity {
     private static final int MAX_BG_MB = 15;
     private static final long MAX_BG_BYTES = MAX_BG_MB * 1024L * 1024L;
 
-    private static final String LOG_TAG_VER = "v45.2";
+    private static final String LOG_TAG_VER = "v45.4";
     static void lg(String s) {
         if (!App.logEnabled()) return;
         android.util.Log.i("SoftUi", s);
@@ -53,10 +53,114 @@ private SettingsStore store;
         try { SoftUi.GlassSyncUnhook(); } catch (Throwable ignored) {}
         // 移除可能残留的 Shizuku 权限回调监听器（它静态持有本 Activity）。
         try { Adb.removePending(); } catch (Throwable ignored) {}
+        adbGateShowing = false;
         shell = null;
         uiRoot = null;
         store = null;
         super.onDestroy();
+    }
+
+    // ===================== ADB(Shizuku) 权限门禁 =====================
+    // 每次打开 GUI 检测一次 ADB 权限；无权限则弹窗要求获取，
+    // 用户拒绝 / 获取失败 / 点了退出 -> finish() 关闭界面。
+    //
+    // 线程安全约定：
+    //  - Shizuku 权限回调在【非主线程】触发，且可能在 Activity 进入 onDestroy 之后到达；
+    //  - onDestroy 会把 uiRoot 置 null，因此在回调里【绝不能】直接 uiRoot.post(...)，
+    //    必须先经 safePost() 判空，避免空指针崩溃与对已销毁视图的无意义操作。
+    private android.view.ViewGroup curRoot() {
+        return destroyed ? null : uiRoot;
+    }
+
+    /** 安全 post：Activity 已销毁或 uiRoot 已置 null 时静默丢弃。 */
+    private void safePost(final Runnable r) {
+        final android.view.ViewGroup root = curRoot();
+        if (root == null || r == null) return;
+        try {
+            root.post(() -> {
+                if (destroyed || uiRoot == null) return;   // 执行前再判一次（post 是异步的）
+                try { r.run(); } catch (Throwable t) { lg("[safePost] 任务异常: " + t); }
+            });
+        } catch (Throwable ignored) {}
+    }
+
+    // 门禁弹窗同一时刻只允许一个（防止用户连点导致 overlay 叠层）。
+    private boolean adbGateShowing = false;
+
+    private void checkAdbGate() {
+        if (destroyed) return;
+        int st;
+        try { st = Adb.status(); } catch (Throwable t) { st = Adb.NONE; }
+        if (st == Adb.OK) { lg("[ADB门禁] 已授权，放行: " + Adb.label()); return; }
+        lg("[ADB门禁] 无权限 status=" + st + " label=" + Adb.label());
+        showAdbGateDialog();
+    }
+
+    private void showAdbGateDialog() {
+        if (destroyed || uiRoot == null) return;
+        if (adbGateShowing) { lg("[ADB门禁] 已有弹窗在显示，忽略重复调用"); return; }
+        final int st;
+        try { st = Adb.status(); } catch (Throwable t) { return; }
+        if (st == Adb.OK) return;
+        adbGateShowing = true;
+
+        final boolean connected = (st == Adb.NO_PERM); // Shizuku 已运行，仅缺授权
+        String title = "需要 ADB 权限";
+        String msg;
+        if (connected) {
+            msg = "本模块需要 ADB(Shizuku) 权限才能工作。\n\n"
+                    + "当前状态：" + Adb.label() + "\n\n"
+                    + "点击「立即获取」授权；若不授权，将退出设置界面。";
+        } else {
+            msg = "未检测到 Shizuku 服务（ADB 权限通道）。\n\n"
+                    + "请先安装并启动 Shizuku（或在 Root 环境下启用 Sui），"
+                    + "然后回到本界面重试。\n\n"
+                    + "若不获取权限，将退出设置界面。";
+        }
+        try {
+            // 统一在弹窗消失后清标记，保证同一时刻只有一个门禁弹窗。
+            Runnable clearFlag = () -> adbGateShowing = false;
+            SoftUi.confirm(uiRoot, title, msg,
+                    connected ? "立即获取" : "重试",
+                    "退出",
+                    () -> {
+                        clearFlag.run();
+                        lg("[ADB门禁] 用户选择获取/重试");
+                        if (!connected) {
+                            // Shizuku 未连接：重试一次检测；仍无则再次弹窗
+                            safePost(() -> {
+                                if (Adb.status() == Adb.OK) {
+                                    lg("[ADB门禁] 重试成功，放行");
+                                    SoftUi.infoDialog(uiRoot, "已获取 ADB 权限", Adb.label(), "好");
+                                } else {
+                                    showAdbGateDialog();
+                                }
+                            });
+                            return;
+                        }
+                        // 已连接但未授权：走 Shizuku 授权流程
+                        // 注意：done 回调可能在 Activity 销毁后到达（见 Adb.request），
+                        // 这里不直接碰 uiRoot，统一交给 safePost 判空。
+                        Adb.request(SettingsActivity.this, () -> safePost(() -> {
+                            if (Adb.status() == Adb.OK) {
+                                lg("[ADB门禁] 授权成功，放行: " + Adb.label());
+                                SoftUi.infoDialog(uiRoot, "已获取 ADB 权限", Adb.label(), "好");
+                            } else {
+                                lg("[ADB门禁] 授权未通过: " + Adb.label());
+                                showAdbGateDialog();
+                            }
+                        }));
+                    },
+                    () -> {
+                        clearFlag.run();
+                        lg("[ADB门禁] 用户选择退出 -> finish()");
+                        if (!destroyed) finish();
+                    });
+        } catch (Throwable t) {
+            adbGateShowing = false;
+            lg("[ADB门禁] 弹窗失败，直接退出: " + t);
+            if (!destroyed) finish();
+        }
     }
 
     private static int themeIndex(int mode) {
@@ -126,6 +230,9 @@ private SettingsStore store;
                 lg("shell inset ok: shellTop=" + shell.getTop() + " shellH=" + shell.getHeight());
             } catch (Throwable t) { lg("shell inset 失败: " + t); }
             lg("setContentView OK —— onCreate 完成");
+            // ADB(Shizuku) 权限门禁：无权限则弹窗要求获取，拒绝/获取失败则退出 GUI。
+            // 用 safePost：Activity 若在此刻已销毁则静默丢弃，避免校验已销毁视图。
+            safePost(() -> checkAdbGate());
         } catch (Throwable t) {
             lg("!!! 异常: " + t);
             for (StackTraceElement e : t.getStackTrace()) lg("    at " + e);
@@ -316,7 +423,19 @@ private SettingsStore store;
     }
 
     private static final String CHANGELOG =
-            "v45.3\n"
+            "v45.4\n"
+            + "· 新增「ADB 权限检测」：打开设置界面时自动检测 ADB(Shizuku) 权限\n"
+            + "  · 未授权时弹窗引导获取；拒绝授权或获取失败则退出设置界面\n"
+            + "  · 未检测到 Shizuku 服务时提示先启动 Shizuku，并支持重试\n"
+            + "  · 授权成功后即时放行，无需重启界面\n"
+            + "· 适配真我 (realme) 日历/天气横向小组件（weather_widget_layout）\n"
+            + "  · 新增识别日历日期文字（calendar）与组件根容器，模糊可正常呈现\n"
+            + "· 时钟模糊：真我 (realme) 组件改用视图透明度（setAlpha）控制\n"
+            + "  · 消除「实心白 / 模糊」来回闪烁，透明来源唯一，调节线性直观\n"
+            + "· 日志完善：启动时记录系统版本 / 机型 / 进程等环境信息\n"
+            + "· 内部版本号统一同步至 v45.4\n"
+            + "\n"
+            + "v45.3\n"
             + "· 修复时钟模糊「长时间不可见（待机/切页）后再次可见时不更新」的问题\n"
             + "  · 不可见期间的时间变化不再被丢弃，恢复可见立即重建，无需等待轮询\n"
             + "  · 灭屏期间保留低频探测，避免广播丢失后状态机停摆\n"

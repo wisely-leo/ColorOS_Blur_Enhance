@@ -72,12 +72,14 @@ public final class Adb {
                             SettingsActivity.lg("ADB 权限回调: requestCode=" + requestCode
                                     + " grantResult=" + grantResult);
                             // Activity 可能已销毁：runOnUiThread 在销毁后仍会 post，
-                            // 这里判空 isFinishing/isDestroyed 规避无意义回调。
+                            // 因此这里改为主线程内再判一次（isFinishing/isDestroyed
+                            // 在回调线程判断存在竞态窗口，可能误放行导致回调触碰已销毁视图）。
                             if (done != null) {
                                 try {
-                                    if (!a.isFinishing() && !a.isDestroyed()) {
-                                        a.runOnUiThread(done);
-                                    }
+                                    a.runOnUiThread(() -> {
+                                        if (a.isFinishing() || a.isDestroyed()) return;
+                                        try { done.run(); } catch (Throwable ignored) {}
+                                    });
                                 } catch (Throwable ignored) {}
                             }
                         }
@@ -88,7 +90,14 @@ public final class Adb {
             rikka.shizuku.Shizuku.requestPermission(0);
         } catch (Throwable t) {
             SettingsActivity.lg("申请 ADB 权限失败: " + t);
-            if (done != null) a.runOnUiThread(done);
+            if (done != null) {
+                try {
+                    a.runOnUiThread(() -> {
+                        if (a.isFinishing() || a.isDestroyed()) return;
+                        try { done.run(); } catch (Throwable ignored) {}
+                    });
+                } catch (Throwable ignored) {}
+            }
         }
     }
     public static String restartScope(Context c, List<String> pkgs) {
