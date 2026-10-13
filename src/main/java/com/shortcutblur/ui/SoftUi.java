@@ -36,8 +36,11 @@ public final class SoftUi {
     public static float RADIUS      = 22f;
     public static float ROW_H       = 48f;
     public static float PAD         = 16f;
-
-    public static final int ROW_TITLE_ID = 0x7F00A001;
+    /**
+     * 行标题 View 的 id。用 generateViewId() 生成，保证不与资源 ID 冲突；
+     * 仅初始化一次，供 findRowTitle 跨实例比对。
+     */
+    public static final int ROW_TITLE_ID = View.generateViewId();
     public static float GAP         = 10f;
     public static float SIDE        = 16f;
     public static float TITLE_TOP   = 18f;
@@ -317,6 +320,14 @@ public final class SoftUi {
                     return;
                 }
                 cur = ((View) cur).getParent();
+            }
+
+            // 降级：整条祖先链没有 Card 宿主。
+            // 说明该行被直接放进了普通容器（LinearLayout / FrameLayout 等），
+            // 此时没有"组容器"来统一分配圆角 —— 退化为对自身应用一次全圆角按压，
+            // 保证"只要标了 markPressable 就一定有按压反馈"，避免静默失效。
+            if (isPressable(v) && v.getBackground() == null) {
+                applyPressFeedback(v, true, true, null);
             }
         } catch (Throwable ignored) {}
     }
@@ -2119,6 +2130,7 @@ public final class SoftUi {
             scaleAnimator.start();
         }
         @Override public boolean onTouchEvent(android.view.MotionEvent e) {
+            if (!isEnabled()) return false;
             float segW = getWidth() / (float) labels.length;
             switch (e.getActionMasked()) {
                 case android.view.MotionEvent.ACTION_DOWN:
@@ -2540,7 +2552,6 @@ public final class SoftUi {
         vlp.rightMargin = dp(c, 8);
         right.addView(val, vlp);
         final Slider sl = new Slider(c, value, min, max);
-        if (cb != null) sl.setOnChange(cb);
         sl.setOnChange(new Slider.OnChange() {
             @Override public void onChange(float v) {
                 val.setText(fmt(v) + (unit == null ? "" : unit));
