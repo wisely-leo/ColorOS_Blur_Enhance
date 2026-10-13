@@ -2,7 +2,6 @@ package com.shortcutblur;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.view.View;
-import android.view.Window;
 import java.lang.reflect.Executable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -24,7 +23,6 @@ public final class QuickSearchBlur {
             if (sInstalled) return;
             try {
                 installViewHook(module, loader);
-                installWindowHook(module, loader);
                 sInstalled = true;
                 ModuleLog.d(TAG, "install done classLoader=" + (loader != null));
             } catch (Throwable t) {
@@ -56,36 +54,6 @@ public final class QuickSearchBlur {
         });
         sViewHookInstalled = true;
         ModuleLog.d(TAG, "[hook] View.setBackground");
-    }
-    private static volatile boolean sWindowHookInstalled = false;
-    private static void installWindowHook(BlurEnhanceModule module, ClassLoader loader) throws Throwable {
-        if (sWindowHookInstalled) return;
-        Method m = Window.class.getDeclaredMethod("setBackgroundDrawable", Drawable.class);
-
-        if (java.lang.reflect.Modifier.isAbstract(m.getModifiers())) {
-            sWindowHookInstalled = true;
-            ModuleLog.d(TAG, "[hook] Window.setBackgroundDrawable skipped (abstract)");
-            return;
-        }
-        m.setAccessible(true);
-        module.hookPublic("qs.window.setBg", (Executable) m, new XposedInterface.Hooker() {
-            @Override
-            public Object intercept(XposedInterface.Chain chain) throws Throwable {
-                try {
-                    if (shouldTransparent()) {
-                        Object[] args = chain.getArgs().toArray();
-                        if (args.length >= 1) {
-                            ModuleLog.d(TAG, "hit window.setBackgroundDrawable -> transparent");
-                            args[0] = TRANSPARENT;
-                            return chain.proceed(args);
-                        }
-                    }
-                } catch (Throwable ignore) {}
-                return chain.proceed();
-            }
-        });
-        sWindowHookInstalled = true;
-        ModuleLog.d(TAG, "[hook] Window.setBackgroundDrawable");
     }
     private static boolean shouldTransparent() {
         try {
