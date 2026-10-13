@@ -44,6 +44,17 @@ public final class ClockTextAlphaHook {
         // 按 id:color:newColor 去重，同一组合只记一次，避免日志刷屏。
         private final java.util.Set<String> logged =
                 java.util.concurrent.ConcurrentHashMap.newKeySet();
+        // 发热优化⑦：notifyContentMaybeChangedAll 会遍历所有时钟状态机并可能触发重建。
+        // 时钟/天气组件可能高频推送 setTextColor，这里做 200ms 节流，
+        // 避免 1 秒内多次全量通知（重建本身有 MIN_REBUILD_INTERVAL_MS 保护，这里是上游减负）。
+        private static final long NOTIFY_MIN_INTERVAL_MS = 200L;
+        private long lastNotifyAt = 0L;
+        private void notifyThrottled() {
+            long now = android.os.SystemClock.uptimeMillis();
+            if (now - lastNotifyAt < NOTIFY_MIN_INTERVAL_MS) return;
+            lastNotifyAt = now;
+            try { GlyphBlurRenderer.notifyContentMaybeChangedAll(); } catch (Throwable ignored) {}
+        }
         @Override
         public Object intercept(Chain chain) throws Throwable {
             try {
@@ -60,11 +71,11 @@ public final class ClockTextAlphaHook {
                                 // （见 GlyphBlurRenderer.applyTextAlpha），此处不再改写
                                 // setTextColor 的 alpha，避免「色 alpha × View alpha」双重叠加
                                 // 导致文字过淡或闪烁。仅通知重采样。
-                                try { GlyphBlurRenderer.notifyContentMaybeChangedAll(); } catch (Throwable ignored) {}
+                                notifyThrottled();
                                 return chain.proceed();
                             }
                             int newColor = (color & 0x00FFFFFF) | (targetAlpha() << 24);
-                            try { GlyphBlurRenderer.notifyContentMaybeChangedAll(); } catch (Throwable ignored) {}
+                            notifyThrottled();
                             // 热路径去重：同 id+color+newColor 只记一次
                             if (logged.add(Integer.toHexString(id) + ":" + Integer.toHexString(color)
                                     + ":" + Integer.toHexString(newColor))) {

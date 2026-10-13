@@ -211,7 +211,7 @@ public final class ShortcutBlurFeature {
                                                     try {
                                                         repressPanelAlpha(fhost);
                                                     } catch (Throwable ignored) {}
-                                                    if (++frames >= 40) {   // 约 0.6s 后自动摘除
+                                                    if (++frames >= 24) {   // 约 0.4s 后自动摘除（覆盖 330ms 关闭动画）
                                                         try {
                                                             android.view.ViewTreeObserver v = fhost.getViewTreeObserver();
                                                             if (v.isAlive()) v.removeOnPreDrawListener(this);
@@ -225,7 +225,8 @@ public final class ShortcutBlurFeature {
                                             ModuleLog.e("CARDBLUR", "add OnPreDraw failed", t);
                                         }
                                         // 兜底：再压几次，防止 OnPreDraw 未触发的边界情况。
-                                        for (final long d : new long[]{0L, 16L, 48L, 96L, 160L}) {
+                                        // （发热优化④：去掉 0L —— 与 OnPreDraw 首帧重复；仅保留错开的 3 次）
+                                        for (final long d : new long[]{32L, 96L, 160L}) {
                                             fhost.postDelayed(new Runnable() {
                                                 @Override public void run() {
                                                     try {
@@ -365,9 +366,9 @@ public final class ShortcutBlurFeature {
     //   1) 把该容器背景整体调半透明（保留圆角 / Ripple / 形状）；
     //   2) 用 Oplus 私有 API setBackgroundRenderEffect 叠加背景模糊。
     // 隶属「Shortcut 实时模糊」总开关（FeatureFlags.SHORTCUT_BLUR）。
-    // 只挂一次（WeakHashMap 去重），只针对"直接挂背景的容器"（通常是弹窗内容根）。
+    // 只挂一次（WeakHashMap 去重由 applyCardBlurRec 的深度短路保证），
+    // 只针对"直接挂背景的容器"（通常是弹窗内容根）。
     // ========================================================================
-    private static final Map<View, Boolean> cardBlurApplied = new WeakHashMap<>();
 
     /** 弹窗卡片本体模糊半径（FeatureFlags 热更），默认 64。 */
     private static float cardBlurRadius() {
@@ -424,7 +425,8 @@ public final class ShortcutBlurFeature {
     /** 把面板（≥200×200 且带背景）的背景颜色 alpha 强制压成 CARD_PANEL_ALPHA。
      *  与 applyCardBlurRec 的 setAlpha 不同：这里直接 setColor 改"颜色本身"，
      *  可抵消 ArrowPopup 用 newDrawable() 从 constant state 复制出的不透明实例。
-     *  性能：优先复用上次命中的面板 View（弱引用缓存，且与 root 绑定），避免每帧遍历整个子树。 */
+     *  性能：优先复用上次命中的面板 View（弱引用缓存，且与 root 绑定），避免每帧遍历整个子树。
+     *  发热优化⑤：入口先做"alpha 已达标"短路，避免每帧白跑一遍 forceAlphaOnBg。 */
     private static volatile java.lang.ref.WeakReference<View> sPanelCache = null;
     private static volatile java.lang.ref.WeakReference<View> sPanelCacheRoot = null;
     private static void repressPanelAlpha(View v) {
@@ -437,6 +439,7 @@ public final class ShortcutBlurFeature {
                 View cached = ref.get();
                 if (cached != null && cached.getParent() != null
                         && cached.getWidth() >= 200 && cached.getHeight() >= 200) {
+                    if (isPanelAlphaOk(cached)) return;   // ← 已达标：整次调用直接结束
                     forceAlphaOnBg(cached);
                     return;
                 }
@@ -467,8 +470,8 @@ public final class ShortcutBlurFeature {
             android.graphics.drawable.Drawable bg = c.getBackground();
             if (bg == null) return;
             int want = (FeatureFlags.CARD_PANEL_ALPHA & 0xFF) << 24;
+            // 已是目标 alpha。仍需处理"颜色本身不透明"的情况 → 检查 GradientDrawable 颜色。
             if (bg.getAlpha() == (FeatureFlags.CARD_PANEL_ALPHA & 0xFF)) {
-                // 已是目标 alpha。仍需处理"颜色本身不透明"的情况 → 检查 GradientDrawable 颜色。
                 if (bg instanceof android.graphics.drawable.GradientDrawable) {
                     android.content.res.ColorStateList csl =
                             ((android.graphics.drawable.GradientDrawable) bg).getColor();
@@ -489,6 +492,24 @@ public final class ShortcutBlurFeature {
                     + Integer.toHexString(FeatureFlags.CARD_PANEL_ALPHA)
                     + " cls=" + c.getClass().getSimpleName());
         } catch (Throwable ignored) {}
+    }
+
+    /** 发热优化⑤ 配套：判定面板背景 alpha 是否已达标（含 GradientDrawable 颜色 alpha）。
+     *  纯读操作，不 mutate、不触发 invalidate，可安全用于每帧短路判断。 */
+    private static boolean isPanelAlphaOk(View c) {
+        try {
+            android.graphics.drawable.Drawable bg = c.getBackground();
+            if (bg == null) return false;
+            int target = FeatureFlags.CARD_PANEL_ALPHA & 0xFF;
+            if (bg instanceof android.graphics.drawable.GradientDrawable) {
+                android.content.res.ColorStateList csl =
+                        ((android.graphics.drawable.GradientDrawable) bg).getColor();
+                if (csl != null) return (csl.getDefaultColor() >>> 24) == target;
+            }
+            return bg.getAlpha() == target;
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
     private static int applyCardBlur(ViewGroup card) {
         if (card == null) return 0;
@@ -794,14 +815,19 @@ try {
                 Reflect.setAccessible(m);
                 hookTarget((Executable) m, "cardblur.getAttrColor", new XposedInterface.Hooker() {
                     @Override public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                        // 发热优化⑫：Themes.getAttrColor 是 Launcher3 的全局工具方法（高频）。
+                        // 先做 attr 判定再取值，绝大多数调用（attr != ATTR_POPUP_COLOR_PRIMARY）
+                        // 走最短路：一次 getArg + 一次 int 比较，不做装箱、不碰 result。
                         Object attr = chain.getArg(1);
+                        boolean isTarget = (attr instanceof Integer)
+                                && ((Integer) attr).intValue() == ATTR_POPUP_COLOR_PRIMARY;
+                        if (!isTarget) return chain.proceed();
                         Object result = chain.proceed();
                         try {
-                            if (attr instanceof Integer && ((Integer) attr) == ATTR_POPUP_COLOR_PRIMARY
-                                    && result instanceof Integer) {
+                            if (result instanceof Integer) {
                                 int c = (Integer) result;
                                 int out = ((FeatureFlags.CARD_PANEL_ALPHA & 0xFF) << 24) | (c & 0x00FFFFFF);
-                                ModuleLog.d("CARDBLUR", "popupColorPrimary in=0x" + Integer.toHexString(c)
+                                ModuleLog.dv("CARDBLUR", "popupColorPrimary in=0x" + Integer.toHexString(c)
                                         + " out=0x" + Integer.toHexString(out));
                                 return out;
                             }
@@ -1103,15 +1129,16 @@ try {
     private static void armBlurForView(View view, String mid) {
         if (view == null) return;
         try {
-            ModuleLog.d("LIVE", "armBlurForView id=" + mid);
+            // 发热优化⑥：本方法是「每次弹窗」的热路径，4 条 d() 日志改为 dv()（仅在 VERBOSE 档输出）
+            ModuleLog.dv("LIVE", "armBlurForView id=" + mid);
             if (sFadingOut) {
                 sFadingOut = false;
-                ModuleLog.d("ICONANIM", "enter during fade-out, aborted fade-out state");
+                ModuleLog.dv("ICONANIM", "enter during fade-out, aborted fade-out state");
             }
             sShortcutBlurActive = true;
-            ModuleLog.d("PAUSE", "window OPEN (armBlurForView id=" + mid + ")");
+            ModuleLog.dv("PAUSE", "window OPEN (armBlurForView id=" + mid + ")");
             final int flags = resolveBlurFlags(view);
-            ModuleLog.d("LIVE", "flags=" + flags + " (static=" + ((flags & F_STATIC) != 0)
+            ModuleLog.dv("LIVE", "flags=" + flags + " (static=" + ((flags & F_STATIC) != 0)
                     + " icon=" + ((flags & F_ICON) != 0) + " wall=" + ((flags & F_WALL) != 0) + ")");
             setIconBlurArmed(view, true);
             if ((flags & F_STATIC) != 0) clearStaticLayers(view);

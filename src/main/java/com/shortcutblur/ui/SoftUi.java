@@ -1706,6 +1706,10 @@ public final class SoftUi {
             for (int i = 0; i < VIEWS.size(); i++) {
                 GlassView v = VIEWS.get(i).get();
                 if (v == null || !v.isAttachedToWindow()) continue;
+                // 发热优化⑪：跳过不可见（被遮挡 / 滚出屏幕）的玻璃层，避免无谓重绘。
+                // getGlobalVisibleRect 比 isShown 更严格（能识别"滚出可视区域"），
+                // 对设置页长列表场景可显著减少滚动期 invalidate 数量。
+                if (!v.isShown()) continue;
                 v.onTick();
                 alive++;
             }
@@ -1782,7 +1786,8 @@ public final class SoftUi {
     static void diag(String s) {
         if (s == null) return;
         if (!App.logEnabled()) return;
-        try { android.util.Log.i("SoftUi", s); } catch (Throwable ignored) {}
+        // 发热优化⑩：去掉 android.util.Log.i。滚动 tick 等路径会周期性调用本方法，
+        // Log.i 是跨进程 IPC；UiLog 已是文件日志，够排查用。二者取一，避免双份开销。
         UiLog.write("[fx] " + s);
     }
 

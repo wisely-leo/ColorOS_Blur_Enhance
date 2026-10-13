@@ -589,9 +589,13 @@ public class GlyphBlurRenderer {
     }
     private static final long FALLBACK_CHECK_MS = 2000L;
     private static final long FALLBACK_SCREENOFF_MS = 8000L;
-    // 可见性待恢复时的探测间隔：这是「短时不可见 → 可见」的响应粒度，属性能敏感路径，
-    // 必须保持较高频率（250ms）。不可贸然放宽，否则不可见期间的时间变动会延迟刷新。
-    private static final long FALLBACK_HIDDEN_PROBE_MS = 250L;
+    // 可见性待恢复时的探测间隔。
+    // 发热优化⑧：250ms（4Hz）→ 800ms。原注释担心「不可见期间时间变动延迟刷新」，
+    // 但实际上不可见时用户看不到内容，稍晚刷新无感；反而 4Hz 常驻唤醒在
+    // 「被遮挡但未 detach」的场景下会持续耗电发热（卡在 tick 状态）。
+    // 可见性恢复有两条更快的路径兜底：① OnPreDraw（可见即首帧触发）
+    // ② onContentChanged（内容变更驱动），800ms 仅作为「广播丢失」的最终保险。
+    private static final long FALLBACK_HIDDEN_PROBE_MS = 800L;
     private static final long REBUILD_SETTLE_MS = 50L;
     private static final class ClockBlurStateMachine {
         private static final int IDLE = 0;

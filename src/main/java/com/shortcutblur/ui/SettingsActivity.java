@@ -30,7 +30,7 @@ public class SettingsActivity extends Activity {
     private static final int MAX_BG_MB = 15;
     private static final long MAX_BG_BYTES = MAX_BG_MB * 1024L * 1024L;
 
-    private static final String LOG_TAG_VER = "v46";
+    private static final String LOG_TAG_VER = "v46.1";
     static void lg(String s) {
         if (s == null) return;
         if (!App.logEnabled()) return;
@@ -420,7 +420,20 @@ private SettingsStore store;
     }
 
     private static final String CHANGELOG =
-            "v46\n"
+            "v46.1\n"
+            + "· 发热与耗电优化（重点修复长稳使用下的发热）\n"
+            + "  · 日志输出不再逐条同步刷盘，改为批量写入，大幅降低存储 IO\n"
+            + "  · 日志不再逐条写入系统日志，减少跨进程通信开销\n"
+            + "  · 时钟/天气组件在「被遮挡但未移除」时不再高频探测（4Hz → 1.25Hz）\n"
+            + "  · 快捷菜单关闭动画的透明度压制减少冗余帧，降低关闭瞬间的 CPU 占用\n"
+            + "  · 最近任务滑动时的配置读取频率下调（2s → 5s），减少滑动期卡顿\n"
+            + "  · 桌面主题色读取先做快速判定，避免大量无关调用进入处理逻辑\n"
+            + "  · 设置界面滚动时不再重绘屏幕外的玻璃层\n"
+            + "  · 弹窗等热路径日志降级，仅在调试档输出\n"
+            + "  · 补充若干缓存上限保护，避免长时间运行后缓慢膨胀\n"
+            + "· 内部版本号同步至 v46.1\n"
+            + "\n"
+            + "v46\n"
             + "· 快捷菜单模糊修复与增强（长按图标弹出的一级菜单 + 「更多功能」二级菜单）\n"
             + "  · 修复一级菜单关闭时短暂「恢复实心 / 闪白」，退出动画全程保持半透明模糊\n"
             + "  · 修复二级「更多功能」菜单弹出时，桌面图标模糊被误清除的问题\n"

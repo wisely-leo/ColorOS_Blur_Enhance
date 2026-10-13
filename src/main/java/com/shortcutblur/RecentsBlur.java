@@ -858,7 +858,11 @@ final class RecentsBlur {
     }
     private static void reloadConfigIfStale() {
         long now = android.os.SystemClock.uptimeMillis();
-        if (now - sConfLastRead < 2000L) return;
+        // 发热优化⑨：2s → 5s。本方法在 setScaleX/Y 热路径（滑动每帧）被调用，
+        // 命中窗口内只做一次 uptimeMillis 比较（很便宜），但一旦过期就会做
+        // 2 次 Settings.System.getString（Binder IPC）+ 1 次文件 IO（FUSE）。
+        // 配置热更不需要 2 秒级响应，5s 对用户完全无感，可显著降低滑动手势期的抖动。
+        if (now - sConfLastRead < 5000L) return;
         sConfLastRead = now;
         try {
             android.content.Context ctx = currentAppContext();
