@@ -30,7 +30,7 @@ public class SettingsActivity extends Activity {
     private static final int MAX_BG_MB = 15;
     private static final long MAX_BG_BYTES = MAX_BG_MB * 1024L * 1024L;
 
-    private static final String LOG_TAG_VER = "v45.4";
+    private static final String LOG_TAG_VER = "v45.5";
     static void lg(String s) {
         if (s == null) return;
         if (!App.logEnabled()) return;
@@ -420,7 +420,17 @@ private SettingsStore store;
     }
 
     private static final String CHANGELOG =
-            "v45.4\n"
+            "v45.5\n"
+            + "· 统一日志开关：界面日志 / 功能日志共用同一开关\n"
+            + "  · 关闭日志后不再有任何后台写文件，减少无谓 IO\n"
+            + "  · 修复个别日志在开关关闭时仍会写入的问题\n"
+            + "· 性能优化（拖动 / 滑动更顺滑，减少卡顿与内存抖动）\n"
+            + "  · 色相滑块拖动时不再每帧分配临时数组\n"
+            + "  · 彩色渐变缓存随尺寸变化正确失效，避免显示错位\n"
+            + "  · 卡片点按高亮背景在参数未变时复用，避免重复创建\n"
+            + "· 内部版本号统一同步至 v45.5\n"
+            + "\n"
+            + "v45.4\n"
             + "· 新增「ADB 权限检测」：打开设置界面时自动检测 ADB(Shizuku) 权限\n"
             + "  · 未授权时弹窗引导获取；拒绝授权或获取失败则退出设置界面\n"
             + "  · 未检测到 Shizuku 服务时提示先启动 Shizuku，并支持重试\n"
