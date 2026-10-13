@@ -61,6 +61,12 @@ public final class QuickSearchBlur {
     private static void installWindowHook(BlurEnhanceModule module, ClassLoader loader) throws Throwable {
         if (sWindowHookInstalled) return;
         Method m = Window.class.getDeclaredMethod("setBackgroundDrawable", Drawable.class);
+
+        if (java.lang.reflect.Modifier.isAbstract(m.getModifiers())) {
+            sWindowHookInstalled = true;
+            ModuleLog.d(TAG, "[hook] Window.setBackgroundDrawable skipped (abstract)");
+            return;
+        }
         m.setAccessible(true);
         module.hookPublic("qs.window.setBg", (Executable) m, new XposedInterface.Hooker() {
             @Override
