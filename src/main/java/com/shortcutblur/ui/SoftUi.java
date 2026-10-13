@@ -37,7 +37,7 @@ public final class SoftUi {
     public static float ROW_H       = 48f;
     public static float PAD         = 16f;
 
-    public static final int ROW_TITLE_ID = 0x7F00A001;
+    public static final int ROW_TITLE_ID = View.generateViewId();
     public static float GAP         = 10f;
     public static float SIDE        = 16f;
     public static float TITLE_TOP   = 18f;
@@ -280,6 +280,10 @@ public final class SoftUi {
                     return;
                 }
                 cur = ((View) cur).getParent();
+            }
+
+            if (isPressable(v) && v.getBackground() == null) {
+                applyPressFeedback(v, true, true, null);
             }
         } catch (Throwable ignored) {}
     }
@@ -2058,6 +2062,7 @@ public final class SoftUi {
             scaleAnimator.start();
         }
         @Override public boolean onTouchEvent(android.view.MotionEvent e) {
+            if (!isEnabled()) return false;
             float segW = getWidth() / (float) labels.length;
             switch (e.getActionMasked()) {
                 case android.view.MotionEvent.ACTION_DOWN:
@@ -2478,7 +2483,6 @@ public final class SoftUi {
         vlp.rightMargin = dp(c, 8);
         right.addView(val, vlp);
         final Slider sl = new Slider(c, value, min, max);
-        if (cb != null) sl.setOnChange(cb);
         sl.setOnChange(new Slider.OnChange() {
             @Override public void onChange(float v) {
                 val.setText(fmt(v) + (unit == null ? "" : unit));
