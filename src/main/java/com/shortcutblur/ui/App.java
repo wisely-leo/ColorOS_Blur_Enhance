@@ -7,7 +7,7 @@ public class App extends Application {
     public void onCreate() {
         super.onCreate();
         sApp = this;
-        lg("=== App.onCreate (v45.4-ui) pid=" + android.os.Process.myPid() + " ===");
+        lg("=== App.onCreate (v45.5-ui) pid=" + android.os.Process.myPid() + " ===");
         try {
             lg("环境: Android " + android.os.Build.VERSION.RELEASE
                     + " (SDK " + android.os.Build.VERSION.SDK_INT + ")"

@@ -63,7 +63,7 @@ public class BlurEnhanceModule extends XposedModule {
     private static volatile boolean sScreenReceiverInstalled = false;
     private static volatile boolean sConfReceiverInstalled = false;
     private static final String ACTION_SETCONF = "com.wiselyleo.blurenhance.SETCONF";
-    private static final String BUILD_TAG = "v45.4";
+    private static final String BUILD_TAG = "v45.5";
     private volatile boolean installed = false;
     private final java.util.WeakHashMap<android.view.View, String> sLastClockText = new java.util.WeakHashMap<android.view.View, String>();
     private volatile boolean postEffectInstalled = false;
