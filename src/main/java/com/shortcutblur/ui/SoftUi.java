@@ -162,60 +162,91 @@ public final class SoftUi {
                 TypedValue.COMPLEX_UNIT_DIP, v, c.getResources().getDisplayMetrics()));
     }
 
-    public static void pressFeedback(View v) {
-        pressFeedback(v, PRESS_FILL, PRESS_RADIUS, true, true);
+    public static void markPressable(View v) {
+        if (v == null) return;
+        v.setClickable(true);
+        v.setFocusable(true);
+        try { v.setTag(PRESS_TAG, Boolean.TRUE); } catch (Throwable ignored) {}
+
+        schedulePressGroupRefresh(v);
     }
 
-    public static void pressFeedback(View v, int fillColor, float radiusDp,
-                                     boolean roundTop, boolean roundBottom) {
-        if (v == null) return;
+    static boolean isPressable(View v) {
+        if (v == null) return false;
+        Object t = v.getTag(PRESS_TAG);
+        return t instanceof Boolean && (Boolean) t;
+    }
 
+    static final int PRESS_TAG = "softui_press".hashCode();
+
+    public static void markRowGroup(View v) {
+        if (v == null) return;
+        try { v.setTag(TAG_GROUP, Boolean.TRUE); } catch (Throwable ignored) {}
+
+        if (v instanceof ViewGroup) {
+            try { ((ViewGroup) v).setClipChildren(false); ((ViewGroup) v).setClipToPadding(false); }
+            catch (Throwable ignored) {}
+        }
+    }
+
+    static boolean isRowGroup(View v) {
+        if (v == null) return false;
+        Object t = v.getTag(TAG_GROUP);
+        return t instanceof Boolean && (Boolean) t;
+    }
+
+    static final int TAG_GROUP = "softui_row_group".hashCode();
+
+    static void applyPressFeedback(View v, boolean roundTop, boolean roundBottom) {
+        if (v == null) return;
         final Context c = v.getContext();
         final int ex = dp(c, PAD);
         final int topEx = roundTop ? dp(c, PAD / 2f) : 0;
         final int botEx = roundBottom ? dp(c, PAD / 2f) : 0;
-        final float rt = roundTop ? radiusDp : 0f;
-        final float rb = roundBottom ? radiusDp : 0f;
+        final float rt = roundTop ? PRESS_RADIUS : 0f;
+        final float rb = roundBottom ? PRESS_RADIUS : 0f;
         android.graphics.drawable.StateListDrawable sl =
                 new android.graphics.drawable.StateListDrawable();
         sl.addState(new int[]{android.R.attr.state_pressed},
-                inset(pressShape(c, fillColor, rt, rb), -ex, -topEx, -ex, -botEx));
+                inset(pressShape(c, PRESS_FILL, rt, rb), -ex, -topEx, -ex, -botEx));
         sl.addState(new int[]{android.R.attr.state_focused},
-                inset(pressShape(c, fillColor, rt, rb), -ex, -topEx, -ex, -botEx));
+                inset(pressShape(c, PRESS_FILL, rt, rb), -ex, -topEx, -ex, -botEx));
         sl.addState(new int[]{},
                 inset(pressShape(c, 0x00000000, rt, rb), -ex, -topEx, -ex, -botEx));
         v.setBackground(sl);
         v.setClickable(true);
         v.setFocusable(true);
-
-        unclampAncestors(v);
-
-        try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable ignored) {}
     }
 
-    private static void unclampAncestors(View v) {
-        try {
-            android.view.ViewParent p = v == null ? null : v.getParent();
-            if (p == null) {
+    public static void pressFeedback(View v) {
+        markPressable(v);
+        applyPressFeedback(v, true, true);
+    }
 
-                if (v != null) {
-                    v.post(new Runnable() {
-                        @Override public void run() { unclampAncestors(v); }
-                    });
-                }
+    public static void pressFeedback(View v, int fillColor, float radiusDp,
+                                     boolean roundTop, boolean roundBottom) {
+        markPressable(v);
+        applyPressFeedback(v, roundTop, roundBottom);
+    }
+
+    private static void schedulePressGroupRefresh(final View v) {
+        if (v == null) return;
+        try {
+            final android.view.ViewParent p = v.getParent();
+            if (p == null) {
+                v.post(new Runnable() {
+                    @Override public void run() { schedulePressGroupRefresh(v); }
+                });
                 return;
             }
-            int guard = 0;
-            while (p instanceof ViewGroup && guard++ < 8) {
-                ViewGroup g = (ViewGroup) p;
-                boolean changed = g.getClipChildren() || g.getClipToPadding();
-                if (changed) {
-                    g.setClipChildren(false);
-                    g.setClipToPadding(false);
-                }
 
-                if (!changed) break;
-                p = g.getParent();
+            android.view.ViewParent cur = p;
+            while (cur instanceof View) {
+                if (cur instanceof Card) {
+                    ((Card) cur).postRefreshPressGroup();
+                    return;
+                }
+                cur = ((View) cur).getParent();
             }
         } catch (Throwable ignored) {}
     }
@@ -927,50 +958,43 @@ public final class SoftUi {
 
             inner.setClipToPadding(false);
         }
-        private static final int TAG_PRESS = "softui_press".hashCode();
 
-        public void applyEdgeInsets(float insetDp) {
-            final int n = inner.getChildCount();
-            for (int i = 0; i < n; i++) {
-                View ch = inner.getChildAt(i);
-                Object tag = ch.getTag(TAG_PRESS);
-                if (!(tag instanceof Boolean) || !((Boolean) tag)) continue;
-                boolean t = (i == 0), b = (i == n - 1);
-                String pos = (t && b) ? "single" : (t ? "first" : (b ? "last" : "mid"));
-                applyPressShape(ch, pos);
+        public void refreshPressGroup() {
+            java.util.List<View> rows = new java.util.ArrayList<>();
+            collectRows(inner, rows);
+            final int m = rows.size();
+            for (int k = 0; k < m; k++) {
+                View ch = rows.get(k);
 
-                View p = (ch instanceof ViewGroup) ? ch : null;
-                if (p != null) {
-                    ((ViewGroup) p).setClipChildren(false);
-                    ((ViewGroup) p).setClipToPadding(false);
-                }
-                android.view.ViewParent vp = ch.getParent();
-                while (vp instanceof ViewGroup && vp != inner) {
-                    ((ViewGroup) vp).setClipChildren(false);
-                    ((ViewGroup) vp).setClipToPadding(false);
-                    vp = ((View) vp).getParent();
+                boolean first = (k == 0), last = (k == m - 1);
+                if (SoftUi.isPressable(ch)) {
+                    SoftUi.applyPressFeedback(ch, first, last);
                 }
             }
             inner.setClipChildren(false);
         }
 
-        static void applyPressShape(View v, String pos) {
-            int fill = SoftUi.PRESS_FILL;
-            float r = SoftUi.PRESS_RADIUS;
-            boolean rt, rb;
-            switch (pos) {
-                case "single": rt = true;  rb = true;  break;
-                case "first":  rt = true;  rb = false; break;
-                case "last":   rt = false; rb = true;  break;
-                default:       rt = false; rb = false; break;
+        private static void collectRows(ViewGroup parent, java.util.List<View> out) {
+            if (parent == null) return;
+            final int n = parent.getChildCount();
+            for (int i = 0; i < n; i++) {
+                View ch = parent.getChildAt(i);
+                if (ch.getVisibility() != View.VISIBLE) continue;
+                if (SoftUi.isPressable(ch)) {
+                    out.add(ch);
+                } else if (SoftUi.isRowGroup(ch)) {
+                    ((ViewGroup) ch).setClipChildren(false);
+                    ((ViewGroup) ch).setClipToPadding(false);
+                    collectRows((ViewGroup) ch, out);
+                } else {
+                    out.add(ch);
+                }
             }
-            SoftUi.pressFeedback(v, fill, r, rt, rb);
-v.setTag(TAG_PRESS, Boolean.TRUE);
         }
         @Override public void addView(View child, int index, ViewGroup.LayoutParams params) {
             if (inner != null && child != inner) {
                 inner.addView(child, params);
-                scheduleEdgeInsets();
+                postRefreshPressGroup();
                 return;
             }
             super.addView(child, index, params);
@@ -978,20 +1002,20 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
         @Override public void addView(View child) {
             if (inner != null && child != inner) {
                 inner.addView(child);
-                scheduleEdgeInsets();
+                postRefreshPressGroup();
                 return;
             }
             super.addView(child);
         }
+        private boolean pressGroupScheduled = false;
 
-        private boolean edgeInsetsScheduled = false;
-        private void scheduleEdgeInsets() {
-            if (edgeInsetsScheduled) return;
-            edgeInsetsScheduled = true;
+        public void postRefreshPressGroup() {
+            if (pressGroupScheduled) return;
+            pressGroupScheduled = true;
             post(new Runnable() {
                 @Override public void run() {
-                    edgeInsetsScheduled = false;
-                    applyEdgeInsets(-1f);
+                    pressGroupScheduled = false;
+                    refreshPressGroup();
                 }
             });
         }
@@ -1034,7 +1058,7 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
             if (sw == null) return this;
             setClickable(true);
             setFocusable(true);
-            pressFeedback(this);
+            markPressable(this);
             setOnClickListener(v -> sw.setChecked(!sw.isChecked()));
             return this;
         }
@@ -1052,7 +1076,7 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
             }
             setClickable(true);
             setFocusable(true);
-            pressFeedback(this);
+            markPressable(this);
             setOnClickListener(v -> {
                 if (right instanceof Switch) {
                     Switch sw = (Switch) right;
@@ -1534,7 +1558,7 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
             card.addView(v, lp);
         }
 
-        card.applyEdgeInsets(-1f);
+        card.refreshPressGroup();
         return card;
     }
     public static View toggle(Context c, String title, boolean checked,
@@ -1545,6 +1569,7 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
                                               Switch.OnToggle cb, final View... dependents) {
         final LinearLayout holder = new LinearLayout(c);
         holder.setOrientation(LinearLayout.VERTICAL);
+        SoftUi.markRowGroup(holder);
         for (View d : dependents) {
             holder.addView(d, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -1598,15 +1623,14 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
             });
             va.addListener(new android.animation.AnimatorListenerAdapter() {
                 @Override public void onAnimationEnd(android.animation.Animator a) {
-
                     lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
                     holder.setLayoutParams(lp);
+                    reapplyEdgeInsets(holder);
                 }
             });
             holder.setTag(FOLD_ANIM_TAG, va);
             va.start();
         } else {
-
             reapplyEdgeInsets(holder);
             int fromH = holder.getHeight() > 0 ? holder.getHeight() : measureContentHeight(holder);
             ValueAnimator va = ValueAnimator.ofInt(fromH, 0);
@@ -1618,10 +1642,11 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
             });
             va.addListener(new android.animation.AnimatorListenerAdapter() {
                 @Override public void onAnimationEnd(android.animation.Animator a) {
-
                     lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
                     holder.setLayoutParams(lp);
                     holder.setVisibility(View.GONE);
+
+                    reapplyEdgeInsets(holder);
                 }
             });
             holder.setTag(FOLD_ANIM_TAG, va);
@@ -1634,7 +1659,7 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
         try {
             android.view.ViewParent p = v == null ? null : v.getParent();
             while (p instanceof android.view.View) {
-                if (p instanceof Card) { ((Card) p).applyEdgeInsets(-1f); return; }
+                if (p instanceof Card) { ((Card) p).postRefreshPressGroup(); return; }
                 p = ((android.view.View) p).getParent();
             }
         } catch (Throwable ignored) {}
@@ -2252,7 +2277,7 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
     public static Row link(Context c, String title, final OnClick cb) {
         TextView arrow = text(c, "›", BODY_SIZE + 4, TEXT_SECONDARY);
         Row r = new Row(c, title, arrow, false);
-        pressFeedback(r);
+        markPressable(r);
         r.setOnClickListener(v -> { if (cb != null) cb.onClick(); });
         return r;
     }
@@ -2261,7 +2286,7 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
     }
     public static Row action(Context c, String title, View right, final OnClick cb) {
         Row r = new Row(c, title, right, false);
-        pressFeedback(r);
+        markPressable(r);
         r.setOnClickListener(v -> { if (cb != null) cb.onClick(); });
         return r;
     }
@@ -2296,7 +2321,7 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
         outer.setGravity(Gravity.CENTER_VERTICAL);
         outer.addView(line, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        pressFeedback(outer);
+        markPressable(outer);
         outer.setOnClickListener(v -> { if (cb != null) cb.onClick(); });
         return outer;
     }
@@ -2310,7 +2335,7 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
         alp.leftMargin = dp(c, 6f);
         wrap.addView(arrow, alp);
         Row r = new Row(c, title, wrap, false);
-        pressFeedback(r);
+        markPressable(r);
         r.setOnClickListener(v -> { if (cb != null) cb.onClick(); });
         return r;
     }
@@ -2366,7 +2391,7 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
                 ViewGroup.LayoutParams.WRAP_CONTENT));
         col.setClickable(true);
         col.setFocusable(true);
-        pressFeedback(col);
+        markPressable(col);
         col.setOnClickListener(v -> { if (cb != null) cb.onClick(); });
         return col;
     }
