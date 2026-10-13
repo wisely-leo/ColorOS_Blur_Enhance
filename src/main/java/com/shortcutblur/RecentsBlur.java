@@ -21,7 +21,7 @@ final class RecentsBlur {
     private static volatile boolean sStateInOverview = false;
     private static volatile float RECENTS_BLUR_MAX = 64.0f;
 
-    private static volatile float sScaleClampMin = 0.92f;
+    private static volatile float sScaleClampMin = 0.96f;
     private static volatile long sConfLastRead = 0L;
     private static final String CONF_PATH = "/sdcard/Download/ColorOSBlurEnhance.conf";
     private static volatile boolean sAnchorUseWorkspace = false;
