@@ -64,6 +64,22 @@ public final class SoftUi {
     public static int   PRESS_FILL        = 0x14000000;
     public static int   PRESS_FILL_STRONG = 0x1F000000;
     public static float PRESS_RADIUS      = 22f;
+
+    /**
+     * 全局按压色覆盖（复用性）：非 null 时，所有未显式指定按压色的行都用它，
+     * 且不再随深浅色主题自动切换。null = 使用主题默认 PRESS_FILL。
+     */
+    public static Integer PRESS_FILL_OVERRIDE = null;
+
+    /** 设置全局按压色（影响所有未单独指定色的行与卡片）。传 null 恢复主题默认。 */
+    public static void setGlobalPressFill(Integer color) {
+        PRESS_FILL_OVERRIDE = color;
+    }
+
+    /** 当前生效的默认按压色（主题色 / 全局覆盖）。 */
+    static int defaultPressFill() {
+        return PRESS_FILL_OVERRIDE != null ? PRESS_FILL_OVERRIDE : PRESS_FILL;
+    }
     public static float FOOTER_H   = 64f;
     public static float TAB_SIZE   = 15f;
     public static int   TAB_SEL    = 0xFF007AFF;
@@ -170,10 +186,22 @@ public final class SoftUi {
 
     /** 声明某行"可按下"。只打标记 + 绑定可点击性，样式留待组容器统一分配。 */
     public static void markPressable(View v) {
+        markPressable(v, null);
+    }
+
+    /**
+     * 声明某行"可按下"，并可选指定该行的按压色（null = 跟随所在按压组 / 全局默认）。
+     * 复用性：外部项目可传入自己的主题按压色，而无需改 SoftUi 全局常量。
+     */
+    public static void markPressable(View v, Integer fillColor) {
         if (v == null) return;
         v.setClickable(true);
         v.setFocusable(true);
-        try { v.setTag(PRESS_TAG, Boolean.TRUE); } catch (Throwable ignored) {}
+        try {
+            v.setTag(PRESS_TAG, Boolean.TRUE);
+            if (fillColor != null) v.setTag(PRESS_FILL_TAG, fillColor);
+        } catch (Throwable ignored) {}
+
         // 未挂载时下一帧再请求（挂载后由 Card.addView 也会触发）。
         schedulePressGroupRefresh(v);
     }
@@ -186,6 +214,16 @@ public final class SoftUi {
     }
 
     static final int PRESS_TAG = "softui_press".hashCode();
+
+    /** 行级按压色标签；未设置则回退到所在按压组 / 全局默认。 */
+    static final int PRESS_FILL_TAG = "softui_press_fill".hashCode();
+
+    /** 读取行级自定义按压色；未设置返回 null。 */
+    static Integer getPressFill(View v) {
+        if (v == null) return null;
+        Object t = v.getTag(PRESS_FILL_TAG);
+        return (t instanceof Integer) ? (Integer) t : null;
+    }
 
     /** 标记某个容器为"行的容器"（其子项与相邻行同属一个按压组，应向下展开参与排序）。 */
     public static void markRowGroup(View v) {
@@ -212,6 +250,18 @@ public final class SoftUi {
      * 负 inset 向四周扩出 PAD，使高亮覆盖整行边界（含卡片内边距）。
      */
     static void applyPressFeedback(View v, boolean roundTop, boolean roundBottom) {
+        applyPressFeedback(v, roundTop, roundBottom, null);
+    }
+
+    /**
+     * 应用按压反馈外观（组容器统一调用，不对外暴露）。
+     * 负 inset 向四周扩出 PAD，使高亮覆盖整行边界（含卡片内边距）。
+     *
+     * @param groupFill 所在按压组的按压色（卡片级），null = 用全局 PRESS_FILL；
+     *                  行的自定义色（setPressFill）优先级更高。
+     */
+    static void applyPressFeedback(View v, boolean roundTop, boolean roundBottom,
+                                   Integer groupFill) {
         if (v == null) return;
         final Context c = v.getContext();
         final int ex = dp(c, PAD);
@@ -219,12 +269,15 @@ public final class SoftUi {
         final int botEx = roundBottom ? dp(c, PAD / 2f) : 0;
         final float rt = roundTop ? PRESS_RADIUS : 0f;
         final float rb = roundBottom ? PRESS_RADIUS : 0f;
+        // 颜色优先级：行级自定义 > 所在组（卡片级）> 全局覆盖 / 主题默认
+        Integer rowFill = getPressFill(v);
+        final int fill = rowFill != null ? rowFill : (groupFill != null ? groupFill : defaultPressFill());
         android.graphics.drawable.StateListDrawable sl =
                 new android.graphics.drawable.StateListDrawable();
         sl.addState(new int[]{android.R.attr.state_pressed},
-                inset(pressShape(c, PRESS_FILL, rt, rb), -ex, -topEx, -ex, -botEx));
+                inset(pressShape(c, fill, rt, rb), -ex, -topEx, -ex, -botEx));
         sl.addState(new int[]{android.R.attr.state_focused},
-                inset(pressShape(c, PRESS_FILL, rt, rb), -ex, -topEx, -ex, -botEx));
+                inset(pressShape(c, fill, rt, rb), -ex, -topEx, -ex, -botEx));
         sl.addState(new int[]{},
                 inset(pressShape(c, 0x00000000, rt, rb), -ex, -topEx, -ex, -botEx));
         v.setBackground(sl);
@@ -238,10 +291,11 @@ public final class SoftUi {
         applyPressFeedback(v, true, true);
     }
 
+    /** 兼容旧签名：现在 fillColor 会真正生效（行级自定义按压色）。 */
     public static void pressFeedback(View v, int fillColor, float radiusDp,
                                      boolean roundTop, boolean roundBottom) {
-        markPressable(v);
-        applyPressFeedback(v, roundTop, roundBottom);
+        markPressable(v, fillColor);
+        applyPressFeedback(v, roundTop, roundBottom, fillColor);
     }
 
     /** 请求最近按压组容器重算圆角；未挂载时等下一帧再试。 */
@@ -991,10 +1045,30 @@ public final class SoftUi {
                 // 这样开关行下方若接有其它行，就不会误判为"全圆角"。
                 boolean first = (k == 0), last = (k == m - 1);
                 if (SoftUi.isPressable(ch)) {
-                    SoftUi.applyPressFeedback(ch, first, last);
+                    SoftUi.applyPressFeedback(ch, first, last, cardPressFill);
                 }
             }
             inner.setClipChildren(false);
+        }
+
+        /** 卡片级按压色（null = 跟随全局 PRESS_FILL）。 */
+        private Integer cardPressFill = null;
+
+        /**
+         * 设置本卡片内所有可按下行的按压色（卡片级覆盖）。
+         * 复用性：外部项目可整卡换色；单独的行仍可用 markPressable(v, color) 覆盖。
+         */
+        public Card setPressFill(int color) {
+            cardPressFill = color;
+            postRefreshPressGroup();
+            return this;
+        }
+
+        /** 清除卡片级按压色，恢复全局默认。 */
+        public Card clearPressFill() {
+            cardPressFill = null;
+            postRefreshPressGroup();
+            return this;
         }
         /**
          * 递归收集一组「可见行」（按视觉顺序，用于首/中/尾圆角判定）。
@@ -1089,9 +1163,32 @@ public final class SoftUi {
             if (sw == null) return this;
             setClickable(true);
             setFocusable(true);
-            markPressable(this);
+            markPressable(this, rowPressFill);
             setOnClickListener(v -> sw.setChecked(!sw.isChecked()));
             return this;
+        }
+
+        /** 行级自定义按压色（链式）；null = 跟随卡片/全局。 */
+        private Integer rowPressFill = null;
+
+        /** 设置本行的按压色，便于在外部项目复用统一组件时自定义高亮色。 */
+        public Row pressFill(int color) {
+            rowPressFill = color;
+            setTag(PRESS_FILL_TAG, (Integer) color);
+            requestRefresh();
+            return this;
+        }
+
+        /** 清除行级按压色，恢复卡片/全局默认。 */
+        public Row clearPressFill() {
+            rowPressFill = null;
+            setTag(PRESS_FILL_TAG, (Integer) null);
+            requestRefresh();
+            return this;
+        }
+
+        private void requestRefresh() {
+            SoftUi.schedulePressGroupRefresh(this);
         }
 
         public Switch switchView() {
@@ -1107,7 +1204,7 @@ public final class SoftUi {
             }
             setClickable(true);
             setFocusable(true);
-            markPressable(this);
+            markPressable(this, rowPressFill);
             setOnClickListener(v -> {
                 if (right instanceof Switch) {
                     Switch sw = (Switch) right;
@@ -2311,6 +2408,11 @@ public final class SoftUi {
         markPressable(r);
         r.setOnClickListener(v -> { if (cb != null) cb.onClick(); });
         return r;
+    }
+
+    /** 带自定义按压色的 link（复用性：外部项目可指定高亮色）。 */
+    public static Row link(Context c, String title, int pressFillColor, final OnClick cb) {
+        return link(c, title, cb).pressFill(pressFillColor);
     }
     public static TextView statusText(Context c, String s) {
         return text(c, s == null ? "" : s, SUB_SIZE, TEXT_SECONDARY);
