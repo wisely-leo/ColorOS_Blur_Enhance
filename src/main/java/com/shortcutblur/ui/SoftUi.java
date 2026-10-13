@@ -1275,7 +1275,7 @@ public final class SoftUi {
         private Backdrop() {}
         static void setSource(android.graphics.Bitmap b, View anchorView) {
             if (src != b) {
-                Effects.logDiag("壁纸登记: " + (b == null ? "null"
+                SoftUi.diag("壁纸登记: " + (b == null ? "null"
                         : b.getWidth() + "x" + b.getHeight()
                           + " id=" + Integer.toHexString(System.identityHashCode(b))));
             }
@@ -1373,7 +1373,7 @@ public final class SoftUi {
         }
         private void applyNativeBlur() {
             if (android.os.Build.VERSION.SDK_INT < 31) {
-                Effects.logDiag("API<31：系统无 RenderEffect，玻璃层降级为不模糊");
+                SoftUi.diag("API<31：系统无 RenderEffect，玻璃层降级为不模糊");
                 return;
             }
             float px = Math.max(0.1f, dp(getContext(), radiusDp));
@@ -1381,13 +1381,13 @@ public final class SoftUi {
                 painter.setRenderEffect(android.graphics.RenderEffect.createBlurEffect(
                         px, px, android.graphics.Shader.TileMode.CLAMP));
             } catch (Throwable t) {
-                Effects.logDiag("setRenderEffect 失败: " + t);
+                SoftUi.diag("setRenderEffect 失败: " + t);
             }
         }
         public void start() {
             if (started) return;
             started = true;
-            Effects.logDiag("玻璃层启动: " + getClass().getSimpleName()
+            SoftUi.diag("玻璃层启动: " + getClass().getSimpleName()
                     + " r=" + radiusDp + "dp corner=" + cornerDp
                     + " 原生模糊=" + (android.os.Build.VERSION.SDK_INT >= 31));
             final Runnable bind = () -> {
@@ -1571,7 +1571,7 @@ public final class SoftUi {
                 sc.post(() -> { pending = false; tick(); });
             };
             tvo.addOnScrollChangedListener(hookListener);
-            Effects.logDiag("滚动监听挂载: sv@" + Integer.toHexString(System.identityHashCode(sc))
+            SoftUi.diag("滚动监听挂载: sv@" + Integer.toHexString(System.identityHashCode(sc))
                     + " tvo@" + Integer.toHexString(System.identityHashCode(tvo)));
         }
         private static void tick() {
@@ -1586,9 +1586,11 @@ public final class SoftUi {
             }
             if (ticks <= 3 || ticks % 120 == 0) {
                 View h = hooked == null ? null : hooked.get();
-                Effects.logDiag("tick#" + ticks + " 层数=" + alive + " scrollY="
-                        + (h instanceof android.widget.ScrollView
-                            ? ((android.widget.ScrollView) h).getScrollY() : -1));
+                if (SoftUi.DIAG) {
+                    SoftUi.diag("tick#" + ticks + " 层数=" + alive + " scrollY="
+                            + (h instanceof android.widget.ScrollView
+                                ? ((android.widget.ScrollView) h).getScrollY() : -1));
+                }
             }
         }
         static void refresh() {
@@ -1627,6 +1629,11 @@ public final class SoftUi {
         @Override public void setColorFilter(android.graphics.ColorFilter f) { fill.setColorFilter(f); }
         @Override public int getOpacity() { return android.graphics.PixelFormat.TRANSLUCENT; }
     }
+
+    /**
+     * 视觉特效（单一职责：只负责"怎么画"）。
+     * 诊断日志不再自建实现 —— 见 {@link #diag(String)}，直接复用 ui.UiLog。
+     */
     static final class Effects {
         static boolean selfBlur(View v, float r) {
             if (android.os.Build.VERSION.SDK_INT < 31) return false;
@@ -1639,35 +1646,23 @@ public final class SoftUi {
                 return false;
             }
         }
-        static boolean FILE_LOGGING = false;
-        private static final java.util.concurrent.atomic.AtomicBoolean BUSY =
-                new java.util.concurrent.atomic.AtomicBoolean(false);
-        static void logDiag(String s) {
-            android.util.Log.i("SoftUi", s);
-            if (!FILE_LOGGING) return;
-            if (!BUSY.compareAndSet(false, true)) return;
-            try {
-                for (String d : new String[]{
-                        "/storage/emulated/0/Download",
-                        "/sdcard/Download",
-                        "/storage/emulated/0"}) {
-                    java.io.File dir = new java.io.File(d);
-                    if (!dir.exists() || !dir.canWrite()) continue;
-                    java.io.OutputStreamWriter w = new java.io.OutputStreamWriter(
-                            new java.io.FileOutputStream(
-                                    new java.io.File(dir, "UiStartup.log"), true),
-                            "UTF-8");
-                    w.write("[fx] " + s + "\n");
-                    w.flush();
-                    w.close();
-                    return;
-                }
-            } catch (Throwable ignored) {
-            } finally {
-                BUSY.set(false);
-            }
-        }
     }
+
+    /**
+     * SoftUi 的诊断输出开关。false 时 {@link #diag(String)} 直接返回，零开销。
+     */
+    static boolean DIAG = true;
+
+    /**
+     * 诊断日志统一入口：只做 logcat + 委托给既有的 {@code com.shortcutblur.ui.UiLog}
+     * （持久 Writer + 2MB 轮转）。原先 Effects 内自带一份重复实现，已删除。
+     */
+    static void diag(String s) {
+        if (!DIAG) return;
+        android.util.Log.i("SoftUi", s);
+        UiLog.write("[fx] " + s);
+    }
+
     public static void stack(LinearLayout root, View... children) {
         Context c = root.getContext();
         for (int i = 0; i < children.length; i++) {
@@ -2614,11 +2609,11 @@ public final class SoftUi {
             try {
                 blurBehind(bar, sample, HEADER_BLUR, true);
                 bar.setBackgroundColor(0x00000000);
-                Effects.logDiag("header.post: 毛玻璃（壁纸+内容）"
+                SoftUi.diag("header.post: 毛玻璃（壁纸+内容）"
                         + " bar=" + bar.getWidth() + "x" + bar.getHeight()
                         + " children=" + bar.getChildCount());
             } catch (Throwable t2) {
-                Effects.logDiag("header.post 失败: " + t2);
+                SoftUi.diag("header.post 失败: " + t2);
             }
         });
         return bar;
@@ -2678,7 +2673,7 @@ public final class SoftUi {
                         sbh + dp(c, HEADER_H));
         blp.gravity = Gravity.TOP;
         shell.addView(bar, blp);
-        Effects.logDiag("scrollingScreen 构建: HEADER_H(dp)=" + HEADER_H
+        SoftUi.diag("scrollingScreen 构建: HEADER_H(dp)=" + HEADER_H
                 + " statusBar(px)=" + sbh
                 + " padTop(px)=" + (sbh + dp(c, HEADER_H) + dp(c, HEADER_GAP))
                 + " headerH(px)=" + (sbh + dp(c, HEADER_H))
