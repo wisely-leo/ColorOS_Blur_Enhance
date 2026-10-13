@@ -891,6 +891,12 @@ final class RecentsBlur {
                     } else if (line.startsWith("anchorMode")) {
                         int i = line.indexOf('=');
                         if (i > 0) sAnchorUseWorkspace = line.substring(i + 1).trim().equalsIgnoreCase("workspace");
+                    } else if (line.startsWith("blur_max")) {
+                        int i = line.indexOf('=');
+                        if (i > 0) {
+                            float v3 = Float.parseFloat(line.substring(i + 1).trim());
+                            if (v3 >= 0f && v3 <= 200f) RECENTS_BLUR_MAX = v3;
+                        }
                     }
                 }
                 sConfErrorLogged = false;
