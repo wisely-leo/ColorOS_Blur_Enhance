@@ -11,6 +11,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import io.github.libxposed.api.XposedInterface;
 import static com.shortcutblur.BlurLib.*;
+import static com.shortcutblur.Symbols.*;
 final class RecentsBlur {
     private RecentsBlur() {}
     public interface HookApi {

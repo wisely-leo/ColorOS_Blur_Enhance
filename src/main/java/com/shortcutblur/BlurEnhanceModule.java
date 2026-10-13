@@ -22,6 +22,7 @@ import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedModule;
 import io.github.libxposed.api.XposedModuleInterface;
 import static com.shortcutblur.BlurLib.*;
+import static com.shortcutblur.Symbols.*;
 public class BlurEnhanceModule extends XposedModule {
     private final RecentsBlur.HookApi recentsApi = new RecentsBlur.HookApi() {
         @Override public void hook(String id, Executable target, XposedInterface.Hooker hooker) {
@@ -34,25 +35,10 @@ public class BlurEnhanceModule extends XposedModule {
     public void hookPublic(String id, Executable target, XposedInterface.Hooker hooker) {
         hookEx(id, target, hooker);
     }
-
-    private static final String CLS_POPUP_BLUR_VIEW = Symbols.CLS_POPUP_BLUR_VIEW;
-    private static final String CLS_OPLUS_POPUP = Symbols.CLS_OPLUS_POPUP;
-    private static final String CLS_ARROW_POPUP = Symbols.CLS_ARROW_POPUP;
-    private static final String CLS_OPLUS_EFFECT = Symbols.CLS_OPLUS_EFFECT;
-    private static final String CLS_DRAWABLE = Symbols.CLS_DRAWABLE;
-    private static final String CLS_OBJECT_ANIMATOR = Symbols.CLS_OBJECT_ANIMATOR;
-    private static final String CLS_PROPERTY = Symbols.CLS_PROPERTY;
-    private static final String CLS_ANIMATOR_SET = Symbols.CLS_ANIMATOR_SET;
-    private static final String CLS_ANIMATOR = Symbols.CLS_ANIMATOR;
-    private static final String CLS_TIME_INTERPOLATOR = Symbols.CLS_TIME_INTERPOLATOR;
-    private static final String CLS_DECELERATE = Symbols.CLS_DECELERATE;
-    private static final String M_GET_POP_BLUR_VIEW = Symbols.M_GET_POP_BLUR_VIEW;
     private static final String PKG_POSTEFFECT = "com.oplus.blur";
     private static final String PKG_QUICKSEARCH = "com.heytap.quicksearchbox";
     private static final String PKG_CLOCK = "com.coloros.alarmclock";
     private static final String PKG_YUYAN = "com.yuyan.pinyin.offline.release";
-    private static final String CLS_EA = Symbols.CLS_EA;
-    private static final String CLS_BLUR_MGR = Symbols.CLS_BLUR_MGR;
     private static final float BLUR_RADIUS = 64.0f;
     private static final long BLUR_DURATION = 330L;
     private static final int F_STATIC = 1 << 0;

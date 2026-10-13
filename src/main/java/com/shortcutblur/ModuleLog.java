@@ -63,6 +63,21 @@ public final class ModuleLog {
                 c = new java.util.concurrent.atomic.AtomicInteger();
                 java.util.concurrent.atomic.AtomicInteger prev = SWALLOWED.putIfAbsent(tag, c);
                 if (prev != null) c = prev;
+
+                if (prev == null) {
+                    String detail = "swallow[" + tag + "] first";
+                    if (t != null) {
+                        detail += " " + t.getClass().getSimpleName() + ":" + t.getMessage();
+                        try {
+                            StackTraceElement[] st = t.getStackTrace();
+                            if (st != null && st.length > 0) {
+                                detail += "@" + st[0].getClassName() + "." + st[0].getMethodName()
+                                        + ":" + st[0].getLineNumber();
+                            }
+                        } catch (Throwable ignored) {}
+                    }
+                    d("SWALLOW", detail);
+                }
             }
             c.incrementAndGet();
         } catch (Throwable ignored) {
