@@ -162,67 +162,107 @@ public final class SoftUi {
                 TypedValue.COMPLEX_UNIT_DIP, v, c.getResources().getDisplayMetrics()));
     }
 
-    public static void pressFeedback(View v) {
-        pressFeedback(v, PRESS_FILL, PRESS_RADIUS, true, true);
+    // ============ 按压反馈（统一系统） ============
+    // 设计：所有「可点击行」只调用 markPressable() 声明自己可按下，
+    //       由所在的按压组容器（Card）在内容稳定后统一 refreshPressGroup()，
+    //       保证同一张卡片内所有行的按压反馈样式、圆角、边界完全一致。
+    //       工厂函数不再各自 setBackground，避免各卡片表现不一。
+
+    /** 声明某行"可按下"。只打标记 + 绑定可点击性，样式留待组容器统一分配。 */
+    public static void markPressable(View v) {
+        if (v == null) return;
+        v.setClickable(true);
+        v.setFocusable(true);
+        try { v.setTag(PRESS_TAG, Boolean.TRUE); } catch (Throwable ignored) {}
+        // 未挂载时下一帧再请求（挂载后由 Card.addView 也会触发）。
+        schedulePressGroupRefresh(v);
     }
 
-    public static void pressFeedback(View v, int fillColor, float radiusDp,
-                                     boolean roundTop, boolean roundBottom) {
-        if (v == null) return;
+    /** 是否已声明为可按下行。 */
+    static boolean isPressable(View v) {
+        if (v == null) return false;
+        Object t = v.getTag(PRESS_TAG);
+        return t instanceof Boolean && (Boolean) t;
+    }
 
+    static final int PRESS_TAG = "softui_press".hashCode();
+
+    /** 标记某个容器为"行的容器"（其子项与相邻行同属一个按压组，应向下展开参与排序）。 */
+    public static void markRowGroup(View v) {
+        if (v == null) return;
+        try { v.setTag(TAG_GROUP, Boolean.TRUE); } catch (Throwable ignored) {}
+        // 行容器本身不裁剪，避免负 inset 溢出被裁掉
+        if (v instanceof ViewGroup) {
+            try { ((ViewGroup) v).setClipChildren(false); ((ViewGroup) v).setClipToPadding(false); }
+            catch (Throwable ignored) {}
+        }
+    }
+
+    /** 是否为"行的容器"（应向下展开参与按压组排序）。 */
+    static boolean isRowGroup(View v) {
+        if (v == null) return false;
+        Object t = v.getTag(TAG_GROUP);
+        return t instanceof Boolean && (Boolean) t;
+    }
+
+    static final int TAG_GROUP = "softui_row_group".hashCode();
+
+    /**
+     * 应用按压反馈外观（组容器统一调用，不对外暴露）。
+     * 负 inset 向四周扩出 PAD，使高亮覆盖整行边界（含卡片内边距）。
+     */
+    static void applyPressFeedback(View v, boolean roundTop, boolean roundBottom) {
+        if (v == null) return;
         final Context c = v.getContext();
         final int ex = dp(c, PAD);
         final int topEx = roundTop ? dp(c, PAD / 2f) : 0;
         final int botEx = roundBottom ? dp(c, PAD / 2f) : 0;
-        final float rt = roundTop ? radiusDp : 0f;
-        final float rb = roundBottom ? radiusDp : 0f;
+        final float rt = roundTop ? PRESS_RADIUS : 0f;
+        final float rb = roundBottom ? PRESS_RADIUS : 0f;
         android.graphics.drawable.StateListDrawable sl =
                 new android.graphics.drawable.StateListDrawable();
         sl.addState(new int[]{android.R.attr.state_pressed},
-                inset(pressShape(c, fillColor, rt, rb), -ex, -topEx, -ex, -botEx));
+                inset(pressShape(c, PRESS_FILL, rt, rb), -ex, -topEx, -ex, -botEx));
         sl.addState(new int[]{android.R.attr.state_focused},
-                inset(pressShape(c, fillColor, rt, rb), -ex, -topEx, -ex, -botEx));
+                inset(pressShape(c, PRESS_FILL, rt, rb), -ex, -topEx, -ex, -botEx));
         sl.addState(new int[]{},
                 inset(pressShape(c, 0x00000000, rt, rb), -ex, -topEx, -ex, -botEx));
         v.setBackground(sl);
         v.setClickable(true);
         v.setFocusable(true);
-        // pressFeedback 用负 InsetDrawable 把按下高亮向外扩出 PAD，
-        // 需要父容器不裁剪该溢出区域，否则点按反馈只覆盖控件本身、无法铺满整行。
-        // 这里向上解除裁剪（遇已放开裁剪的容器即止，避免无谓遍历）。
-        unclampAncestors(v);
-
-        try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable ignored) {}
     }
 
-    /**
-     * 向上解除祖先容器的裁剪，使负 inset 的按压高亮能溢出到整行边界。
-     * 到已放开裁剪的容器（或非 ViewGroup）即停止。
-     */
-    private static void unclampAncestors(View v) {
+    /** 兼容旧调用：等价于 aplicar 外观（默认全圆角）。 */
+    public static void pressFeedback(View v) {
+        markPressable(v);
+        applyPressFeedback(v, true, true);
+    }
+
+    public static void pressFeedback(View v, int fillColor, float radiusDp,
+                                     boolean roundTop, boolean roundBottom) {
+        markPressable(v);
+        applyPressFeedback(v, roundTop, roundBottom);
+    }
+
+    /** 请求最近按压组容器重算圆角；未挂载时等下一帧再试。 */
+    private static void schedulePressGroupRefresh(final View v) {
+        if (v == null) return;
         try {
-            android.view.ViewParent p = v == null ? null : v.getParent();
+            final android.view.ViewParent p = v.getParent();
             if (p == null) {
-                // 尚未挂载到父级（pressFeedback 常在 addView 之前调用）：
-                // 下一帧重试一次，确保挂载后再解除裁剪。
-                if (v != null) {
-                    v.post(new Runnable() {
-                        @Override public void run() { unclampAncestors(v); }
-                    });
-                }
+                v.post(new Runnable() {
+                    @Override public void run() { schedulePressGroupRefresh(v); }
+                });
                 return;
             }
-            int guard = 0;
-            while (p instanceof ViewGroup && guard++ < 8) {
-                ViewGroup g = (ViewGroup) p;
-                boolean changed = g.getClipChildren() || g.getClipToPadding();
-                if (changed) {
-                    g.setClipChildren(false);
-                    g.setClipToPadding(false);
+            // 找到最近的 Card 容器，请求其刷新整组。
+            android.view.ViewParent cur = p;
+            while (cur instanceof View) {
+                if (cur instanceof Card) {
+                    ((Card) cur).postRefreshPressGroup();
+                    return;
                 }
-                // 已放开裁剪的容器，其上层通常也已放开，无需继续向上。
-                if (!changed) break;
-                p = g.getParent();
+                cur = ((View) cur).getParent();
             }
         } catch (Throwable ignored) {}
     }
@@ -295,14 +335,14 @@ public final class SoftUi {
         d.setCornerRadius(dp(c, radiusDp));
         return d;
     }
-    /** 圆角 + 填充 + 描边（strokeDp 单位 dp）。 */
+
     private static GradientDrawable roundRect(int fill, float radiusDp, int strokeColor,
                                              float strokeDp, Context c) {
         GradientDrawable d = roundRect(fill, radiusDp, c);
         if (strokeDp > 0f) d.setStroke(dp(c, strokeDp), strokeColor);
         return d;
     }
-    /** 水平居中行（orientation=HORIZONTAL + gravity=CENTER_VERTICAL）的公共构造。 */
+
     private static LinearLayout hRow(Context c) {
         LinearLayout l = new LinearLayout(c);
         l.setOrientation(LinearLayout.HORIZONTAL);
@@ -765,7 +805,6 @@ public final class SoftUi {
         return null;
     }
 
-    /** 取色弹窗：颜色预览 + 十六进制输入框 + 取消/确定。 */
     public static void colorPickerDialog(final View anchor, String title, int initialRgb,
                                          final ColorInputCb cb) {
         showPanel(anchor, title, 16f, new PanelBuilder() {
@@ -841,7 +880,6 @@ public final class SoftUi {
                     @Override public void afterTextChanged(android.text.Editable s2) { eval.accept(s2.toString()); }
                 });
 
-                // 确定：dismiss 后先做一次即时校验（eval），有效才回调
                 addDialogButtons(ctx, inner, "取消", "确定", dismiss, null, () -> {
                     try { eval.accept(et.getText().toString()); } catch (Throwable ignored) {}
                     if (result[1] == 1 && cb != null) cb.onColor(result[0], true);
@@ -936,50 +974,58 @@ public final class SoftUi {
 
             inner.setClipToPadding(false);
         }
-        private static final int TAG_PRESS = "softui_press".hashCode();
 
-        public void applyEdgeInsets(float insetDp) {
-            final int n = inner.getChildCount();
-            for (int i = 0; i < n; i++) {
-                View ch = inner.getChildAt(i);
-                Object tag = ch.getTag(TAG_PRESS);
-                if (!(tag instanceof Boolean) || !((Boolean) tag)) continue;
-                boolean t = (i == 0), b = (i == n - 1);
-                String pos = (t && b) ? "single" : (t ? "first" : (b ? "last" : "mid"));
-                applyPressShape(ch, pos);
-
-                View p = (ch instanceof ViewGroup) ? ch : null;
-                if (p != null) {
-                    ((ViewGroup) p).setClipChildren(false);
-                    ((ViewGroup) p).setClipToPadding(false);
-                }
-                android.view.ViewParent vp = ch.getParent();
-                while (vp instanceof ViewGroup && vp != inner) {
-                    ((ViewGroup) vp).setClipChildren(false);
-                    ((ViewGroup) vp).setClipToPadding(false);
-                    vp = ((View) vp).getParent();
+/**
+         * 刷新本卡片的「按压组」：把内部所有可见行按视觉顺序统一分配首/中/尾圆角，
+         * 并对其中"可按下"的行应用统一的按压反馈外观，同时放开必要裁剪。
+         * 这是按压反馈的唯一收敛点 —— 保证同一卡片内各行表现完全一致。
+         */
+        public void refreshPressGroup() {
+            java.util.List<View> rows = new java.util.ArrayList<>();
+            collectRows(inner, rows);
+            final int m = rows.size();
+            for (int k = 0; k < m; k++) {
+                View ch = rows.get(k);
+                // 位置判定基于「所有可见行」的视觉顺序：首行上圆、末行下圆、其余直角。
+                // 无 press 的行（slider / segmentRow 等）也参与判定，
+                // 这样开关行下方若接有其它行，就不会误判为"全圆角"。
+                boolean first = (k == 0), last = (k == m - 1);
+                if (SoftUi.isPressable(ch)) {
+                    SoftUi.applyPressFeedback(ch, first, last);
                 }
             }
             inner.setClipChildren(false);
         }
-
-        static void applyPressShape(View v, String pos) {
-            int fill = SoftUi.PRESS_FILL;
-            float r = SoftUi.PRESS_RADIUS;
-            boolean rt, rb;
-            switch (pos) {
-                case "single": rt = true;  rb = true;  break;
-                case "first":  rt = true;  rb = false; break;
-                case "last":   rt = false; rb = true;  break;
-                default:       rt = false; rb = false; break;
+        /**
+         * 递归收集一组「可见行」（按视觉顺序，用于首/中/尾圆角判定）。
+         * - 带 press 标记的子项：视作一行，收下且不展开其子树。
+         * - 不带标记的子项：
+         *   - 若是"行容器"（如 toggleWithDependents 的 holder），向下展开，
+         *     其中每一行都纳入同一组的顺序，同时放开其裁剪；
+         *   - 否则视作独立一行（slider / segmentRow / divider 等），也纳入顺序。
+         * - GONE 的内容不参与（折叠收起时依赖项不占位）。
+         */
+        private static void collectRows(ViewGroup parent, java.util.List<View> out) {
+            if (parent == null) return;
+            final int n = parent.getChildCount();
+            for (int i = 0; i < n; i++) {
+                View ch = parent.getChildAt(i);
+                if (ch.getVisibility() != View.VISIBLE) continue;
+                if (SoftUi.isPressable(ch)) {
+                    out.add(ch);
+                } else if (SoftUi.isRowGroup(ch)) {
+                    ((ViewGroup) ch).setClipChildren(false);
+                    ((ViewGroup) ch).setClipToPadding(false);
+                    collectRows((ViewGroup) ch, out);
+                } else {
+                    out.add(ch);   // 非 press 的独立行，参与首尾判定
+                }
             }
-            SoftUi.pressFeedback(v, fill, r, rt, rb);
-v.setTag(TAG_PRESS, Boolean.TRUE);
         }
         @Override public void addView(View child, int index, ViewGroup.LayoutParams params) {
             if (inner != null && child != inner) {
                 inner.addView(child, params);
-                scheduleEdgeInsets();
+                postRefreshPressGroup();
                 return;
             }
             super.addView(child, index, params);
@@ -987,27 +1033,20 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
         @Override public void addView(View child) {
             if (inner != null && child != inner) {
                 inner.addView(child);
-                scheduleEdgeInsets();
+                postRefreshPressGroup();
                 return;
             }
             super.addView(child);
         }
-        /**
-         * 自动重算按压高亮边界。
-         * pressFeedback 用负 InsetDrawable 把按下高亮向外扩出 PAD，
-         * 若子项是在 applyEdgeInsets() 之后动态加入（或使用者未显式调用），
-         * 溢出部分会被父容器裁剪 → 点按反馈无法铺满整行。
-         * 这里在每次 addView 后把重算收敛到下一帧，让 Card 自洽，
-         * 不依赖外部是否走 card() 工厂或手动调用 applyEdgeInsets()。
-         */
-        private boolean edgeInsetsScheduled = false;
-        private void scheduleEdgeInsets() {
-            if (edgeInsetsScheduled) return;
-            edgeInsetsScheduled = true;
+        private boolean pressGroupScheduled = false;
+        /** 合并同一帧内的多次请求，下一帧刷新按压组（圆角 + 裁剪）。 */
+        public void postRefreshPressGroup() {
+            if (pressGroupScheduled) return;
+            pressGroupScheduled = true;
             post(new Runnable() {
                 @Override public void run() {
-                    edgeInsetsScheduled = false;
-                    applyEdgeInsets(-1f);
+                    pressGroupScheduled = false;
+                    refreshPressGroup();
                 }
             });
         }
@@ -1050,7 +1089,7 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
             if (sw == null) return this;
             setClickable(true);
             setFocusable(true);
-            pressFeedback(this);
+            markPressable(this);
             setOnClickListener(v -> sw.setChecked(!sw.isChecked()));
             return this;
         }
@@ -1068,7 +1107,7 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
             }
             setClickable(true);
             setFocusable(true);
-            pressFeedback(this);
+            markPressable(this);
             setOnClickListener(v -> {
                 if (right instanceof Switch) {
                     Switch sw = (Switch) right;
@@ -1122,8 +1161,7 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
     }
     static final class Backdrop {
         static android.graphics.Bitmap src;
-        // anchor 必须弱引用：它是从 Activity/View 树传入的 View，
-        // 若强引用会在 Activity 销毁后仍钉住整棵旧 View 树（静态字段 = GC root）。
+
         static java.lang.ref.WeakReference<View> anchor;
         static final float[] MAP = new float[3];
         private Backdrop() {}
@@ -1185,7 +1223,6 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
         Backdrop.setSource(null, null);
     }
 
-    /** 供宿主 Activity 在销毁时调用：解除 GlassSync 的静态滚动监听与 View 引用。 */
     public static void GlassSyncUnhook() {
         try { GlassSync.unhookIfDetached(); } catch (Throwable ignored) {}
     }
@@ -1362,9 +1399,7 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
         private static final java.util.WeakHashMap<View, Boolean> WATCHED =
                 new java.util.WeakHashMap<>();
         private static android.view.ViewTreeObserver hookedTvo;
-        // hooked / hookListener 都是静态 GC root，必须保证 Activity 销毁后能被解开：
-        //   - hooked 用弱引用（原先强引用会钉住最后一个 ScrollView → 整棵 View 树）
-        //   - hookListener 会在 detach 时显式 remove 并置空（见 unhook()）
+
         private static java.lang.ref.WeakReference<View> hooked;
         private static android.view.ViewTreeObserver.OnScrollChangedListener hookListener;
         private static boolean pending;
@@ -1385,14 +1420,14 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
                 sc.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
                     @Override public void onViewAttachedToWindow(View v) { hook(v); }
                     @Override public void onViewDetachedFromWindow(View v) {
-                        // 当前观察的 View 脱离窗口 → 解除静态监听与引用，避免泄漏 View 树。
+
                         View cur = hooked == null ? null : hooked.get();
                         if (cur == v) unhook();
                     }
                 });
             }
         }
-        /** 解除当前挂载的滚动监听并清空静态引用（Activity 销毁/detach 时调用）。 */
+
         static void unhook() {
             if (hookedTvo != null && hookListener != null) {
                 try { hookedTvo.removeOnScrollChangedListener(hookListener); } catch (Throwable ignored) {}
@@ -1404,15 +1439,10 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
             ticks = 0;
         }
 
-        /**
-         * 仅当"当前观察的 View 已脱离窗口"时才解除。
-         * 用于 Activity.onDestroy 兜底：避免旧 Activity 的 onDestroy 误清新 Activity
-         * （recreate 时新 Activity 已先 attach）刚挂上的监听。
-         */
         static void unhookIfDetached() {
             View cur = hooked == null ? null : hooked.get();
-            if (cur == null) return;                 // 已被 GC/清空，无需处理
-            if (!cur.isAttachedToWindow()) unhook(); // 只有真的脱离才解
+            if (cur == null) return;
+            if (!cur.isAttachedToWindow()) unhook();
         }
         private static void hook(final View sc) {
             android.view.ViewTreeObserver tvo = sc.getViewTreeObserver();
@@ -1559,7 +1589,7 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
             card.addView(v, lp);
         }
 
-        card.applyEdgeInsets(-1f);
+        card.refreshPressGroup();
         return card;
     }
     public static View toggle(Context c, String title, boolean checked,
@@ -1570,6 +1600,7 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
                                               Switch.OnToggle cb, final View... dependents) {
         final LinearLayout holder = new LinearLayout(c);
         holder.setOrientation(LinearLayout.VERTICAL);
+        SoftUi.markRowGroup(holder);   // 声明为"行容器"：其子项与开关行同属一个按压组
         for (View d : dependents) {
             holder.addView(d, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -1623,15 +1654,14 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
             });
             va.addListener(new android.animation.AnimatorListenerAdapter() {
                 @Override public void onAnimationEnd(android.animation.Animator a) {
-
                     lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
                     holder.setLayoutParams(lp);
+                    reapplyEdgeInsets(holder);
                 }
             });
             holder.setTag(FOLD_ANIM_TAG, va);
             va.start();
         } else {
-
             reapplyEdgeInsets(holder);
             int fromH = holder.getHeight() > 0 ? holder.getHeight() : measureContentHeight(holder);
             ValueAnimator va = ValueAnimator.ofInt(fromH, 0);
@@ -1643,10 +1673,11 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
             });
             va.addListener(new android.animation.AnimatorListenerAdapter() {
                 @Override public void onAnimationEnd(android.animation.Animator a) {
-
                     lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
                     holder.setLayoutParams(lp);
                     holder.setVisibility(View.GONE);
+                    // 折叠完成后重新计算：开关行恢复全圆角
+                    reapplyEdgeInsets(holder);
                 }
             });
             holder.setTag(FOLD_ANIM_TAG, va);
@@ -1659,7 +1690,7 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
         try {
             android.view.ViewParent p = v == null ? null : v.getParent();
             while (p instanceof android.view.View) {
-                if (p instanceof Card) { ((Card) p).applyEdgeInsets(-1f); return; }
+                if (p instanceof Card) { ((Card) p).postRefreshPressGroup(); return; }
                 p = ((android.view.View) p).getParent();
             }
         } catch (Throwable ignored) {}
@@ -1668,7 +1699,6 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
         void onConfirm();
     }
 
-    /** 信息弹窗：仅一个「关闭」按钮（全宽）。 */
     public static void infoDialog(View anchor, String title, String message, String closeText) {
         final String msg = message;
         final String closeLabel = (closeText == null ? "关闭" : closeText);
@@ -1677,7 +1707,7 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
                                         final LinearLayout inner, android.widget.FrameLayout panel,
                                         final Runnable dismiss) {
                 addDialogMessage(ctx, inner, msg, Gravity.START);
-                // 单按钮：closeLabel 显示为确定按钮样式
+
                 addDialogButtons(ctx, inner, closeLabel, null, dismiss, null, null);
             }
         });
@@ -2125,7 +2155,7 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
         });
         return t;
     }
-    /** 弹窗消息正文：TextView + 可滚动容器 + 按屏高 55% 限高。gravity 传 CENTER / START。 */
+
     private static void addDialogMessage(final Context ctx, final LinearLayout inner,
                                          final String msg, final int gravity) {
         if (msg == null || msg.length() == 0) return;
@@ -2159,11 +2189,7 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
             }
         } catch (Throwable ignored) {}
     }
-    /**
-     * 弹窗按钮行。
-     * okLabel == null → 单按钮（cancelLabel，全宽 filled），点击后 dismiss 并回调 onOk；
-     * 否则 → 取消 + 确定两按钮等宽，点击均先 dismiss，再回调 onCancel / onOk。
-     */
+
     private static void addDialogButtons(final Context ctx, final LinearLayout inner,
                                          final String cancelLabel, final String okLabel,
                                          final Runnable dismiss,
@@ -2282,7 +2308,7 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
     public static Row link(Context c, String title, final OnClick cb) {
         TextView arrow = text(c, "›", BODY_SIZE + 4, TEXT_SECONDARY);
         Row r = new Row(c, title, arrow, false);
-        pressFeedback(r);
+        markPressable(r);
         r.setOnClickListener(v -> { if (cb != null) cb.onClick(); });
         return r;
     }
@@ -2291,7 +2317,7 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
     }
     public static Row action(Context c, String title, View right, final OnClick cb) {
         Row r = new Row(c, title, right, false);
-        pressFeedback(r);
+        markPressable(r);
         r.setOnClickListener(v -> { if (cb != null) cb.onClick(); });
         return r;
     }
@@ -2326,7 +2352,7 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
         outer.setGravity(Gravity.CENTER_VERTICAL);
         outer.addView(line, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        pressFeedback(outer);
+        markPressable(outer);
         outer.setOnClickListener(v -> { if (cb != null) cb.onClick(); });
         return outer;
     }
@@ -2340,7 +2366,7 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
         alp.leftMargin = dp(c, 6f);
         wrap.addView(arrow, alp);
         Row r = new Row(c, title, wrap, false);
-        pressFeedback(r);
+        markPressable(r);
         r.setOnClickListener(v -> { if (cb != null) cb.onClick(); });
         return r;
     }
@@ -2396,7 +2422,7 @@ v.setTag(TAG_PRESS, Boolean.TRUE);
                 ViewGroup.LayoutParams.WRAP_CONTENT));
         col.setClickable(true);
         col.setFocusable(true);
-        pressFeedback(col);
+        markPressable(col);
         col.setOnClickListener(v -> { if (cb != null) cb.onClick(); });
         return col;
     }
