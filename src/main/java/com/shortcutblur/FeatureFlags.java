@@ -23,8 +23,32 @@ public final class FeatureFlags {
     public static volatile int CLOCK_GLASS_MIX = 0;
 
     public static volatile boolean IME_BLUR = false;
-
     public static volatile int IME_BLUR_RADIUS = 100;
+
+    // 快捷菜单（ShortcutBlur）模糊半径：图标模糊动画的目标半径。0=不模糊，上限 200。
+    public static volatile float SHORTCUT_BLUR_RADIUS = 64.0f;
+
+    // 快捷菜单弹窗本体（popup 背景视图）模糊：用 Oplus 私有模糊 API 对弹窗背景视图挂背景渲染效果。
+    // 隶属于「Shortcut 实时模糊」(SHORTCUT_BLUR)：无独立开关，开了总开关即启用。
+    // 半径 = SHORTCUT_WINDOW_BLUR_RADIUS。
+    public static volatile float SHORTCUT_WINDOW_BLUR_RADIUS = 64.0f;
+
+    // 快捷菜单卡片（一/二级）统一 Oplus 背景模糊（com.oplus.view.ViewRootManager）的混色。
+    // 与输入法模糊同源，用同一套私有 API；一级与二级共用同组参数以保证观感一致。
+    public static volatile int CARD_BLUR_COLOR_LIGHT = 0x66FFFFFF;
+    public static volatile int CARD_BLUR_COLOR_DARK = 0x99000000;
+    /** 卡片模糊圆角（dp）。直接决定模糊层圆角；<=0 时退回读取卡片面板自身圆角（COUI RoundFrameLayout）。 */
+    public static volatile float CARD_BLUR_CORNER_DP = 16f;
+
+    /**
+     * 二级菜单（"更多功能"子菜单）背景模糊半径。独立于一级，可单独调大/调小。
+     * <=0 时回退用 SHORTCUT_BLUR_RADIUS（一级半径）。
+     */
+    public static volatile float CARD_SECONDARY_BLUR_RADIUS = 96.0f;
+
+    // 一级（长按图标）卡片面板背景的不透明度（0x00~0xFF）。
+    // 面板背景本身多为浅色/白色，数值越高越"实"、越显白；降低可让模糊更透出来。
+    public static volatile int CARD_PANEL_ALPHA = 0x99;
 
     // 键盘圆角固定 25dp，不再允许用户自定义。
     // 原因：系统 BackgroundBlurDrawable.setCornerRadius 在半径超过绘制区域
@@ -203,6 +227,42 @@ public final class FeatureFlags {
                     if (r >= 0 && r <= 500) IME_BLUR_RADIUS = r;
                 } catch (Throwable ignored) {}
                 break;
+            case "shortcut_blur_radius":
+                try {
+                    float f = Float.parseFloat(v.trim());
+                    if (f >= 0f && f <= 200f) SHORTCUT_BLUR_RADIUS = f;
+                } catch (Throwable ignored) {}
+                break;
+            case "shortcut_window_blur_radius":
+                try {
+                    float f = Float.parseFloat(v.trim());
+                    if (f >= 0f && f <= 200f) SHORTCUT_WINDOW_BLUR_RADIUS = f;
+                } catch (Throwable ignored) {}
+                break;
+            case "card_panel_alpha":
+                // 一级快捷菜单面板背景不透明度（0x00~0xFF）。数值越高越"实"、越显白。
+                try {
+                    String s = v.trim();
+                    int a = (s.startsWith("0x") || s.startsWith("0X"))
+                            ? (int) Long.parseLong(s.substring(2), 16)
+                            : Integer.parseInt(s);
+                    if (a >= 0 && a <= 0xFF) CARD_PANEL_ALPHA = a;
+                } catch (Throwable ignored) {}
+                break;
+            case "card_secondary_blur_radius":
+                // 二级（"更多功能"）菜单模糊半径；<=0 时回退一级半径。
+                try {
+                    float f = Float.parseFloat(v.trim());
+                    CARD_SECONDARY_BLUR_RADIUS = f;
+                } catch (Throwable ignored) {}
+                break;
+            case "card_blur_corner":
+            case "card_blur_corner_dp":
+                try {
+                    float f = Float.parseFloat(v.trim());
+                    if (f >= 0f && f <= 100f) CARD_BLUR_CORNER_DP = f;
+                } catch (Throwable ignored) {}
+                break;
             case "ime_blur_corner":
             case "ime_blur_corner_dp":
                 // 圆角已固定为 25dp（IME_BLUR_CORNER_DP 为 final 常量），
@@ -268,6 +328,16 @@ public final class FeatureFlags {
             if (v != null) { int old = IME_BLUR_COLOR_DARK; applyKey("ime_blur_color_dark", v); changed |= (old != IME_BLUR_COLOR_DARK); }
             v = i.getStringExtra("ime_blur_mask");
             if (v != null) { float old = IME_BLUR_MASK_ALPHA; applyKey("ime_blur_mask", v); changed |= (old != IME_BLUR_MASK_ALPHA); }
+            v = i.getStringExtra("shortcut_blur_radius");
+            if (v != null) { float old = SHORTCUT_BLUR_RADIUS; applyKey("shortcut_blur_radius", v); changed |= (old != SHORTCUT_BLUR_RADIUS); }
+            v = i.getStringExtra("shortcut_window_blur_radius");
+            if (v != null) { float old = SHORTCUT_WINDOW_BLUR_RADIUS; applyKey("shortcut_window_blur_radius", v); changed |= (old != SHORTCUT_WINDOW_BLUR_RADIUS); }
+            v = i.getStringExtra("card_panel_alpha");
+            if (v != null) { int old = CARD_PANEL_ALPHA; applyKey("card_panel_alpha", v); changed |= (old != CARD_PANEL_ALPHA); }
+            v = i.getStringExtra("card_secondary_blur_radius");
+            if (v != null) { float old = CARD_SECONDARY_BLUR_RADIUS; applyKey("card_secondary_blur_radius", v); changed |= (old != CARD_SECONDARY_BLUR_RADIUS); }
+            v = i.getStringExtra("card_blur_corner");
+            if (v != null) { float old = CARD_BLUR_CORNER_DP; applyKey("card_blur_corner", v); changed |= (old != CARD_BLUR_CORNER_DP); }
         } catch (Throwable t) {
             ModuleLog.e(TAG, "applyFromIntent failed", t);
         }
@@ -288,6 +358,11 @@ public final class FeatureFlags {
                 + " clockGlass=" + CLOCK_GLASS
                 + " imeBlur=" + IME_BLUR
                 + " imeRadius=" + IME_BLUR_RADIUS
-                + " imeCorner=" + IME_BLUR_CORNER_DP;
+                + " imeCorner=" + IME_BLUR_CORNER_DP
+                + " shortcutRadius=" + SHORTCUT_BLUR_RADIUS
+                + " scWindowBlurR=" + SHORTCUT_WINDOW_BLUR_RADIUS
+                + " cardAlpha=0x" + Integer.toHexString(CARD_PANEL_ALPHA)
+                + " cardSecRadius=" + CARD_SECONDARY_BLUR_RADIUS
+                + " cardCornerDp=" + CARD_BLUR_CORNER_DP;
     }
 }

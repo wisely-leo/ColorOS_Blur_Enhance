@@ -5,7 +5,9 @@ import android.graphics.RenderEffect;
 import android.graphics.Shader;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.PopupWindow;
 import android.view.animation.DecelerateInterpolator;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Executable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -40,8 +42,16 @@ public final class ShortcutBlurFeature {
     private static volatile Host host;
 
     // ---- ③ 常量：动画 / 阈值 ----
-    private static final float BLUR_RADIUS = 64.0f;
     private static final long BLUR_DURATION = 330L;
+    /** 图标模糊目标半径：用户可在设置页自定义（FeatureFlags 热更），默认 64。 */
+    private static float blurRadius() {
+        try {
+            float r = FeatureFlags.SHORTCUT_BLUR_RADIUS;
+            return (r < 0f) ? 0f : (r > 200f ? 200f : r);
+        } catch (Throwable t) {
+            return 64.0f;
+        }
+    }
     private static final long DEPTH_FALLBACK_DELAY = 500L;
     private static final long SWALLOW_RESET_DELAY = 450L;
 
@@ -56,21 +66,33 @@ public final class ShortcutBlurFeature {
     private static volatile View sIconBlurLayer = null;
     private static volatile long sPopupSeq = 0L;
     private static volatile long sIconAnimStartedSeq = -1L;
+    /**
+     * 「fade-out 期间又被重新点亮」标记。
+     * 场景：打开一级快捷菜单时图标模糊已 fade-in；接着用户点二级（如"添加快捷方式"），
+     * 一级弹窗走 close 动画 → 我们 fade-out；紧接着二级弹窗 open → 我们 fade-in 重新点亮。
+     * 此时 fade-out 的延迟 remove 回调必须放弃移除，否则会把刚点亮的模糊层清掉（"秒清"）。
+     */
+    private static volatile boolean sIconBlurRelight = false;
     private static volatile boolean sFadingOut = false;
     private static volatile int sSwallowCount = 0;
 
     // ---- ③ 图标模糊：实例级缓存（弱引用，避免钉住 View 子树）----
     private static final Map<View, Boolean> armed = new WeakHashMap<>();
     private static final Map<View, Integer> flagsCache = new WeakHashMap<>();
-    private static final Map<String, ValueAnimator> iconAnims = new ConcurrentHashMap<>();
+    /**
+     * layer(或其动画宿主 View) → 正在跑的模糊动画。
+     * 以 View 本身为 key（而非 identityHashCode 字符串），避免每次动画创建临时 String，
+     * 也杜绝 hashCode 碰撞导致"误删他人动画"。用 WeakHashMap 保证 key(View) 可被回收，
+     * 不会因动画条目残留而钉住 View 子树造成泄漏（配套访问均在同一锁内做复合操作）。
+     */
+    private static final Map<View, ValueAnimator> iconAnims =
+            new java.util.WeakHashMap<>();
 
     // ---- Oplus 反射缓存（③ 的 applyIconBlurRadius 使用）----
     private static volatile boolean sOplusEffectResolved = false;
     private static volatile Class<?> sOplusEffectCls = null;
     private static volatile Method sSetBgRenderEffect = null;
     private static volatile Method sSetRenderEffectViewMethod = null;
-    private static volatile boolean sOplusApiDumped = false;
-    private static final Set<String> dumpedCls = new HashSet<>();
 
     /** 安装 ③ 的全部 hook。返回安装数量。 */
     public static int install(ClassLoader loader, Host h) {
@@ -84,6 +106,11 @@ public final class ShortcutBlurFeature {
             n += hookPopupOpenCloseAnimation(loader, cn, "onCreateCloseAnimation", false);
         }
         n += installSwallowPauseHook(loader);
+        n += hookAssignMargins(loader);
+        n += hookShowForIcon(loader);
+        n += hookMoreFunctionsCtor(loader);
+        n += hookArrowRoundedBg(loader);
+        n += hookPopupColorPrimaryAttr(loader);
         return n;
     }
 
@@ -148,7 +175,7 @@ public final class ShortcutBlurFeature {
                     if (!m.getName().equals(methodName)) continue;
                     Class<?>[] pt = m.getParameterTypes();
                     if (pt.length != 1) continue;
-                    if (!"android.animation.AnimatorSet".equals(pt[0].getName())) continue;
+                    if (!CLS_ANIMATOR_SET.equals(pt[0].getName())) continue;
                     if (!hooked.add(m)) {
                         ModuleLog.d("INSTALL", "skip dup hook " + c.getName() + "." + methodName);
                         continue;
@@ -160,6 +187,58 @@ public final class ShortcutBlurFeature {
                             Object self = chain.getThisObject();
                             Object set = chain.getArg(0);
                             Object result = chain.proceed();
+                            // 关闭动画：close 期间持续把面板背景压回半透明，
+                            // 抵消 assignMarginsAndBackgrounds→newDrawable 刷白（C 类闪白）。
+                            if (!opening) {
+                                try {
+                                    View host = null;
+                                    if (self instanceof View) host = (View) self;
+                                    if (host == null && self != null) {
+                                        Object pbv = Reflect.readField(self, "mPopBlurView");
+                                        if (pbv instanceof View) host = (View) pbv;
+                                    }
+                                    if (host != null) {
+                                        final View fhost = host;
+                                        // 关键：不用 postDelayed（会晚一帧 → 漏一帧实心）。
+                                        // 改用 OnPreDrawListener：每次绘制前先把面板背景压回半透明，
+                                        // 这样"白底"在真正上屏前就被改掉，杜绝"一帧实心"。
+                                        try {
+                                            final android.view.ViewTreeObserver vto = fhost.getViewTreeObserver();
+                                            final android.view.ViewTreeObserver.OnPreDrawListener l =
+                                                    new android.view.ViewTreeObserver.OnPreDrawListener() {
+                                                private int frames = 0;
+                                                @Override public boolean onPreDraw() {
+                                                    try {
+                                                        repressPanelAlpha(fhost);
+                                                    } catch (Throwable ignored) {}
+                                                    if (++frames >= 40) {   // 约 0.6s 后自动摘除
+                                                        try {
+                                                            android.view.ViewTreeObserver v = fhost.getViewTreeObserver();
+                                                            if (v.isAlive()) v.removeOnPreDrawListener(this);
+                                                        } catch (Throwable ignored) {}
+                                                    }
+                                                    return true;
+                                                }
+                                            };
+                                            vto.addOnPreDrawListener(l);
+                                        } catch (Throwable t) {
+                                            ModuleLog.e("CARDBLUR", "add OnPreDraw failed", t);
+                                        }
+                                        // 兜底：再压几次，防止 OnPreDraw 未触发的边界情况。
+                                        for (final long d : new long[]{0L, 16L, 48L, 96L, 160L}) {
+                                            fhost.postDelayed(new Runnable() {
+                                                @Override public void run() {
+                                                    try {
+                                                        repressPanelAlpha(fhost);
+                                                    } catch (Throwable ignored) {}
+                                                }
+                                            }, d);
+                                        }
+                                    }
+                                } catch (Throwable t) {
+                                    ModuleLog.e("CARDBLUR", "close repress failed", t);
+                                }
+                            }
                             try {
                                 View anchor = null;
                                 if (self != null) {
@@ -181,7 +260,10 @@ public final class ShortcutBlurFeature {
                                     if (opening && (flags & (F_ICON | F_ICON_ANIM)) != 0) {
                                         final View lt = sIconBlurLayer;
                                         if (lt != null) {
-                                            Object iconAnim = createIconBlurAnimator(lt, 0.0f, BLUR_RADIUS, BLUR_DURATION);
+                                            // 标记「已重新点亮」：若此前一级弹窗刚触发过 fade-out，
+                                            // 其延迟 remove 回调会因此放弃移除（保留模糊层）。
+                                            sIconBlurRelight = true;
+                                            Object iconAnim = createIconBlurAnimator(lt, 0.0f, blurRadius(), BLUR_DURATION);
                                             if (iconAnim instanceof ValueAnimator) {
                                                 ((ValueAnimator) iconAnim).start();
                                                 ModuleLog.d("ICONANIM", "open anim -> started icon blur fade-in (sync)");
@@ -276,6 +358,591 @@ public final class ShortcutBlurFeature {
     }
 
     // ========================================================================
+    // ⑤ 快捷菜单卡片本体模糊（Oplus 背景渲染效果）
+    // ------------------------------------------------------------------------
+    // 目标：ArrowPopup.assignMarginsAndBackgrounds(ViewGroup, int) 会给"弹窗内容
+    // 容器"设置纯色 GradientDrawable 背景（卡片本体）。我们在它执行之后：
+    //   1) 把该容器背景整体调半透明（保留圆角 / Ripple / 形状）；
+    //   2) 用 Oplus 私有 API setBackgroundRenderEffect 叠加背景模糊。
+    // 隶属「Shortcut 实时模糊」总开关（FeatureFlags.SHORTCUT_BLUR）。
+    // 只挂一次（WeakHashMap 去重），只针对"直接挂背景的容器"（通常是弹窗内容根）。
+    // ========================================================================
+    private static final Map<View, Boolean> cardBlurApplied = new WeakHashMap<>();
+
+    /** 弹窗卡片本体模糊半径（FeatureFlags 热更），默认 64。 */
+    private static float cardBlurRadius() {
+        try {
+            float r = FeatureFlags.SHORTCUT_BLUR_RADIUS;
+            return (r < 0f) ? 0f : (r > 200f ? 200f : r);
+        } catch (Throwable t) {
+            return 64.0f;
+        }
+    }
+
+    private static int hookAssignMargins(ClassLoader loader) {
+        int n = 0;
+        try {
+            Class<?> cls = Reflect.loadClass(CLS_ARROW_POPUP, loader);
+            if (cls == null) {
+                ModuleLog.d("CARDBLUR", "ArrowPopup not found");
+                return 0;
+            }
+            for (Method m : cls.getDeclaredMethods()) {
+                if (!m.getName().equals(M_ASSIGN_MARGINS)) continue;
+                Class<?>[] pt = m.getParameterTypes();
+                if (pt.length != 2) continue;
+                if (!"android.view.ViewGroup".equals(pt[0].getName())) continue;
+                if (pt[1] != int.class) continue;
+                Reflect.setAccessible(m);
+                hookTarget((Executable) m, "cardblur.assignMargins", new XposedInterface.Hooker() {
+                    @Override
+                    public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                        Object result = chain.proceed();
+                        try {
+                            Object arg0 = chain.getArg(0);
+                            if (arg0 instanceof ViewGroup) {
+                                applyCardBlur((ViewGroup) arg0);
+                            }
+                        } catch (Throwable t) {
+                            ModuleLog.e("CARDBLUR", "hook body failed", t);
+                        }
+                        return result;
+                    }
+                });
+                n++;
+                ModuleLog.d("CARDBLUR", "hook assignMarginsAndBackgrounds installed");
+            }
+        } catch (Throwable t) {
+            ModuleLog.e("INSTALL", "hookAssignMargins failed", t);
+        }
+        return n;
+    }
+
+    /** 给快捷菜单卡片挂 Oplus 背景模糊：递归找"带背景的可见子视图"（真正的卡片面板），
+     *  把其背景调半透明并叠加 Oplus 背景渲染效果（setBackgroundRenderEffect，模块原有 API）。
+     *  返回实际挂上的视图数（0 = 没找到可挂目标）。 */
+    /** 把面板（≥200×200 且带背景）的背景颜色 alpha 强制压成 CARD_PANEL_ALPHA。
+     *  与 applyCardBlurRec 的 setAlpha 不同：这里直接 setColor 改"颜色本身"，
+     *  可抵消 ArrowPopup 用 newDrawable() 从 constant state 复制出的不透明实例。
+     *  性能：优先复用上次命中的面板 View（弱引用缓存，且与 root 绑定），避免每帧遍历整个子树。 */
+    private static volatile java.lang.ref.WeakReference<View> sPanelCache = null;
+    private static volatile java.lang.ref.WeakReference<View> sPanelCacheRoot = null;
+    private static void repressPanelAlpha(View v) {
+        try {
+            if (v == null) return;
+            // 快速路径：同一 root 下上次命中的面板仍在树上且尺寸达标 → 直接压，不遍历。
+            java.lang.ref.WeakReference<View> rootRef = sPanelCacheRoot;
+            java.lang.ref.WeakReference<View> ref = sPanelCache;
+            if (rootRef != null && rootRef.get() == v && ref != null) {
+                View cached = ref.get();
+                if (cached != null && cached.getParent() != null
+                        && cached.getWidth() >= 200 && cached.getHeight() >= 200) {
+                    forceAlphaOnBg(cached);
+                    return;
+                }
+            }
+            if (v instanceof ViewGroup) {
+                ViewGroup g = (ViewGroup) v;
+                for (int i = 0; i < g.getChildCount(); i++) {
+                    View c = g.getChildAt(i);
+                    if (c.getWidth() >= 200 && c.getHeight() >= 200) {
+                        forceAlphaOnBg(c);
+                        if (c.getBackground() != null) {
+                            sPanelCache = new java.lang.ref.WeakReference<>(c);
+                            sPanelCacheRoot = new java.lang.ref.WeakReference<>(v);
+                        }
+                    }
+                }
+            } else {
+                forceAlphaOnBg(v);
+                if (v.getBackground() != null) {
+                    sPanelCache = new java.lang.ref.WeakReference<>(v);
+                    sPanelCacheRoot = new java.lang.ref.WeakReference<>(v);
+                }
+            }
+        } catch (Throwable ignored) {}
+    }
+    private static void forceAlphaOnBg(View c) {
+        try {
+            android.graphics.drawable.Drawable bg = c.getBackground();
+            if (bg == null) return;
+            int want = (FeatureFlags.CARD_PANEL_ALPHA & 0xFF) << 24;
+            if (bg.getAlpha() == (FeatureFlags.CARD_PANEL_ALPHA & 0xFF)) {
+                // 已是目标 alpha。仍需处理"颜色本身不透明"的情况 → 检查 GradientDrawable 颜色。
+                if (bg instanceof android.graphics.drawable.GradientDrawable) {
+                    android.content.res.ColorStateList csl =
+                            ((android.graphics.drawable.GradientDrawable) bg).getColor();
+                    if (csl != null) {
+                        int cur = csl.getDefaultColor();
+                        if ((cur >>> 24) == (FeatureFlags.CARD_PANEL_ALPHA & 0xFF)) return;
+                        int out = want | (cur & 0x00FFFFFF);
+                        ((android.graphics.drawable.GradientDrawable) bg).setColor(out);
+                        ModuleLog.d("CARDBLUR", "  repress gdColor 0x" + Integer.toHexString(cur)
+                                + " -> 0x" + Integer.toHexString(out));
+                    }
+                }
+                return;
+            }
+            // alpha 字段不是目标值：直接 setAlpha（对普通 Drawable 有效）。
+            bg.mutate().setAlpha(FeatureFlags.CARD_PANEL_ALPHA);
+            ModuleLog.d("CARDBLUR", "  repress alpha -> 0x"
+                    + Integer.toHexString(FeatureFlags.CARD_PANEL_ALPHA)
+                    + " cls=" + c.getClass().getSimpleName());
+        } catch (Throwable ignored) {}
+    }
+    private static int applyCardBlur(ViewGroup card) {
+        if (card == null) return 0;
+        try {
+            if (!FeatureFlags.SHORTCUT_BLUR) return 0;
+            float r = cardBlurRadius();
+            if (r <= 0.01f) return 0;
+            int count = applyCardBlurRec(card, r, 0);
+            ModuleLog.d("CARDBLUR", "apply card blur r=" + r
+                    + " root=" + card.getClass().getSimpleName()
+                    + " " + card.getWidth() + "x" + card.getHeight()
+                    + " attached=" + count);
+            return count;
+        } catch (Throwable t) {
+            ModuleLog.e("CARDBLUR", "applyCardBlur failed", t);
+            return 0;
+        }
+    }
+
+    private static int applyCardBlurRec(View v, float r, int depth) {
+        if (v == null || depth > 4) return 0;
+        int n = 0;
+        try {
+            android.graphics.drawable.Drawable bg = v.getBackground();
+            boolean hasBg = bg != null;
+            // "卡面板"判定：带背景 + 足够大（排除 84x84 之类图标项）。
+            // 一级菜单面板实测 ≈812x923，其子图标约 84x84，故 200px 阈值可准确区分。
+            boolean bigEnough = v.getWidth() >= 200 && v.getHeight() >= 200;
+            if (hasBg && bigEnough) {
+                // 命中"卡面板"：背景调半透明 + 叠加 Oplus 背景模糊（原方案）。
+                try {
+                    android.graphics.drawable.Drawable mut = bg.mutate();
+                    mut.setAlpha(FeatureFlags.CARD_PANEL_ALPHA);
+                    v.setBackground(mut);
+                } catch (Throwable t) {
+                    ModuleLog.d("CARDBLUR", "  alpha failed: " + t);
+                }
+                ModuleLog.d("CARDBLUR", "  card panel depth=" + depth
+                        + " cls=" + v.getClass().getSimpleName()
+                        + " " + v.getWidth() + "x" + v.getHeight()
+                        + " alpha=0x" + Integer.toHexString(FeatureFlags.CARD_PANEL_ALPHA)
+                        + " bg=" + bg.getClass().getSimpleName());
+                applyIconBlurRadius(v, r, true);
+                n++;
+                // 命中面板后不再下探其子项（图标），避免误伤。
+                return n;
+            }
+            if (v instanceof ViewGroup) {
+                ViewGroup g = (ViewGroup) v;
+                int c = g.getChildCount();
+                for (int i = 0; i < c; i++) {
+                    n += applyCardBlurRec(g.getChildAt(i), r, depth + 1);
+                }
+            }
+        } catch (Throwable t) {
+            ModuleLog.d("CARDBLUR", "  rec err: " + t);
+        }
+        return n;
+    }
+
+    /** Hook showForIcon：快捷菜单弹出入口。基类 PopupContainerWithArrow.showForIcon(BubbleTextView)
+     *  与 OEM 子类 OplusPopupContainerWithArrow.showForIcon(View) 都要装（实际走 OEM 版）。 */
+    private static int hookShowForIcon(ClassLoader loader) {
+        int n = 0;
+        for (String cn : new String[]{CLS_OPLUS_POPUP, CLS_POPUP_CONTAINER}) {
+            n += hookShowForIconOn(loader, cn);
+        }
+        return n;
+    }
+
+    private static int hookShowForIconOn(ClassLoader loader, String clsName) {
+        int n = 0;
+        try {
+            Class<?> cls = Reflect.loadClass(clsName, loader);
+            if (cls == null) {
+                ModuleLog.d("CARDBLUR", "class not found: " + clsName);
+                return 0;
+            }
+            for (Method m : cls.getDeclaredMethods()) {
+                if (!m.getName().equals("showForIcon")) continue;
+                Class<?>[] pt = m.getParameterTypes();
+                if (pt.length != 1) continue;
+                Reflect.setAccessible(m);
+                final String mid = clsName.substring(clsName.lastIndexOf('.') + 1)
+                        + "#showForIcon(" + pt[0].getSimpleName() + ")";
+                hookTarget((Executable) m, "cardblur.showForIcon", new XposedInterface.Hooker() {
+                    @Override
+                    public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                        Object result = chain.proceed();
+                        try {
+                            if (result instanceof ViewGroup) {
+                                ViewGroup card = (ViewGroup) result;
+                                ModuleLog.d("CARDBLUR", mid + " ret cls=" + card.getClass().getName()
+                                        + " " + card.getWidth() + "x" + card.getHeight()
+                                        + " children=" + card.getChildCount()
+                                        + " bg=" + (card.getBackground() == null ? "null"
+                                                   : card.getBackground().getClass().getName()));
+                                final ViewGroup fc = card;
+                                fc.postDelayed(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        try {
+                                            ModuleLog.d("CARDBLUR", "post layout cls=" + fc.getClass().getName()
+                                                    + " " + fc.getWidth() + "x" + fc.getHeight()
+                                                    + " children=" + fc.getChildCount());
+                                            applyCardBlur(fc);
+                                        } catch (Throwable t) {
+                                            ModuleLog.e("CARDBLUR", "post apply failed", t);
+                                        }
+                                    }
+                                }, 80L);
+                            }
+                        } catch (Throwable t) {
+                            ModuleLog.e("CARDBLUR", "showForIcon hook body failed", t);
+                        }
+                        return result;
+                    }
+                });
+                n++;
+                ModuleLog.d("CARDBLUR", "hook " + mid + " installed");
+            }
+        } catch (Throwable t) {
+            ModuleLog.e("INSTALL", "hookShowForIconOn(" + clsName + ") failed", t);
+        }
+        return n;
+    }
+
+    // ========================================================================
+    // ⑥ 二级（"更多功能"）菜单模糊：强制开启 COUI 官方背景模糊
+    // ------------------------------------------------------------------------
+    // 二级菜单由 com.coui.appcompat.poplist.COUIPopupListWindow 承载，其主子两个
+    // RoundFrameLayout（mMainMenuWrapper / mSubMenuWrapper）各自持有一个
+    // COUIBackgroundBlurBuilder；是否模糊由 builder.d 决定，写入点是
+    // COUIPopupListWindow.setUseBackgroundBlur(boolean[, AnimLevel])。
+    // 我们 hook 该方法，强制首个 boolean 参数为 true，使主子两级菜单都模糊。
+    // 隶属「Shortcut 实时模糊」总开关（FeatureFlags.SHORTCUT_BLUR）。
+    // ========================================================================
+    private static int hookCouiUseBlur(ClassLoader loader) {
+        int n = 0;
+        try {
+            Class<?> cls = Reflect.loadClass(CLS_COUI_POPUP_LIST_WINDOW, loader);
+            if (cls == null) {
+                ModuleLog.d("CARDBLUR", "COUIPopupListWindow not found");
+                return 0;
+            }
+            for (Method m : cls.getDeclaredMethods()) {
+                if (!m.getName().equals(M_SET_USE_BG_BLUR)) continue;
+                Class<?>[] pt = m.getParameterTypes();
+                if (pt.length < 1 || pt[0] != boolean.class) continue;
+                Reflect.setAccessible(m);
+                final int argc = pt.length;
+                hookTarget((Executable) m, "cardblur.couiUseBlur", new XposedInterface.Hooker() {
+                    @Override
+                    public Object intercept(XposedInterface.Chain chain) throws Throwable {
+try {
+                                boolean orig = (Boolean) chain.getArg(0);
+                                Object self = chain.getThisObject();
+                                String who = (self == null ? "null" : self.getClass().getSimpleName());
+                                ModuleLog.d("CARDBLUR", "setUseBackgroundBlur(" + orig + ", argc=" + argc
+                                        + ") this=" + who);
+                                if (FeatureFlags.SHORTCUT_BLUR && !orig) {
+                                    ModuleLog.d("CARDBLUR", "force coui blur ON (was " + orig + ", argc=" + argc + ")");
+                                    Object[] args = new Object[argc];
+                                    args[0] = Boolean.TRUE;
+                                    for (int i = 1; i < argc; i++) args[i] = chain.getArg(i);
+                                    return chain.proceed(args);
+                                }
+                            } catch (Throwable t) {
+                            ModuleLog.e("CARDBLUR", "couiUseBlur body failed", t);
+                        }
+                        return chain.proceed();
+                    }
+                });
+                n++;
+                ModuleLog.d("CARDBLUR", "hook COUIPopupListWindow#" + M_SET_USE_BG_BLUR + "(" + argc + ") installed");
+            }
+        } catch (Throwable t) {
+            ModuleLog.e("INSTALL", "hookCouiUseBlur failed", t);
+        }
+        return n;
+    }
+
+    // ========================================================================
+    // ⑥ 二级（"更多功能"）菜单模糊：走一级同款 Oplus 私有模糊 API
+    // ------------------------------------------------------------------------
+    // 二级菜单窗口 com.android.launcher3.popup.MoreFunctionsPopupListWindow 继承
+    // COUIPopupListWindow，其 mMainMenuWrapper / mSubMenuWrapper 均为
+    // com.coui.appcompat.poplist.RoundFrameLayout（即一/二级菜单卡片面板）。
+    // 系统默认 setUseBackgroundBlur(false)，故二级无模糊。
+    // 本 hook 在窗口构造后，对两个 wrapper 复用一级同款 Oplus 私有模糊
+    // （applyIconBlurRadius(v, r, useOplus=true)），实现一/二级视觉统一。
+    // 隶属「Shortcut 实时模糊」总开关（FeatureFlags.SHORTCUT_BLUR）。
+    // ========================================================================
+    // ========================================================================
+    // ⑧ 一级快捷菜单"背景发白/退出恢复实心"根治（资源色 alpha）
+    // ------------------------------------------------------------------------
+    // 【历史说明】曾用两条"源头降透"思路，实测均未命中（hook 装上但零调用），
+    // 已移除，避免无效 hook 增加开销与干扰：
+    //   · ColorUtils.removeOpacity  —— 实测零调用（isLightWeightOS/isAnimationLevel 分支未命中）
+    //   · ArrowPopup.lambda$assignMarginsAndBackgrounds$0 / getExtractedColor
+    //                              —— 实测零调用（疑被 R8 内联/重命名）
+    //   · Context/Resources.getColor（按资源 ID 0x7f06077f 过滤）—— 高频出口，已移除
+    // 现役有效修复见下方 ⑫（hookArrowRoundedBg，命中 mRoundedTop/Bottom）与
+    //       ⑬（hookPopupColorPrimaryAttr，命中 popupColorPrimary 属性色）。
+    // ========================================================================
+    // ========================================================================
+    // ⑫ 终极修复：ArrowPopup.mRoundedTop/mRoundedBottom 背景"降透"
+    // ------------------------------------------------------------------------
+    // 调用栈实证（探针）：
+    //   GD.setColor(0xffffffff) ← ArrowPopup.<init>:36 / :39
+    // 源码实证（ArrowPopup.smali）：
+    //   .line 35-36  mRoundedTop  = new GradientDrawable(); setColor(0xffffffff)
+    //   .line 38-39  mRoundedBottom = new GradientDrawable(); setColor(0xffffffff)
+    //   .line 3205+  assignMarginsAndBackgrounds 里：
+    //        child.setBackground(mRoundedTop.getConstantState().newDrawable())
+    //     ★ newDrawable() 复制的是"原始 constant state"，会丢弃我们后面设的 alpha，
+    //       于是面板每次 assign 都被刷回"纯白不透明" → 打开/关闭闪白。
+    // 修法：构造完成后，反射取 mRoundedTop/mRoundedBottom，把颜色改成
+    //   (CARD_PANEL_ALPHA<<24)|(原RGB)，即"纯白但半透明"。此后 newDrawable()
+    //   复制出来的新实例天然带该 alpha → 任何时机都不会再变实心。
+    // 影响面：仅 OplusPopupContainerWithArrow / 其他 ArrowPopup 子类（都是快捷菜单）。
+    // ========================================================================
+    private static int hookArrowRoundedBg(ClassLoader loader) {
+        int n = 0;
+        try {
+            Class<?> cls = Reflect.loadClass(CLS_ARROW_POPUP, loader);
+            if (cls == null) {
+                ModuleLog.d("CARDBLUR", "ArrowPopup not found (rounded)");
+                return 0;
+            }
+            for (Constructor<?> c : cls.getDeclaredConstructors()) {
+                Reflect.setAccessible(c);
+                hookTarget((Executable) c, "cardblur.arrowRoundedCtor", new XposedInterface.Hooker() {
+                    @Override public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                        Object r = chain.proceed();
+                        try {
+                            Object self = chain.getThisObject();
+                            recolorRounded(self, "mRoundedTop");
+                            recolorRounded(self, "mRoundedBottom");
+                        } catch (Throwable t) {
+                            ModuleLog.e("CARDBLUR", "arrowRounded recolor failed", t);
+                        }
+                        return r;
+                    }
+                });
+                n++;
+            }
+            ModuleLog.d("CARDBLUR", "hook ArrowPopup rounded-bg installed n=" + n);
+        } catch (Throwable t) {
+            ModuleLog.e("INSTALL", "hookArrowRoundedBg failed", t);
+        }
+        // 兜底：即使构造 hook 没装上，也直接 hook GD.setColor，
+        // 仅当"调用者就是 ArrowPopup 构造函数"时改值（用栈判定，命中率低但安全）。
+        return n;
+    }
+    /** 反射读 ArrowPopup 的 mRoundedTop/Bottom 字段，把颜色 alpha 换成 CARD_PANEL_ALPHA。 */
+    private static void recolorRounded(Object popup, String field) {
+        try {
+            if (popup == null) return;
+            Object gd = Reflect.readField(popup, field);
+            if (gd == null) return;
+            Method setColor = gd.getClass().getMethod("setColor", int.class);
+            Method getColor = gd.getClass().getMethod("getColor");
+            Object csl = getColor.invoke(gd);
+            int base = 0xFFFFFF;
+            if (csl instanceof android.content.res.ColorStateList) {
+                base = ((android.content.res.ColorStateList) csl).getDefaultColor() & 0x00FFFFFF;
+            }
+            int out = ((FeatureFlags.CARD_PANEL_ALPHA & 0xFF) << 24) | base;
+            setColor.invoke(gd, out);
+            ModuleLog.d("CARDBLUR", "rounded " + field + " -> 0x" + Integer.toHexString(out));
+        } catch (Throwable t) {
+            ModuleLog.e("CARDBLUR", "recolorRounded(" + field + ") failed", t);
+        }
+    }
+    // ========================================================================
+    // ⑬ 从"主题属性 popupColorPrimary"源头降透（快捷菜单背景色的最上游）
+    // ------------------------------------------------------------------------
+    // 源码实证（ArrowPopup.smali 构造）：
+    //   sget v6, R$attr;->popupColorPrimary   // = 0x7f04085a
+    //   getAttrColor(ctx, v6)                 // ← 面板背景色（mBackgroundColor）
+    //   mBackgroundColor = v6; mArrowColor = v6
+    //   mRoundedTop.setColor(v6); mRoundedBottom.setColor(v6)
+    // 用户指出 popupColorPrimary 指向的正是 res 资源 launcher_deep_shortcut_bg_color。
+    // 本 hook 在"属性色解析"出口把 alpha 换成 CARD_PANEL_ALPHA —— 比"构造后
+    // recolor"更早、更彻底：mBackgroundColor 与 mRoundedTop/Bottom 同时被治。
+    // 仅当 attr == popupColorPrimary 才改，其它属性色零影响。
+    // ========================================================================
+    private static final int ATTR_POPUP_COLOR_PRIMARY = 0x7f04085a;
+    private static int hookPopupColorPrimaryAttr(ClassLoader loader) {
+        try {
+            Class<?> themes = Reflect.loadClass("com.android.launcher3.util.Themes", loader);
+            if (themes == null) {
+                ModuleLog.d("CARDBLUR", "Themes not found");
+                return 0;
+            }
+            int n = 0;
+            for (Method m : themes.getDeclaredMethods()) {
+                if (!"getAttrColor".equals(m.getName())) continue;
+                Class<?>[] pt = m.getParameterTypes();
+                if (pt.length != 2 || pt[0] != android.content.Context.class || pt[1] != int.class) continue;
+                if (m.getReturnType() != int.class) continue;
+                Reflect.setAccessible(m);
+                hookTarget((Executable) m, "cardblur.getAttrColor", new XposedInterface.Hooker() {
+                    @Override public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                        Object attr = chain.getArg(1);
+                        Object result = chain.proceed();
+                        try {
+                            if (attr instanceof Integer && ((Integer) attr) == ATTR_POPUP_COLOR_PRIMARY
+                                    && result instanceof Integer) {
+                                int c = (Integer) result;
+                                int out = ((FeatureFlags.CARD_PANEL_ALPHA & 0xFF) << 24) | (c & 0x00FFFFFF);
+                                ModuleLog.d("CARDBLUR", "popupColorPrimary in=0x" + Integer.toHexString(c)
+                                        + " out=0x" + Integer.toHexString(out));
+                                return out;
+                            }
+                        } catch (Throwable t) {
+                            ModuleLog.e("CARDBLUR", "getAttrColor body failed", t);
+                        }
+                        return result;
+                    }
+                });
+                n++;
+            }
+            ModuleLog.d("CARDBLUR", "hook popupColorPrimary attr installed n=" + n);
+            return n;
+        } catch (Throwable t) {
+            ModuleLog.e("INSTALL", "hookPopupColorPrimaryAttr failed", t);
+            return 0;
+        }
+    }
+    // ========================================================================
+    private static int hookMoreFunctionsCtor(ClassLoader loader) {
+        int n = 0;
+        try {
+            Class<?> cls = Reflect.loadClass(CLS_MORE_FUNCTIONS_WINDOW, loader);
+            if (cls == null) {
+                ModuleLog.d("CARDBLUR", "MoreFunctionsPopupListWindow not found");
+                return 0;
+            }
+            for (Constructor<?> c : cls.getDeclaredConstructors()) {
+                Class<?>[] pt = c.getParameterTypes();
+                if (pt.length != 2) continue;
+                Reflect.setAccessible(c);
+                hookTarget((Executable) c, "cardblur.mfCtor", new XposedInterface.Hooker() {
+                    @Override
+                    public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                        Object r = chain.proceed();
+                        try {
+                            final Object self = chain.getThisObject();
+                            // ⚠️ MoreFunctionsPopupListWindow 继承 PopupWindow，不是 View！
+                            // wrapper（mMainMenuWrapper/mSubMenuWrapper）才是 View。
+                            // 用 getContentView()（PopupWindow API）拿根 View，post 后再挂模糊。
+                            ModuleLog.d("CARDBLUR", "mfCtor ret self="
+                                    + (self == null ? "null" : self.getClass().getName()));
+                            if (self != null) {
+                                View anchor = resolvePopupRoot(self);
+                                if (anchor != null) {
+                                    // 弹出动画期间就要有模糊 → 不能等 120ms。
+                                    // 立即 post 一次；再补两帧（32ms/80ms）防止 wrapper 尚未 inflate 完。
+                                    final long[] delays = {0L, 32L, 80L};
+                                    for (final long d : delays) {
+                                        anchor.postDelayed(new Runnable() {
+                                            @Override
+                                            public void run() {
+                                                try {
+                                                    applySecondaryBlur(self);
+                                                } catch (Throwable t) {
+                                                    ModuleLog.e("CARDBLUR", "secondary blur failed", t);
+                                                }
+                                            }
+                                        }, d);
+                                    }
+                                }
+                            }
+                        } catch (Throwable t) {
+                            ModuleLog.e("CARDBLUR", "mfCtor body failed", t);
+                        }
+                        return r;
+                    }
+                });
+                n++;
+                ModuleLog.d("CARDBLUR", "hook MoreFunctionsPopupListWindow(2) installed");
+            }
+        } catch (Throwable t) {
+            ModuleLog.e("INSTALL", "hookMoreFunctionsCtor failed", t);
+        }
+        return n;
+    }
+
+    // 从 PopupWindow 子类（MoreFunctionsPopupListWindow）拿一个可用的 View 作为 post 载体。
+    // 优先 getContentView()；拿不到则尝试从 wrapper 字段取。
+    private static View resolvePopupRoot(Object self) {
+        // ① PopupWindow.getContentView()
+        try {
+            Method gcv = self.getClass().getMethod("getContentView");
+            Object c = gcv.invoke(self);
+            if (c instanceof View) return (View) c;
+        } catch (Throwable ignored) {}
+        // ② 反射取 mMainMenuWrapper / mSubMenuWrapper
+        for (String fn : new String[]{"mMainMenuWrapper", "mSubMenuWrapper"}) {
+            try {
+                Field f = null;
+                Class<?> c = self.getClass();
+                while (c != null && f == null) {
+                    try { f = c.getDeclaredField(fn); } catch (NoSuchFieldException e) { c = c.getSuperclass(); }
+                }
+                if (f == null) continue;
+                f.setAccessible(true);
+                Object v = f.get(self);
+                if (v instanceof View) return (View) v;
+            } catch (Throwable ignored) {}
+        }
+        return null;
+    }
+
+    // 对 MoreFunctionsPopupListWindow 的 mMainMenuWrapper / mSubMenuWrapper
+    // （均为 RoundFrameLayout）挂 Oplus 私有背景模糊（com.oplus.view.ViewRootManager）。
+    // 一级卡片走 setBackgroundRenderEffect（原方案），二级走 ViewRootManager（本方案），
+    // 两者底层机制不同：前者模糊视图自身渲染层（与图标模糊同层、可叠加），
+    // 后者由 SurfaceFlinger 合成真背景模糊。二级沿用一级的半透明背景观感（alpha 0xCC）。
+    private static void applySecondaryBlur(Object window) {
+        if (!FeatureFlags.SHORTCUT_BLUR) return;
+        // 二级可用独立半径（CARD_SECONDARY_BLUR_RADIUS）；<=0 回退一级半径。
+        float radius = FeatureFlags.CARD_SECONDARY_BLUR_RADIUS;
+        if (radius <= 0.01f) radius = cardBlurRadius();
+        if (radius > 200f) radius = 200f;
+        int hit = 0;
+        for (String fn : new String[]{"mMainMenuWrapper", "mSubMenuWrapper"}) {
+            try {
+                Field f = null;
+                Class<?> c = window.getClass();
+                while (c != null && f == null) {
+                    try { f = c.getDeclaredField(fn); } catch (NoSuchFieldException e) { c = c.getSuperclass(); }
+                }
+                if (f == null) continue;
+                f.setAccessible(true);
+                Object v = f.get(window);
+                if (!(v instanceof View)) continue;
+                View vv = (View) v;
+                ModuleLog.d("CARDBLUR", "secondary " + fn + " cls=" + vv.getClass().getName()
+                        + " " + vv.getWidth() + "x" + vv.getHeight()
+                        + " bg=" + (vv.getBackground() == null ? "null" : vv.getBackground().getClass().getName()));
+                // 走 Oplus 私有模糊（ViewRootManager）。
+                OplusCardBlur.apply(vv, radius);
+                hit++;
+            } catch (Throwable t) {
+                ModuleLog.e("CARDBLUR", "secondary " + fn + " err", t);
+            }
+        }
+        ModuleLog.d("CARDBLUR", "apply secondary oplus blur r=" + radius + " hit=" + hit);
+    }
+
+    // ========================================================================
     // ③ 图标模糊：layer 生命周期 / 状态 / 装配
     // ========================================================================
     private static View ensureIconBlurLayer(View pbv) {
@@ -319,14 +986,16 @@ public final class ShortcutBlurFeature {
         sFadingOut = true;
         sPopupSeq++;
         sIconAnimStartedSeq = -1L;
+        // 新一轮 fade-out：清「重新点亮」标记。若本次 fade-out 尚未完成时
+        // 又发生了一次 open（会把它置 true），则延迟回调放弃移除。
+        sIconBlurRelight = false;
         if (layer == null) { sFadingOut = false; return; }
         try {
-            final String key = System.identityHashCode(layer) + "";
             synchronized (iconAnims) {
-                ValueAnimator old = iconAnims.remove(key);
+                ValueAnimator old = iconAnims.remove(layer);
                 if (old != null) { try { old.cancel(); } catch (Throwable ignore) {} }
             }
-            final ValueAnimator va = ValueAnimator.ofFloat(BLUR_RADIUS, 0.0f);
+            final ValueAnimator va = ValueAnimator.ofFloat(blurRadius(), 0.0f);
             va.setDuration(BLUR_DURATION);
             va.setInterpolator(new DecelerateInterpolator());
             va.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
@@ -339,17 +1008,25 @@ public final class ShortcutBlurFeature {
                 }
             });
             synchronized (iconAnims) {
-                iconAnims.put(key, va);
+                iconAnims.put(layer, va);
             }
             va.start();
-            ModuleLog.d("ICONANIM", "fade-out 64.0->0.0 dur=" + BLUR_DURATION);
+            ModuleLog.d("ICONANIM", "fade-out " + blurRadius() + "->0.0 dur=" + BLUR_DURATION);
             layer.postDelayed(new Runnable() {
                 @Override
                 public void run() {
                     try {
-                        removeAnimation(key);
+                        removeAnimation(layer);
                         if (sIconBlurLayer != layer) {
                             ModuleLog.d("ICONANIM", "fade-out done, layer already replaced, skip remove");
+                            sFadingOut = false;
+                            return;
+                        }
+                        // 关键：fade-out 期间又发生了一次 open（二级弹窗等），
+                        // 说明这不是"真正关闭"，而是"切换到下一个弹窗"。
+                        // 此时保留模糊层（它已被新 open 重新 fade-in），不要移除。
+                        if (sIconBlurRelight) {
+                            ModuleLog.d("ICONANIM", "fade-out done but relit (next popup opened), skip remove");
                             sFadingOut = false;
                             return;
                         }
@@ -369,9 +1046,8 @@ public final class ShortcutBlurFeature {
         try {
             View layer = sIconBlurLayer;
             if (layer == null) return;
-            final String key = System.identityHashCode(layer) + "";
             synchronized (iconAnims) {
-                ValueAnimator old = iconAnims.remove(key);
+                ValueAnimator old = iconAnims.remove(layer);
                 if (old != null) { try { old.cancel(); } catch (Throwable ignore) {} }
             }
             try { applyIconBlurRadius(layer, 0.0f, false); } catch (Throwable ignore) { ModuleLog.swallow("module.iconApply", ignore); }
@@ -404,18 +1080,24 @@ public final class ShortcutBlurFeature {
 
     private static int resolveBlurFlags(View view) {
         if (view == null) return 0;
-        Integer c = flagsCache.get(view);
-        if (c != null) return c;
+        synchronized (flagsCache) {
+            Integer c = flagsCache.get(view);
+            if (c != null) return c;
+        }
         int flags = isInsideOpenFolder(view)
                 ? (F_STATIC | F_ICON | F_ICON_ANIM)
                 : (F_STATIC | F_ICON | F_WALL);
-        flagsCache.put(view, flags);
+        synchronized (flagsCache) {
+            flagsCache.put(view, flags);
+        }
         return flags;
     }
 
     private static void clearBlurFlagsCache(View view) {
         if (view == null) return;
-        flagsCache.remove(view);
+        synchronized (flagsCache) {
+            flagsCache.remove(view);
+        }
     }
 
     private static void armBlurForView(View view, String mid) {
@@ -502,7 +1184,6 @@ public final class ShortcutBlurFeature {
             try {
                 Class<?> cls = resolveOplusEffectCls();
                 if (cls != null) {
-                    dumpOplusApiOnce(cls);
                     Method m = sSetBgRenderEffect;
                     if (m != null) {
                         m.invoke(null, effect, view);
@@ -538,50 +1219,6 @@ public final class ShortcutBlurFeature {
         return sOplusEffectCls;
     }
 
-    private static void dumpOplusApiOnce(Class<?> cls) {
-        if (sOplusApiDumped) return;
-        String key = cls.getName();
-        synchronized (dumpedCls) {
-            if (!dumpedCls.add(key)) { sOplusApiDumped = true; return; }
-        }
-        try {
-            StringBuilder sb = new StringBuilder();
-            for (Method m : cls.getDeclaredMethods()) {
-                sb.append(m.getName()).append('(');
-                Class<?>[] ps = m.getParameterTypes();
-                for (int i = 0; i < ps.length; i++) {
-                    if (i > 0) sb.append(',');
-                    sb.append(ps[i].getSimpleName());
-                }
-                sb.append(")->").append(m.getReturnType().getSimpleName()).append(" | ");
-            }
-            ModuleLog.d("OPLUSDUMP", sb.toString());
-            for (Field f : cls.getDeclaredFields()) {
-                try {
-                    f.setAccessible(true);
-                    Object val = java.lang.reflect.Modifier.isStatic(f.getModifiers()) ? f.get(null) : null;
-                    ModuleLog.d("OPLUSDUMP", "FIELD " + f.getName() + " type=" + f.getType().getSimpleName() + " val=" + val);
-                } catch (Throwable ig) {}
-            }
-            for (Class<?> c = cls.getSuperclass(); c != null && c != Object.class; c = c.getSuperclass()) {
-                StringBuilder s2 = new StringBuilder("SUPER " + c.getName() + ": ");
-                for (Method m : c.getDeclaredMethods()) {
-                    s2.append(m.getName()).append('(');
-                    Class<?>[] ps = m.getParameterTypes();
-                    for (int i = 0; i < ps.length; i++) {
-                        if (i > 0) s2.append(',');
-                        s2.append(ps[i].getSimpleName());
-                    }
-                    s2.append(") | ");
-                }
-                ModuleLog.d("OPLUSDUMP", s2.toString());
-            }
-        } catch (Throwable t) {
-            ModuleLog.e("OPLUSDUMP", "dump failed", t);
-        }
-        sOplusApiDumped = true;
-    }
-
     private static void setIconBlurArmed(View view, boolean value) {
         if (view == null) return;
         synchronized (armed) {
@@ -600,13 +1237,13 @@ public final class ShortcutBlurFeature {
         }
     }
 
-    private static boolean isCurrentAnimation(String key, ValueAnimator va) {
+    private static boolean isCurrentAnimation(View key, ValueAnimator va) {
         synchronized (iconAnims) {
             return iconAnims.get(key) == va;
         }
     }
 
-    private static void removeAnimation(String key) {
+    private static void removeAnimation(View key) {
         synchronized (iconAnims) {
             iconAnims.remove(key);
         }
@@ -716,9 +1353,8 @@ public final class ShortcutBlurFeature {
     private static Object createIconBlurAnimator(final View view, final float from, final float to, long duration) {
         if (view == null) return null;
         try {
-            final String key = System.identityHashCode(view) + "";
             synchronized (iconAnims) {
-                ValueAnimator old = iconAnims.remove(key);
+                ValueAnimator old = iconAnims.remove(view);
                 if (old != null) { try { old.cancel(); } catch (Throwable ignore) {} }
             }
             final ValueAnimator va = ValueAnimator.ofFloat(from, to);
@@ -729,7 +1365,7 @@ public final class ShortcutBlurFeature {
                 @Override
                 public void onAnimationUpdate(ValueAnimator a) {
                     try {
-                        if (!isCurrentAnimation(key, va)) return;
+                        if (!isCurrentAnimation(view, va)) return;
                         float r = (Float) a.getAnimatedValue();
                         if (!Float.isNaN(last) && Math.abs(r - last) < 0.5f) return;
                         last = r;
@@ -739,11 +1375,11 @@ public final class ShortcutBlurFeature {
                 }
             });
             va.addListener(new android.animation.AnimatorListenerAdapter() {
-                @Override public void onAnimationEnd(android.animation.Animator a) { removeAnimation(key); }
-                @Override public void onAnimationCancel(android.animation.Animator a) { removeAnimation(key); }
+                @Override public void onAnimationEnd(android.animation.Animator a) { removeAnimation(view); }
+                @Override public void onAnimationCancel(android.animation.Animator a) { removeAnimation(view); }
             });
             synchronized (iconAnims) {
-                iconAnims.put(key, va);
+                iconAnims.put(view, va);
             }
             ModuleLog.d("ICONANIM", "create icon animator " + from + "->" + to + " dur=" + duration);
             return va;

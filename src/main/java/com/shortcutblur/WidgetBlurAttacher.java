@@ -2,6 +2,7 @@ package com.shortcutblur;
 import android.view.View;
 import android.view.ViewGroup;
 import java.lang.reflect.Method;
+import static com.shortcutblur.Symbols.*;
 public class WidgetBlurAttacher {
     private static final int TYPE_WIDGET = 7;
     private static final long ATTACH_RETRY_MS = 200L;
@@ -49,11 +50,12 @@ public class WidgetBlurAttacher {
             if (attempt > 0) {
                 try { if (!root.isAttachedToWindow()) return; } catch (Throwable ignore) {}
             }
-            synchronized (sDoneHost) {
-                View bound = doneHostOf(host);
-                if (bound != null && Boolean.TRUE.equals(sDone.get(bound))) {
-                    return;
-                }
+            // 已绑定过同一 host 且仍有效 → 直接跳过（避免重复挂载）。
+            View bound = doneHostOf(host);
+            if (bound != null) {
+                boolean already;
+                synchronized (sDone) { already = Boolean.TRUE.equals(sDone.get(bound)); }
+                if (already) return;
             }
             View containerEarly = ViewUtils.findByViewId(root, ClockIds.TARGET_ROOT);
             // 真我 (realme) 时钟：TARGET_ROOT(0x7f0a017b) 在真我上是 date_week_text（非容器），
@@ -76,15 +78,19 @@ public class WidgetBlurAttacher {
                 synchronized (sEverHit) { sEverHit.put(root, Boolean.TRUE); }
                 synchronized (sGaveUp) { sGaveUp.remove(root); }
             } else {
-                if (Boolean.TRUE.equals(sGaveUp.get(root))) {
+                boolean gaveUp;
+                synchronized (sGaveUp) { gaveUp = Boolean.TRUE.equals(sGaveUp.get(root)); }
+                if (gaveUp) {
                     return;
                 }
-                if (attempt >= ATTACH_MAX_RETRY && !Boolean.TRUE.equals(sEverHit.get(root))) {
+                boolean everHit;
+                synchronized (sEverHit) { everHit = Boolean.TRUE.equals(sEverHit.get(root)); }
+                if (attempt >= ATTACH_MAX_RETRY && !everHit) {
                     synchronized (sGaveUp) { sGaveUp.put(root, Boolean.TRUE); }
                     return;
                 }
             }
-            Object launcher = ViewUtils.contextOfType(host.getContext(), "com.android.launcher.Launcher");
+            Object launcher = ViewUtils.contextOfType(host.getContext(), CLS_LAUNCHER);
             if (launcher == null) { ModuleLog.e("BW", "no launcher", null); return; }
             View container = containerEarly;
             if (container == null) { container = ViewUtils.findByViewId(root, ClockIds.CONTAINER); }
@@ -123,14 +129,15 @@ public class WidgetBlurAttacher {
                         + " -> " + promoted.getClass().getSimpleName() + " " + promoted.getWidth() + "x" + promoted.getHeight());
                 container = promoted;
             }
+            // 统一"先 sDoneHost 后 sDone"的加锁顺序，避免与 doneHostOf 形成反向嵌套死锁。
+            View boundNow = doneHostOf(host);   // 内部只用 sDoneHost 锁
             synchronized (sDone) {
-                View bound = doneHostOf(host);
-                if (bound == container || Boolean.TRUE.equals(sDone.get(container))) {
+                if (boundNow == container || Boolean.TRUE.equals(sDone.get(container))) {
                     return;
                 }
                 sDone.put(container, Boolean.TRUE);
-                putDoneHost(host, container);
             }
+            putDoneHost(host, container);       // 内部只用 sDoneHost 锁
             ModuleLog.d("BW", "container=" + container.getClass().getName() + " " + container.getWidth() + "x" + container.getHeight());
             try { container.setTag("OplusBlurBg"); } catch (Throwable t) { ModuleLog.e("BW", "setTag fail", t); }
             boolean ok = tryCardBlurManager(launcher, container);

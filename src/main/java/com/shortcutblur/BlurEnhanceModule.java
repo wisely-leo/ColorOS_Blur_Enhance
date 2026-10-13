@@ -75,7 +75,7 @@ public class BlurEnhanceModule extends XposedModule {
 
     // ---- ② 常量：广播 / 版本 ----
     private static final String ACTION_SETCONF = "com.wiselyleo.blurenhance.SETCONF";
-    private static final String BUILD_TAG = "v45.5.1";
+    private static final String BUILD_TAG = "v46";
 
     // ---- ② 安装状态 ----
     private volatile ClassLoader cl;
@@ -341,13 +341,13 @@ public class BlurEnhanceModule extends XposedModule {
         ModuleLog.i("INSTALL class loaded: " + cls.getName());
         int critical = 0;
         critical += hookBySignature(cls, "c",
-                new String[]{ "android.view.SurfaceControl", "java.lang.Float", "java.lang.Integer", "java.lang.Long" },
+                new String[]{ CLS_SURFACE_CONTROL, "java.lang.Float", "java.lang.Integer", "java.lang.Long" },
                 "c");
         critical += hookBySignature(cls, "e",
-                new String[]{ "android.view.SurfaceControl", "java.lang.Float", "java.lang.Integer", "java.lang.Long" },
+                new String[]{ CLS_SURFACE_CONTROL, "java.lang.Float", "java.lang.Integer", "java.lang.Long" },
                 "e");
         critical += hookBySignature(cls, "d",
-                new String[]{ "android.view.SurfaceControl", "float", "int", "long" },
+                new String[]{ CLS_SURFACE_CONTROL, "float", "int", "long" },
                 "d");
         critical += hookBySignature(cls, "f",
                 new String[]{ "float", "int", "long" },

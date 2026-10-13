@@ -14,6 +14,8 @@ public final class SettingsStore {
     private static final String KEY_IME_BLUR_RADIUS = "ime_blur_radius";
     private static final String KEY_IME_BLUR_CORNER = "ime_blur_corner";
     private static final String KEY_IME_BLUR_MASK   = "ime_blur_mask";
+    private static final String KEY_SHORTCUT_BLUR_RADIUS = "shortcut_blur_radius";
+    private static final String KEY_RECENTS_BLUR_RADIUS  = "recents_blur_radius";
     private static final String KEY_BG_FILE     = "bg_file";
     private static final String KEY_LOG         = "log";
     private static final String KEY_QS_PROBE    = "quicksearch_blur";
@@ -75,6 +77,8 @@ public final class SettingsStore {
     public static final float   DEF_IME_BLUR_RADIUS = 100f;
     public static final float   DEF_IME_BLUR_CORNER = 0f;
     public static final float   DEF_IME_BLUR_MASK   = 1.0f;
+    public static final float   DEF_SHORTCUT_BLUR_RADIUS = 64f;
+    public static final float   DEF_RECENTS_BLUR_RADIUS  = 64f;
     public static final boolean DEF_LOG        = false;
     public static final boolean DEF_QS_PROBE   = true;
     public static final boolean DEF_GALLERY_LIGHT = true;
@@ -265,6 +269,12 @@ public final class SettingsStore {
     public SettingsStore setImeBlurRadius(float v){ sp.edit().putFloat(KEY_IME_BLUR_RADIUS, v).apply(); syncToHost(); return this; }
     public float   getImeBlurMask()   { return sp.getFloat(KEY_IME_BLUR_MASK, DEF_IME_BLUR_MASK); }
     public SettingsStore setImeBlurMask(float v){ sp.edit().putFloat(KEY_IME_BLUR_MASK, v).apply(); syncToHost(); return this; }
+    // 模糊半径：接口保留，但当前不开放用户自定义（不读 sp 用户值，固定默认 64）。
+    // 如需重新开放，把下列 return 改回 sp.getFloat(KEY_..., DEF_...) 并在设置页加回滑块即可。
+    public float   getShortcutBlurRadius(){ return DEF_SHORTCUT_BLUR_RADIUS; }
+    public SettingsStore setShortcutBlurRadius(float v){ sp.edit().putFloat(KEY_SHORTCUT_BLUR_RADIUS, v).apply(); syncToHost(); return this; }
+    public float   getRecentsBlurRadius(){ return DEF_RECENTS_BLUR_RADIUS; }
+    public SettingsStore setRecentsBlurRadius(float v){ sp.edit().putFloat(KEY_RECENTS_BLUR_RADIUS, v).apply(); syncToHost(); return this; }
     public SettingsStore setLog(boolean v)        { sp.edit().putBoolean(KEY_LOG, v).apply(); syncToHost(); return this; }
     public SettingsStore setQsProbe(boolean v)    { sp.edit().putBoolean(KEY_QS_PROBE, v).apply(); syncToHost(); return this; }
     public SettingsStore setGalleryLight(boolean v) { sp.edit().putBoolean(KEY_GALLERY_LIGHT, v).apply(); syncToHost(); return this; }
