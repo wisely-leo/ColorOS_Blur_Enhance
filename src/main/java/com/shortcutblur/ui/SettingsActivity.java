@@ -30,7 +30,7 @@ public class SettingsActivity extends Activity {
     private static final int MAX_BG_MB = 15;
     private static final long MAX_BG_BYTES = MAX_BG_MB * 1024L * 1024L;
 
-    private static final String LOG_TAG_VER = "v45.5.1";
+    private static final String LOG_TAG_VER = "v46";
     static void lg(String s) {
         if (s == null) return;
         if (!App.logEnabled()) return;
@@ -420,7 +420,24 @@ private SettingsStore store;
     }
 
     private static final String CHANGELOG =
-            "v45.5.1\n"
+            "v46\n"
+            + "· 快捷菜单模糊修复与增强（长按图标弹出的一级菜单 + 「更多功能」二级菜单）\n"
+            + "  · 修复一级菜单关闭时短暂「恢复实心 / 闪白」，退出动画全程保持半透明模糊\n"
+            + "  · 修复二级「更多功能」菜单弹出时，桌面图标模糊被误清除的问题\n"
+            + "  · 二级菜单模糊半径独立可调（默认 96，比一级更强），两级互不影响\n"
+            + "  · 二级菜单圆角调整为 16dp，与一级观感统一\n"
+            + "· 新增快捷菜单模糊参数热更（改完即时生效，无需重装）\n"
+            + "  · card_panel_alpha：一级面板不透明度\n"
+            + "  · card_secondary_blur_radius：二级菜单模糊半径\n"
+            + "  · card_blur_corner：二级菜单圆角（dp）\n"
+            + "· 性能与内存优化（快捷菜单模糊链路）\n"
+            + "  · 清理调试探针与失效 Hook，减少无关开销与日志噪声\n"
+            + "  · 模糊动画缓存改用弱引用，消除 View 泄漏与每次动画的临时对象分配\n"
+            + "  · 关闭动画压透明加入面板缓存，消除每帧遍历子视图的开销\n"
+            + "  · 修复若干跨线程集合访问，并统一加锁顺序消除潜在死锁\n"
+            + "· 内部版本号同步至 v46\n"
+            + "\n"
+            + "v45.5.1\n"
             + "· 最近任务缩放下限由 0.92 调整为 0.96（卡片不再缩得过小，观感更稳）\n"
             + "· 修复全局搜索进不去背景模糊偶发报错（移除已失效的窗口背景 Hook）\n"
             + "· 日志降噪：模糊采样率 / 时钟文字颜色两类高频日志按状态去重，避免刷屏\n"
@@ -1067,6 +1084,8 @@ private SettingsStore store;
                             + "\n\n功能开关可在本界面实时调整，保存后由宿主模块读取生效。"
                             + "\n\n重启作用域后立即生效，无需重启手机。"));
             SoftUi.Card cardOss = SoftUi.card(this,
+                    SoftUi.infoBlock(this, "SoftUI",
+                            "本项目自研  ·  基于系统 API 绘制实现"),
                     SoftUi.infoBlock(this, "libxposed API (102)",
                             "libxposed / LSPosed  ·  遵循其自身许可",
                             () -> openUrl("https://github.com/libxposed")),
@@ -1100,7 +1119,7 @@ private SettingsStore store;
                 cardNote,
                 SoftUi.group(this, "权限说明"),
                 cardPerm,
-                SoftUi.group(this, "开源 API 致谢"),
+                SoftUi.group(this, "开源 API 与项目自有 API"),
                 cardOss
             );
             final String[] TABS = { "模块设置", "更多" };
