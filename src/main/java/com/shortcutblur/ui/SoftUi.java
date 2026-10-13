@@ -1060,6 +1060,16 @@ public final class SoftUi {
         }
         private boolean pressGroupScheduled = false;
 
+        public static void requestRefresh(View v) {
+            try {
+                android.view.ViewParent p = v == null ? null : v.getParent();
+                while (p instanceof android.view.View) {
+                    if (p instanceof Card) { ((Card) p).postRefreshPressGroup(); return; }
+                    p = ((android.view.View) p).getParent();
+                }
+            } catch (Throwable ignored) {}
+        }
+
         public void postRefreshPressGroup() {
             if (pressGroupScheduled) return;
             pressGroupScheduled = true;
@@ -1652,14 +1662,14 @@ public final class SoftUi {
             holder.setLayoutParams(lp);
             holder.setVisibility(visible ? View.VISIBLE : View.GONE);
             holder.setAlpha(1f);
-            reapplyEdgeInsets(holder);
+            Card.requestRefresh(holder);
             return;
         }
         final int targetH = measureContentHeight(holder);
         if (visible) {
 
             holder.setVisibility(View.VISIBLE);
-            reapplyEdgeInsets(holder);
+            Card.requestRefresh(holder);
             holder.measure(
                     android.view.View.MeasureSpec.makeMeasureSpec(
                             holder.getWidth() > 0 ? holder.getWidth()
@@ -1680,13 +1690,13 @@ public final class SoftUi {
                 @Override public void onAnimationEnd(android.animation.Animator a) {
                     lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
                     holder.setLayoutParams(lp);
-                    reapplyEdgeInsets(holder);
+                    Card.requestRefresh(holder);
                 }
             });
             holder.setTag(FOLD_ANIM_TAG, va);
             va.start();
         } else {
-            reapplyEdgeInsets(holder);
+            Card.requestRefresh(holder);
             int fromH = holder.getHeight() > 0 ? holder.getHeight() : measureContentHeight(holder);
             ValueAnimator va = ValueAnimator.ofInt(fromH, 0);
             va.setDuration(180);
@@ -1701,7 +1711,7 @@ public final class SoftUi {
                     holder.setLayoutParams(lp);
                     holder.setVisibility(View.GONE);
 
-                    reapplyEdgeInsets(holder);
+                    Card.requestRefresh(holder);
                 }
             });
             holder.setTag(FOLD_ANIM_TAG, va);
@@ -1710,15 +1720,6 @@ public final class SoftUi {
     }
     private static final int FOLD_ANIM_TAG = "softui_fold_anim".hashCode();
 
-    private static void reapplyEdgeInsets(View v) {
-        try {
-            android.view.ViewParent p = v == null ? null : v.getParent();
-            while (p instanceof android.view.View) {
-                if (p instanceof Card) { ((Card) p).postRefreshPressGroup(); return; }
-                p = ((android.view.View) p).getParent();
-            }
-        } catch (Throwable ignored) {}
-    }
     public interface ConfirmCb {
         void onConfirm();
     }
