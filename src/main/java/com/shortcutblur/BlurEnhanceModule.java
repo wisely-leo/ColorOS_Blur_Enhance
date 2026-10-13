@@ -34,24 +34,25 @@ public class BlurEnhanceModule extends XposedModule {
     public void hookPublic(String id, Executable target, XposedInterface.Hooker hooker) {
         hookEx(id, target, hooker);
     }
-    private static final String CLS_POPUP_BLUR_VIEW = "com.android.launcher3.popup.PopupBlurView";
-    private static final String CLS_OPLUS_POPUP = "com.android.launcher3.popup.OplusPopupContainerWithArrow";
-    private static final String CLS_ARROW_POPUP = "com.android.launcher3.popup.ArrowPopup";
-    private static final String CLS_OPLUS_EFFECT = "com.oplus.view.OplusViewBackgroundRenderEffect";
-    private static final String CLS_DRAWABLE = "android.graphics.drawable.Drawable";
-    private static final String CLS_OBJECT_ANIMATOR = "android.animation.ObjectAnimator";
-    private static final String CLS_PROPERTY = "android.util.Property";
-    private static final String CLS_ANIMATOR_SET = "android.animation.AnimatorSet";
-    private static final String CLS_ANIMATOR = "android.animation.Animator";
-    private static final String CLS_TIME_INTERPOLATOR = "android.animation.TimeInterpolator";
-    private static final String CLS_DECELERATE = "android.view.animation.DecelerateInterpolator";
-    private static final String M_GET_POP_BLUR_VIEW = "getPopBlurView";
+
+    private static final String CLS_POPUP_BLUR_VIEW = Symbols.CLS_POPUP_BLUR_VIEW;
+    private static final String CLS_OPLUS_POPUP = Symbols.CLS_OPLUS_POPUP;
+    private static final String CLS_ARROW_POPUP = Symbols.CLS_ARROW_POPUP;
+    private static final String CLS_OPLUS_EFFECT = Symbols.CLS_OPLUS_EFFECT;
+    private static final String CLS_DRAWABLE = Symbols.CLS_DRAWABLE;
+    private static final String CLS_OBJECT_ANIMATOR = Symbols.CLS_OBJECT_ANIMATOR;
+    private static final String CLS_PROPERTY = Symbols.CLS_PROPERTY;
+    private static final String CLS_ANIMATOR_SET = Symbols.CLS_ANIMATOR_SET;
+    private static final String CLS_ANIMATOR = Symbols.CLS_ANIMATOR;
+    private static final String CLS_TIME_INTERPOLATOR = Symbols.CLS_TIME_INTERPOLATOR;
+    private static final String CLS_DECELERATE = Symbols.CLS_DECELERATE;
+    private static final String M_GET_POP_BLUR_VIEW = Symbols.M_GET_POP_BLUR_VIEW;
     private static final String PKG_POSTEFFECT = "com.oplus.blur";
     private static final String PKG_QUICKSEARCH = "com.heytap.quicksearchbox";
     private static final String PKG_CLOCK = "com.coloros.alarmclock";
     private static final String PKG_YUYAN = "com.yuyan.pinyin.offline.release";
-    private static final String CLS_EA = "e.a";
-    private static final String CLS_BLUR_MGR = "com.oplus.posteffect.manager.BlurDrawableManager";
+    private static final String CLS_EA = Symbols.CLS_EA;
+    private static final String CLS_BLUR_MGR = Symbols.CLS_BLUR_MGR;
     private static final float BLUR_RADIUS = 64.0f;
     private static final long BLUR_DURATION = 330L;
     private static final int F_STATIC = 1 << 0;
@@ -250,7 +251,7 @@ public class BlurEnhanceModule extends XposedModule {
                             RecentsBlur.applyConf(i);
                             boolean clockChanged = FeatureFlags.applyFromIntent(i);
                             if (clockChanged) {
-                                try { GlyphBlurRenderer.notifyContentMaybeChangedAll(); } catch (Throwable ignored) {}
+                                try { GlyphBlurRenderer.notifyContentMaybeChangedAll(); } catch (Throwable ignored) { ModuleLog.swallow("module.notify", ignored); }
                             }
                             String mk = i.getStringExtra("mark");
                             if (mk != null) ModuleLog.d("MARK", "==== " + mk + " ====");
@@ -530,7 +531,7 @@ public class BlurEnhanceModule extends XposedModule {
                 ValueAnimator old = iconAnims.remove(key);
                 if (old != null) { try { old.cancel(); } catch (Throwable ignore) {} }
             }
-            try { applyIconBlurRadius(layer, 0.0f, false); } catch (Throwable ignore) {}
+            try { applyIconBlurRadius(layer, 0.0f, false); } catch (Throwable ignore) { ModuleLog.swallow("module.iconApply", ignore); }
             sIconAnimStartedSeq = -1L;
             ViewGroup vg = (ViewGroup) layer.getParent();
             if (vg != null) vg.removeView(layer);
@@ -667,7 +668,7 @@ public class BlurEnhanceModule extends XposedModule {
                 final long seq = sPopupSeq;
                 if (sIconAnimStartedSeq != seq) {
                     sIconAnimStartedSeq = seq;
-                    try { applyIconBlurRadius(itv, 0.01f, false); } catch (Throwable ignore) {}
+                    try { applyIconBlurRadius(itv, 0.01f, false); } catch (Throwable ignore) { ModuleLog.swallow("module.iconApply", ignore); }
                     ModuleLog.d("ICONANIM", "arm icon (defer anim to open, seq=" + seq + ")");
                 } else {
                     ModuleLog.d("ICONANIM", "same popup round, skip re-arm (seq=" + seq + ")");
@@ -830,7 +831,7 @@ public class BlurEnhanceModule extends XposedModule {
             if (drawableCls != null) {
                 Method mw = Reflect.method(view.getClass(), "setWallpaperDrawable", drawableCls);
                 if (mw != null) {
-                    try { mw.invoke(view, (Object) null); wall = true; } catch (Throwable ignore) {}
+                    try { mw.invoke(view, (Object) null); wall = true; } catch (Throwable ignore) { ModuleLog.swallow("module.reflectInvoke", ignore); }
                 }
                 Method md = Reflect.method(view.getClass(), "setDragLayerDrawable", drawableCls);
                 if (md != null) {
@@ -1230,7 +1231,7 @@ public class BlurEnhanceModule extends XposedModule {
                     WidgetBlurAttacher.resetGiveUp((View) vg);
                     WidgetBlurAttacher.attach("[apply]", (View) vg, cl);
                 }
-                try { GlyphBlurRenderer.notifyContentMaybeChangedAll(); } catch (Throwable ignored) {}
+                try { GlyphBlurRenderer.notifyContentMaybeChangedAll(); } catch (Throwable ignored) { ModuleLog.swallow("module.notify", ignored); }
             } catch (Throwable t) {
                 ModuleLog.e("MERGE", "apply post fail", t);
             }

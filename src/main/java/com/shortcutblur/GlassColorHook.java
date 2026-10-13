@@ -7,8 +7,8 @@ import io.github.libxposed.api.XposedModule;
 
 public final class GlassColorHook {
     private static volatile boolean sInstalled = false;
-    private static final String CLS_CONTINUOUS = "com.oplus.posteffect.drawable.ContinuousBlurDrawable";
-    private static final String CLS_BLUR_PARAM = "com.oplus.posteffect.BlurParam";
+    private static final String CLS_CONTINUOUS = Symbols.CLS_CONTINUOUS;
+    private static final String CLS_BLUR_PARAM = Symbols.CLS_BLUR_PARAM;
 
     private GlassColorHook() {}
 

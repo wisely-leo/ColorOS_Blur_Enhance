@@ -51,6 +51,46 @@ public final class ModuleLog {
         d("INFO", detail);
     }
 
+    private static final java.util.concurrent.ConcurrentHashMap<String,
+            java.util.concurrent.atomic.AtomicInteger> SWALLOWED =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    public static void swallow(String tag, Throwable t) {
+        if (!enabled()) return;
+        try {
+            java.util.concurrent.atomic.AtomicInteger c = SWALLOWED.get(tag);
+            if (c == null) {
+                c = new java.util.concurrent.atomic.AtomicInteger();
+                java.util.concurrent.atomic.AtomicInteger prev = SWALLOWED.putIfAbsent(tag, c);
+                if (prev != null) c = prev;
+            }
+            c.incrementAndGet();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    public static void resetSwallowStats() {
+        try { SWALLOWED.clear(); } catch (Throwable ignored) {}
+    }
+
+    public static String swallowStats() {
+        if (!enabled()) return "";
+        try {
+            java.util.List<java.util.Map.Entry<String,
+                    java.util.concurrent.atomic.AtomicInteger>> es =
+                    new java.util.ArrayList<>(SWALLOWED.entrySet());
+            java.util.Collections.sort(es, (a, b) -> b.getValue().get() - a.getValue().get());
+            StringBuilder sb = new StringBuilder("[swallowed] ");
+            for (java.util.Map.Entry<String,
+                    java.util.concurrent.atomic.AtomicInteger> e : es) {
+                sb.append(e.getKey()).append('=').append(e.getValue().get()).append(' ');
+            }
+            return sb.toString().trim();
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
     private static final long MAX_LOG_BYTES = 2L * 1024 * 1024;
     private static Writer logWriter = null;
     private static long logBytes = 0L;

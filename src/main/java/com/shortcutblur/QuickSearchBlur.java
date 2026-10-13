@@ -13,9 +13,8 @@ public final class QuickSearchBlur {
     private static final int ENTER_SOURCE_ASSISTANT_SCREEN = 2;
     private static final int ENTER_SOURCE_ASSISTANT_INFO = 4;
     private static final int ENTER_SOURCE_UNKNOWN = -1;
-    private static final String CLS_RUN_TIME_CONFIG =
-            "com.heytap.quicksearchbox.core.constant.RunTimeConfig";
-    private static final String FLD_QS_ENTER_SOURCE_FLAG = "QS_ENTER_SOURCE_FLAG";
+    private static final String CLS_RUN_TIME_CONFIG = Symbols.CLS_RUN_TIME_CONFIG;
+    private static final String FLD_QS_ENTER_SOURCE_FLAG = Symbols.FLD_QS_ENTER_SOURCE_FLAG;
     private static volatile boolean sInstalled = false;
     private static volatile ClassLoader sLoader = null;
     private QuickSearchBlur() {}
