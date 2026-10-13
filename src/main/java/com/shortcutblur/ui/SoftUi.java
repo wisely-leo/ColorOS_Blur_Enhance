@@ -82,7 +82,7 @@ public final class SoftUi {
 
     public static int   SCRIM       = 0x4D000000;
 
-    private static final int EXTRA_PAD_TAG = 0x7F00B101;
+    private static final int EXTRA_PAD_TAG = View.generateViewId();
 
     public static int   BTN_SUBTLE      = 0x14000000;
     public static int   BTN_SUBTLE_PRESS = 0x28000000;
@@ -527,6 +527,7 @@ public final class SoftUi {
         private float touchSlop = -1f;
         private final RectF track = new RectF();
         private float min, max, value;
+        private float step = 0f;
         private OnChange cb;
         private float pressScale = 0.82f;
         private ValueAnimator scaleAnimator;
@@ -536,10 +537,28 @@ public final class SoftUi {
             setClickable(true);
             touchSlop = android.view.ViewConfiguration.get(c).getScaledTouchSlop();
         }
+
         public void setValue(float v) {
-            value = Math.max(min, Math.min(max, v));
+            value = snapValue(v);
             invalidate();
         }
+
+        public Slider setStep(float step) {
+            this.step = step > 0f ? step : 0f;
+            snap();
+            invalidate();
+            return this;
+        }
+        private float snapValue(float v) {
+            float clamped = Math.max(min, Math.min(max, v));
+            if (step <= 0f) return clamped;
+
+            float k = Math.round((clamped - min) / step);
+            float snapped = min + k * step;
+            snapped = Math.max(min, Math.min(max, snapped));
+            return Math.round(snapped * 1e6f) / 1e6f;
+        }
+        private void snap() { value = snapValue(value); }
         public Slider setOnChange(OnChange c) { this.cb = c; return this; }
 
         private void animatePress(boolean active) {
@@ -628,7 +647,7 @@ public final class SoftUi {
             float left = th, right = getWidth() - th;
             float frac = (right > left) ? (x - left) / (right - left) : 0f;
             frac = Math.max(0f, Math.min(1f, frac));
-            value = min + (max - min) * frac;
+            value = snapValue(min + (max - min) * frac);
             invalidate();
             if (cb != null) cb.onChange(value);
         }
@@ -813,7 +832,48 @@ public final class SoftUi {
     }
 
     public interface ColorInputCb { void onColor(int rgb, boolean valid); }
+    public interface OnInput { void onInput(String text); }
 
+    public static Row input(Context c, String title, String hint, String value,
+                            OnInput onInput) {
+        return input(c, title, hint, value,
+                android.text.InputType.TYPE_CLASS_TEXT, onInput);
+    }
+    public static Row input(Context c, String title, String hint, String value,
+                            int inputType, final OnInput onInput) {
+        final android.widget.EditText et = buildInput(c, BODY_SIZE);
+        et.setBackground(null);
+        et.setPadding(0, 0, 0, 0);
+        et.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        et.setInputType(inputType);
+        if (hint != null) et.setHint(hint);
+        if (value != null) et.setText(value);
+        et.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s2, int a, int b, int d) {}
+            @Override public void onTextChanged(CharSequence s2, int a, int b, int d) {}
+            @Override public void afterTextChanged(android.text.Editable e) {
+                if (onInput != null) onInput.onInput(e == null ? "" : e.toString());
+            }
+        });
+        Row row = new Row(c, title, et, false);
+        return row;
+    }
+
+    static android.widget.EditText buildInput(Context ctx, float textSize) {
+        android.widget.EditText et = new android.widget.EditText(ctx);
+        et.setTextSize(textSize);
+        et.setTextColor(TEXT_PRIMARY);
+        et.setSingleLine(true);
+        et.setHintTextColor(TEXT_SECONDARY);
+        et.setBackground(roundRect(INPUT_FILL, 12f, ACCENT, 1.6f, ctx));
+        int ep = (int) dp(ctx, 14f);
+        et.setPadding(ep, ep, ep, ep);
+        et.setHighlightColor(ACCENT & 0x33FFFFFF);
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            try { et.setTextCursorDrawable(null); } catch (Throwable ignored) {}
+        }
+        return et;
+    }
     public static android.widget.EditText findEditText(View root) {
         if (root instanceof android.widget.EditText) return (android.widget.EditText) root;
         if (root instanceof android.view.ViewGroup) {
@@ -841,22 +901,13 @@ public final class SoftUi {
                 plp.rightMargin = dp(ctx, 12f);
                 line.addView(preview, plp);
 
-                final android.widget.EditText et = new android.widget.EditText(ctx);
+                final android.widget.EditText et = buildInput(ctx, BODY_SIZE + 4f);
                 et.setText(String.format("%06X", initialRgb & 0xFFFFFF));
-                et.setTextSize(BODY_SIZE + 4f);
-                et.setTextColor(TEXT_PRIMARY);
-                et.setSingleLine(true);
                 et.setGravity(Gravity.CENTER);
                 et.setHint("RRGGBB");
-                et.setHintTextColor(TEXT_SECONDARY);
                 et.setInputType(android.text.InputType.TYPE_CLASS_TEXT
                         | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
                         | android.text.InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
-                final android.graphics.drawable.GradientDrawable etBg =
-                        roundRect(INPUT_FILL, 12f, ACCENT, 1.6f, ctx);
-                et.setBackground(etBg);
-                int ep = (int) dp(ctx, 14f);
-                et.setPadding(ep, ep, ep, ep);
                 et.setFilters(new android.text.InputFilter[]{
                         new android.text.InputFilter.LengthFilter(7),
                         new android.text.InputFilter() {
@@ -2460,6 +2511,12 @@ public final class SoftUi {
     public static View slider(Context c, String title, float value,
                               float min, float max, final String unit,
                               Slider.OnChange cb) {
+        return slider(c, title, value, min, max, unit, 0f, cb);
+    }
+
+    public static View slider(Context c, String title, float value,
+                              float min, float max, final String unit,
+                              final float step, Slider.OnChange cb) {
         LinearLayout right = hRow(c);
         final TextView val = text(c, fmt(value) + (unit == null ? "" : unit),
                 SUB_SIZE, TEXT_SECONDARY);
@@ -2468,6 +2525,7 @@ public final class SoftUi {
         vlp.rightMargin = dp(c, 8);
         right.addView(val, vlp);
         final Slider sl = new Slider(c, value, min, max);
+        if (step > 0f) sl.setStep(step);
         sl.setOnChange(new Slider.OnChange() {
             @Override public void onChange(float v) {
                 val.setText(fmt(v) + (unit == null ? "" : unit));
