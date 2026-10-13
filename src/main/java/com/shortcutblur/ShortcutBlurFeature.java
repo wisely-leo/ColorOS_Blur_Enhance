@@ -249,7 +249,7 @@ public final class ShortcutBlurFeature {
                                 }
                                 if (anchor != null && set != null) {
                                     int flags = resolveBlurFlags(anchor);
-                                    ModuleLog.d("ANIM", methodName + " flags=" + flags);
+                                    ModuleLog.dv("ANIM", methodName + " flags=" + flags);
                                     if ((flags & F_WALL) != 0) {
                                         float from = opening ? 0.0f : 1.0f;
                                         float to = opening ? 1.0f : 0.0f;
@@ -480,7 +480,7 @@ public final class ShortcutBlurFeature {
                         if ((cur >>> 24) == (FeatureFlags.CARD_PANEL_ALPHA & 0xFF)) return;
                         int out = want | (cur & 0x00FFFFFF);
                         ((android.graphics.drawable.GradientDrawable) bg).setColor(out);
-                        ModuleLog.d("CARDBLUR", "  repress gdColor 0x" + Integer.toHexString(cur)
+                        ModuleLog.dv("CARDBLUR", "  repress gdColor 0x" + Integer.toHexString(cur)
                                 + " -> 0x" + Integer.toHexString(out));
                     }
                 }
@@ -488,7 +488,7 @@ public final class ShortcutBlurFeature {
             }
             // alpha 字段不是目标值：直接 setAlpha（对普通 Drawable 有效）。
             bg.mutate().setAlpha(FeatureFlags.CARD_PANEL_ALPHA);
-            ModuleLog.d("CARDBLUR", "  repress alpha -> 0x"
+            ModuleLog.dv("CARDBLUR", "  repress alpha -> 0x"
                     + Integer.toHexString(FeatureFlags.CARD_PANEL_ALPHA)
                     + " cls=" + c.getClass().getSimpleName());
         } catch (Throwable ignored) {}
@@ -547,7 +547,7 @@ public final class ShortcutBlurFeature {
                 } catch (Throwable t) {
                     ModuleLog.d("CARDBLUR", "  alpha failed: " + t);
                 }
-                ModuleLog.d("CARDBLUR", "  card panel depth=" + depth
+                ModuleLog.dv("CARDBLUR", "  card panel depth=" + depth
                         + " cls=" + v.getClass().getSimpleName()
                         + " " + v.getWidth() + "x" + v.getHeight()
                         + " alpha=0x" + Integer.toHexString(FeatureFlags.CARD_PANEL_ALPHA)
@@ -982,7 +982,7 @@ try {
             ViewGroup vg = (ViewGroup) parent;
             View existing = sIconBlurLayer;
             if (existing != null && existing.getParent() == vg) {
-                ModuleLog.d("ICONBLUR", "icon blur layer reused (already attached)");
+                ModuleLog.dv("ICONBLUR", "icon blur layer reused (already attached)");
                 return existing;
             }
             View layer = new View(pbv.getContext());
@@ -994,7 +994,7 @@ try {
             int pvIndex = vg.indexOfChild(pbv);
             vg.addView(layer, pvIndex >= 0 ? pvIndex : vg.getChildCount(), lp);
             sIconBlurLayer = layer;
-            ModuleLog.d("ICONBLUR", "icon blur layer added to " + vg.getClass().getSimpleName()
+            ModuleLog.dv("ICONBLUR", "icon blur layer added to " + vg.getClass().getSimpleName()
                     + " idx=" + (pvIndex >= 0 ? pvIndex : vg.getChildCount()) + " children=" + vg.getChildCount());
             return layer;
         } catch (Throwable t) {
@@ -1081,7 +1081,7 @@ try {
             ViewGroup vg = (ViewGroup) layer.getParent();
             if (vg != null) vg.removeView(layer);
             sIconBlurLayer = null;
-            ModuleLog.d("ICONBLUR", "icon blur layer removed (+anim state cleared)");
+            ModuleLog.dv("ICONBLUR", "icon blur layer removed (+anim state cleared)");
         } catch (Throwable t) {
             sIconBlurLayer = null;
         }

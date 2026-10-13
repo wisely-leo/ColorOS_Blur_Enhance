@@ -6,7 +6,10 @@ import static com.shortcutblur.Symbols.*;
 public class WidgetBlurAttacher {
     private static final int TYPE_WIDGET = 7;
     private static final long ATTACH_RETRY_MS = 200L;
-    private static final int ATTACH_MAX_RETRY = 16;
+    // 发热优化：16 → 8。原 16 次 × 200ms = 3.2s 重试窗口，首次失败时在 3.2s 内
+    // 排队 16 个 postDelayed（CPU 反复唤醒）。8 次（1.6s）足以覆盖"launcher 冷启动
+    // 后容器尚未测量完成"的常见时序；仍失败则由 sGaveUp 记录，不再重试。
+    private static final int ATTACH_MAX_RETRY = 8;
     private static final java.util.WeakHashMap<View, Boolean> sDone = new java.util.WeakHashMap<View, Boolean>();
     // host -> container：container 是 host 的子孙，持有 parent 引用会反向强引用 host，
     // 因此 value 也必须用弱引用，否则 WeakHashMap 的 entry 永远无法回收（View 树泄漏）。

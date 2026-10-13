@@ -37,7 +37,9 @@ final class OplusCardBlur {
     // 的 key 永远不可达、entry 永久滞留（典型泄漏）。被 GC 后 apply 会按需重建。
     private static final Map<View, WeakReference<Object>> sMgrOf = new WeakHashMap<>();
 
-    private static final int MAX_RETRY = 6;
+    // 发热优化：6 → 4。原 6 次 × 260ms = 1.56s 重试窗口；每次重试都 new ViewRootManager
+    // 并反射 getDrawable。4 次（1.04s）足以覆盖常见"容器未附着"时序。
+    private static final int MAX_RETRY = 4;
     private static final long RETRY_MS = 260L;
 
     private OplusCardBlur() {}

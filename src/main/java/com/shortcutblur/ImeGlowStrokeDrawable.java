@@ -31,8 +31,10 @@ final class ImeGlowStrokeDrawable extends Drawable {
     /** 仅顶部一条带（非悬浮键盘）。 */
     static final int MODE_TOP_ONLY = 1;
 
-    /** 渐隐层数：足够密才能连续无阶梯。 */
-    private static final int LAYERS = 24;
+    /** 渐隐层数：足够密才能连续无阶梯。
+     *  发热优化：24 → 12。12 层在 8dp 羽化宽度下每层仍不足 1px 重叠，
+     *  视觉上与 24 层几乎无差异（已按 0.5px 重叠补偿），但 drawPath 调用减半。 */
+    private static final int LAYERS = 12;
 
     /** 环使用的填充画笔（EVEN_ODD 挖空内层）。 */
     private final Paint mFill = new Paint(Paint.ANTI_ALIAS_FLAG);

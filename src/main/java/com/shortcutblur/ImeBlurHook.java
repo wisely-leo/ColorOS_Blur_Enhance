@@ -115,7 +115,49 @@ public final class ImeBlurHook {
         ModuleLog.d(TAG, "float probe ready=" + sFloatProbeReady);
     }
 
+    // 发热优化：结果缓存。
+    // isFloatKeyboard 每次调用要做 4 次反射（sFldH7k.get / sFldD7c.get / sFldD7*/get / sMtdJzGet.invoke），
+    // 而 doBlur 在每次键盘 attach / theme / configchange 时都会走到，连续触发时会重复做同样 4 次反射。
+    // 同一台设备同一时刻的“是否悬浮键盘”是稳定的，故缓存结果，仅在横竖屏切换时失效。
+    // 缓存条目随 View 存活（弱引用 key，View 回收即自动失效）。
+    private static final java.util.WeakHashMap<View, Boolean> sFloatCache =
+            new java.util.WeakHashMap<>();
+    private static volatile int sFloatCacheOrientation = -1;
+    private static volatile long sFloatCacheAt = 0L;
+    private static final long FLOAT_CACHE_TTL_MS = 3000L;
+
     private static boolean isFloatKeyboard(View v) {
+        if (v == null) return false;
+        // 缓存命中：同一朝向 + 未过期
+        int ori = currentOrientation(v);
+        long now = android.os.SystemClock.uptimeMillis();
+        Boolean cached = sFloatCache.get(v);
+        if (cached != null && ori == sFloatCacheOrientation
+                && (now - sFloatCacheAt) < FLOAT_CACHE_TTL_MS) {
+            return cached;
+        }
+        boolean val = probeFloatKeyboard(v);
+        // 朝向变化会整体换一批 View，这里顺带清理陈旧条目
+        if (ori != sFloatCacheOrientation) {
+            sFloatCache.clear();
+            sFloatCacheOrientation = ori;
+        }
+        sFloatCacheAt = now;
+        sFloatCache.put(v, val);
+        return val;
+    }
+
+    private static int currentOrientation(View v) {
+        try {
+            android.content.Context ctx = v.getContext();
+            if (ctx == null) return -1;
+            return ctx.getResources().getConfiguration().orientation;
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    private static boolean probeFloatKeyboard(View v) {
         if (!sFloatProbeReady) {
             ensureFloatProbe();
             if (!sFloatProbeReady) return false;
@@ -629,7 +671,8 @@ public final class ImeBlurHook {
                 mgr = sCtorViewRootManager.newInstance(v);
                 d = (Drawable) sGetBlurDrawable.invoke(mgr);
                 if (d == null) {
-                    if (retry < 5) {
+                    // 发热优化：重试上限 5 → 3（每次重试都会重建 glow + LayerDrawable + setBackground）。
+                    if (retry < 3) {
                         ModuleLog.d(TAG, "doBlur: drawable null, retry#" + (retry + 1));
                         v.postDelayed(new Runnable() {
                             @Override

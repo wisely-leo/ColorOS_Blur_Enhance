@@ -1588,39 +1588,75 @@ public final class SoftUi {
             this.content = content;
         }
         @Override View scrollSource() { return content; }
+        // 发热优化：内容指纹缓存。
+        // 原实现每次 onDraw 都会把 target 整棵子树 draw() 到离屏位图（1/SCALE 缩放），
+        // 只要 GlassSync 因任意滚动/布局变化 tick 一次，就会重绘整棵树。
+        // 现在记录「上次绘制时的内容指纹」，指纹未变则直接复用上次的 buf，跳过整树重绘。
+        private long lastFingerprint = Long.MIN_VALUE;
+
+        private long contentFingerprint(int w, int h) {
+            long fp = 1125899906842597L; // 大素数起始
+            fp = fp * 31 + w;
+            fp = fp * 31 + h;
+            fp = fp * 31 + relX;
+            fp = fp * 31 + relY;
+            if (content != null) {
+                fp = fp * 31 + content.getWidth();
+                fp = fp * 31 + content.getHeight();
+                fp = fp * 31 + content.getScrollX();
+                fp = fp * 31 + content.getScrollY();
+                if (content instanceof android.widget.ScrollView) {
+                    android.widget.ScrollView sv = (android.widget.ScrollView) content;
+                    fp = fp * 31 + sv.getScrollX();
+                    fp = fp * 31 + sv.getScrollY();
+                }
+                content.getLocationInWindow(locA);
+                fp = fp * 31 + locA[0];
+                fp = fp * 31 + locA[1];
+            }
+            return fp;
+        }
+
         @Override void drawSource(Canvas cv) {
             int w = getWidth(), h = getHeight();
             if (w <= 0 || h <= 0) return;
             if (relX == Integer.MIN_VALUE) cacheLocation();
             int sw = Math.max(1, w / SCALE), sh = Math.max(1, h / SCALE);
-            if (buf == null || buf.isRecycled()
-                    || buf.getWidth() != sw || buf.getHeight() != sh) {
+            boolean sizeChanged = (buf == null || buf.isRecycled()
+                    || buf.getWidth() != sw || buf.getHeight() != sh);
+            if (sizeChanged) {
                 if (buf != null) buf.recycle();
                 buf = android.graphics.Bitmap.createBitmap(
                         sw, sh, android.graphics.Bitmap.Config.ARGB_8888);
+                lastFingerprint = Long.MIN_VALUE; // 尺寸变化必须重绘
             }
-            buf.eraseColor(CANVAS);
-            Canvas cc = new Canvas(buf);
-            cc.scale(1f / SCALE, 1f / SCALE);
-            if (Backdrop.ready()) Backdrop.drawInto(cc, relX, relY, srcPaint);
-            if (content != null) {
-                content.getLocationInWindow(locA);
-                getLocationInWindow(locB);
-                int tx = locA[0] - locB[0];
-                int ty = locA[1] - locB[1];
-                View target = content;
-                if (content instanceof android.widget.ScrollView) {
-                    android.widget.ScrollView sv = (android.widget.ScrollView) content;
-                    tx -= sv.getScrollX();
-                    ty -= sv.getScrollY();
-                    if (sv.getChildCount() > 0) target = sv.getChildAt(0);
+            // 指纹未变 → 直接复用 buf，跳过 target.draw() 整树重绘
+            long fp = contentFingerprint(w, h);
+            if (fp != lastFingerprint) {
+                buf.eraseColor(CANVAS);
+                Canvas cc = new Canvas(buf);
+                cc.scale(1f / SCALE, 1f / SCALE);
+                if (Backdrop.ready()) Backdrop.drawInto(cc, relX, relY, srcPaint);
+                if (content != null) {
+                    content.getLocationInWindow(locA);
+                    getLocationInWindow(locB);
+                    int tx = locA[0] - locB[0];
+                    int ty = locA[1] - locB[1];
+                    View target = content;
+                    if (content instanceof android.widget.ScrollView) {
+                        android.widget.ScrollView sv = (android.widget.ScrollView) content;
+                        tx -= sv.getScrollX();
+                        ty -= sv.getScrollY();
+                        if (sv.getChildCount() > 0) target = sv.getChildAt(0);
+                    }
+                    cc.save();
+                    cc.translate(tx, ty);
+                    target.draw(cc);
+                    cc.restore();
                 }
-                cc.save();
-                cc.translate(tx, ty);
-                target.draw(cc);
-                cc.restore();
+                cc.setBitmap(null);
+                lastFingerprint = fp;
             }
-            cc.setBitmap(null);
             dst.set(0, 0, w, h);
             cv.drawBitmap(buf, null, dst, srcPaint);
         }
