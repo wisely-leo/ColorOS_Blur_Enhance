@@ -32,8 +32,9 @@ public class SettingsActivity extends Activity {
 
     private static final String LOG_TAG_VER = "v45.4";
     static void lg(String s) {
+        if (s == null) return;
         if (!App.logEnabled()) return;
-        android.util.Log.i("SoftUi", s);
+        try { android.util.Log.i("SoftUi", s); } catch (Throwable ignored) {}
         // 统一走 UiLog：持久 Writer + 2MB 轮转，避免每条日志 open/close 抖动与无限增长。
         UiLog.write(s);
     }

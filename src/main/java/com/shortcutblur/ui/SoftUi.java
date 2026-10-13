@@ -247,6 +247,9 @@ public final class SoftUi {
     }
 
     static final int TAG_GROUP = "softui_row_group".hashCode();
+    // P3：按压反馈幂等缓存 key。注意 setTag(int,Object) 强制 key 的高 8 位 >= 2
+    // （即 key >= 0x02000000），故用固定常量而非 generateViewId()。
+    static final int TAG_PRESS_FEEDBACK = 0x7F00B1F0;
 
     /**
      * 应用按压反馈外观（组容器统一调用，不对外暴露）。
@@ -275,6 +278,18 @@ public final class SoftUi {
         // 颜色优先级：行级自定义 > 所在组（卡片级）> 全局覆盖 / 主题默认
         Integer rowFill = getPressFill(v);
         final int fill = rowFill != null ? rowFill : (groupFill != null ? groupFill : defaultPressFill());
+        // P3：幂等缓存。refreshPressGroup() 会遍历整卡所有行逐个调用本方法，
+        // 折叠动画 / 连续布局期间可能高频触发；而参数（fill, rt, rb）在绝大多数
+        // 刷新中并未变化。用 tag 记住上次参数，未变则直接复用已有背景，跳过重建
+        // （每次重建 = 1 StateListDrawable + 3 GradientDrawable + 3 InsetDrawable）。
+        final int cacheKey = fill * 31 * 31 + (int) (rt * 7) * 31 + (int) (rb * 7);
+        Object last = v.getTag(TAG_PRESS_FEEDBACK);
+        if (last instanceof Integer && ((Integer) last) == cacheKey
+                && v.getBackground() != null) {
+            v.setClickable(true);
+            v.setFocusable(true);
+            return;
+        }
         android.graphics.drawable.StateListDrawable sl =
                 new android.graphics.drawable.StateListDrawable();
         sl.addState(new int[]{android.R.attr.state_pressed},
@@ -284,6 +299,7 @@ public final class SoftUi {
         sl.addState(new int[]{},
                 inset(pressShape(c, 0x00000000, rt, rb), -ex, -topEx, -ex, -botEx));
         v.setBackground(sl);
+        v.setTag(TAG_PRESS_FEEDBACK, cacheKey); // P3：记录本次参数，供下次幂等比对
         v.setClickable(true);
         v.setFocusable(true);
     }
@@ -722,6 +738,10 @@ public final class SoftUi {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint border = new Paint(Paint.ANTI_ALIAS_FLAG);
         private android.graphics.LinearGradient rainbow;
+        // P2：记录 rainbow 生成时的左右端点，布局变化时失效重建（避免彩虹条错位）。
+        private float rainbowLeft = Float.NaN, rainbowRight = Float.NaN;
+        // P1：复用 HSV 数组，避免 onDraw 每帧 new float[3]（拖动时 60fps → 60 个数组/秒）。
+        private final float[] hsv = new float[3];
         private float downX, downY;
         private boolean dragging = false;
         private float touchSlop = -1f;
@@ -745,7 +765,8 @@ public final class SoftUi {
 
         public int currentColor() {
             if (!enabledColor) return 0x9E9E9E;
-            return android.graphics.Color.HSVToColor(new float[]{ frac * 360f, 0.72f, 0.88f });
+            hsv[0] = frac * 360f; hsv[1] = 0.72f; hsv[2] = 0.88f;
+            return android.graphics.Color.HSVToColor(hsv);
         }
 
         private void animatePress(boolean active) {
@@ -767,11 +788,19 @@ public final class SoftUi {
             float cy = h / 2f;
             float left = maxTh, right = w - maxTh;
             track.set(left, cy - trackH / 2f, right, cy + trackH / 2f);
-            if (rainbow == null) {
+            // P2：缓存失效不只看 null，还要看左右端点是否变化（布局变化 / resize）。
+            if (rainbow == null
+                    || Math.abs(rainbowLeft - left) > 0.5f
+                    || Math.abs(rainbowRight - right) > 0.5f) {
                 int[] colors = new int[37];
-                for (int i = 0; i <= 36; i++) colors[i] = android.graphics.Color.HSVToColor(new float[]{ i * 10f, 0.72f, 0.88f });
+                for (int i = 0; i <= 36; i++) {
+                    hsv[0] = i * 10f; hsv[1] = 0.72f; hsv[2] = 0.88f;
+                    colors[i] = android.graphics.Color.HSVToColor(hsv);
+                }
                 rainbow = new android.graphics.LinearGradient(left, 0, right, 0, colors, null,
                         android.graphics.Shader.TileMode.CLAMP);
+                rainbowLeft = left;
+                rainbowRight = right;
             }
             paint.setShader(enabledColor ? rainbow : null);
             if (!enabledColor) paint.setColor(0xFFD0D0D0);
@@ -786,7 +815,9 @@ public final class SoftUi {
 
             float cx = left + (right - left) * frac;
             if (enabledColor) {
-                paint.setColor(android.graphics.Color.HSVToColor(new float[]{ frac * 360f, 0.72f, 0.88f }));
+                // P1：复用字段数组，避免拖动时每帧 new float[3]。
+                hsv[0] = frac * 360f; hsv[1] = 0.72f; hsv[2] = 0.88f;
+                paint.setColor(android.graphics.Color.HSVToColor(hsv));
             } else {
                 paint.setColor(0xFFBDBDBD);
             }
@@ -1680,11 +1711,9 @@ public final class SoftUi {
             }
             if (ticks <= 3 || ticks % 120 == 0) {
                 View h = hooked == null ? null : hooked.get();
-                if (SoftUi.DIAG) {
-                    SoftUi.diag("tick#" + ticks + " 层数=" + alive + " scrollY="
+                SoftUi.diag("tick#" + ticks + " 层数=" + alive + " scrollY="
                             + (h instanceof android.widget.ScrollView
                                 ? ((android.widget.ScrollView) h).getScrollY() : -1));
-                }
             }
         }
         static void refresh() {
@@ -1743,17 +1772,17 @@ public final class SoftUi {
     }
 
     /**
-     * SoftUi 的诊断输出开关。false 时 {@link #diag(String)} 直接返回，零开销。
-     */
-    static boolean DIAG = true;
-
-    /**
      * 诊断日志统一入口：只做 logcat + 委托给既有的 {@code com.shortcutblur.ui.UiLog}
-     * （持久 Writer + 2MB 轮转）。原先 Effects 内自带一份重复实现，已删除。
+     * （持久 Writer + 2MB 轮转）。
+     *
+     * <p>开关统合：不再使用独立的 {@code DIAG} 字段，改为与功能日志共用
+     * {@link App#logEnabled()}（SharedPreferences {@code "log"}，默认关）。
+     * 这样 UI 日志与功能日志行为一致——用户开了才写，关了全静默。
      */
     static void diag(String s) {
-        if (!DIAG) return;
-        android.util.Log.i("SoftUi", s);
+        if (s == null) return;
+        if (!App.logEnabled()) return;
+        try { android.util.Log.i("SoftUi", s); } catch (Throwable ignored) {}
         UiLog.write("[fx] " + s);
     }
 
