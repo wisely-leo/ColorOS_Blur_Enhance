@@ -259,6 +259,20 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         d.setCornerRadius(dp(c, radiusDp));
         return d;
     }
+    /** 圆角 + 填充 + 描边（strokeDp 单位 dp）。 */
+    private static GradientDrawable roundRect(int fill, float radiusDp, int strokeColor,
+                                             float strokeDp, Context c) {
+        GradientDrawable d = roundRect(fill, radiusDp, c);
+        if (strokeDp > 0f) d.setStroke(dp(c, strokeDp), strokeColor);
+        return d;
+    }
+    /** 水平居中行（orientation=HORIZONTAL + gravity=CENTER_VERTICAL）的公共构造。 */
+    private static LinearLayout hRow(Context c) {
+        LinearLayout l = new LinearLayout(c);
+        l.setOrientation(LinearLayout.HORIZONTAL);
+        l.setGravity(Gravity.CENTER_VERTICAL);
+        return l;
+    }
     public static class Switch extends View {
         public interface OnChange { void onChange(boolean value); }
         public interface OnToggle { void onToggle(boolean value); }
@@ -651,9 +665,7 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
                                    ColorSlider.OnColorChange cb) {
         ColorSlider cs = new ColorSlider(c, startFrac);
         if (cb != null) cs.setOnChange(cb);
-        LinearLayout right = new LinearLayout(c);
-        right.setOrientation(LinearLayout.HORIZONTAL);
-        right.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout right = hRow(c);
         right.addView(cs);
         Row row = new Row(c, title, right, false);
         row.post(() -> {
@@ -717,22 +729,17 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         return null;
     }
 
+    /** 取色弹窗：颜色预览 + 十六进制输入框 + 取消/确定。 */
     public static void colorPickerDialog(final View anchor, String title, int initialRgb,
                                          final ColorInputCb cb) {
         showPanel(anchor, title, 16f, new PanelBuilder() {
             @Override public void build(ViewGroup host, final Context ctx,
                                         final LinearLayout inner, android.widget.FrameLayout panel,
                                         final Runnable dismiss) {
-
-                LinearLayout line = new LinearLayout(ctx);
-                line.setOrientation(LinearLayout.HORIZONTAL);
-                line.setGravity(Gravity.CENTER_VERTICAL);
+                LinearLayout line = hRow(ctx);
                 final View preview = new View(ctx);
                 final android.graphics.drawable.GradientDrawable pv =
-                        new android.graphics.drawable.GradientDrawable();
-                pv.setCornerRadius(dp(ctx, 12f));
-                pv.setColor(0xFF000000 | (initialRgb & 0xFFFFFF));
-                pv.setStroke(dp(ctx, 1f), INPUT_STROKE);
+                        roundRect(0xFF000000 | (initialRgb & 0xFFFFFF), 12f, INPUT_STROKE, 1f, ctx);
                 preview.setBackground(pv);
                 LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(dp(ctx, 48f), dp(ctx, 48f));
                 plp.rightMargin = dp(ctx, 12f);
@@ -750,10 +757,7 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
                         | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
                         | android.text.InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
                 final android.graphics.drawable.GradientDrawable etBg =
-                        new android.graphics.drawable.GradientDrawable();
-                etBg.setCornerRadius(dp(ctx, 12f));
-                etBg.setColor(INPUT_FILL);
-                etBg.setStroke(dp(ctx, 1.6f), ACCENT);
+                        roundRect(INPUT_FILL, 12f, ACCENT, 1.6f, ctx);
                 et.setBackground(etBg);
                 int ep = (int) dp(ctx, 14f);
                 et.setPadding(ep, ep, ep, ep);
@@ -801,28 +805,11 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
                     @Override public void afterTextChanged(android.text.Editable s2) { eval.accept(s2.toString()); }
                 });
 
-                LinearLayout btnRow = new LinearLayout(ctx);
-                btnRow.setOrientation(LinearLayout.HORIZONTAL);
-                btnRow.setGravity(Gravity.BOTTOM);
-                TextView btnCancel = dialogButton(ctx, "取消", TEXT_SECONDARY, false, true);
-                btnCancel.setOnClickListener(v -> dismiss.run());
-                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(0, dp(ctx, 46f), 1f);
-                clp.rightMargin = dp(ctx, 8f);
-                btnRow.addView(btnCancel, clp);
-                TextView btnOk = dialogButton(ctx, "确定", ACCENT, true, true);
-                btnOk.setOnClickListener(v -> {
-                    dismiss.run();
-                    eval.accept(et.getText().toString());
+                // 确定：dismiss 后先做一次即时校验（eval），有效才回调
+                addDialogButtons(ctx, inner, "取消", "确定", dismiss, null, () -> {
+                    try { eval.accept(et.getText().toString()); } catch (Throwable ignored) {}
                     if (result[1] == 1 && cb != null) cb.onColor(result[0], true);
                 });
-                LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(0, dp(ctx, 46f), 1f);
-                olp.leftMargin = dp(ctx, 8f);
-                btnRow.addView(btnOk, olp);
-                LinearLayout.LayoutParams brlp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                brlp.topMargin = dp(ctx, 12f);
-                inner.addView(btnRow, brlp);
-
                 et.postDelayed(new Runnable() {
                     @Override public void run() {
                         try {
@@ -1618,6 +1605,7 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         void onConfirm();
     }
 
+    /** 信息弹窗：仅一个「关闭」按钮（全宽）。 */
     public static void infoDialog(View anchor, String title, String message, String closeText) {
         final String msg = message;
         final String closeLabel = (closeText == null ? "关闭" : closeText);
@@ -1625,50 +1613,9 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
             @Override public void build(ViewGroup host, final Context ctx,
                                         final LinearLayout inner, android.widget.FrameLayout panel,
                                         final Runnable dismiss) {
-                if (msg != null && msg.length() > 0) {
-                    TextView tvM = text(ctx, msg, SUB_SIZE + 2f, TEXT_SECONDARY);
-                    tvM.setGravity(Gravity.START);
-                    tvM.setLineSpacing(dp(ctx, 5f), 1f);
-                    final android.widget.ScrollView msgScroll = new android.widget.ScrollView(ctx);
-                    msgScroll.setVerticalFadingEdgeEnabled(true);
-                    msgScroll.setFadingEdgeLength(dp(ctx, 20f));
-                    msgScroll.setVerticalScrollBarEnabled(false);
-                    msgScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-                    msgScroll.addView(tvM, new android.view.ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.WRAP_CONTENT));
-                    LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.WRAP_CONTENT);
-                    mlp.bottomMargin = dp(ctx, 16f);
-                    inner.addView(msgScroll, mlp);
-
-                    try {
-                        int panelW = ctx.getResources().getDisplayMetrics().widthPixels - dp(ctx, 24f);
-                        int contentW = panelW - dp(ctx, (PAD + 6f) * 2f);
-                        tvM.measure(
-                                View.MeasureSpec.makeMeasureSpec(contentW, View.MeasureSpec.AT_MOST),
-                                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
-                        int maxMsgH = Math.round(ctx.getResources()
-                                .getDisplayMetrics().heightPixels * 0.55f);
-                        int th = tvM.getMeasuredHeight();
-                        if (th > maxMsgH) {
-                            mlp.height = maxMsgH;
-                            msgScroll.setLayoutParams(mlp);
-                        }
-                    } catch (Throwable ignored) {}
-                }
-                LinearLayout btnRow = new LinearLayout(ctx);
-                btnRow.setOrientation(LinearLayout.HORIZONTAL);
-                TextView btnClose = dialogButton(ctx, closeLabel, ACCENT, true, true);
-                btnClose.setOnClickListener(v -> dismiss.run());
-                btnRow.addView(btnClose, new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, dp(ctx, 46f)));
-                LinearLayout.LayoutParams brlp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT);
-                brlp.topMargin = dp(ctx, 12f);
-                inner.addView(btnRow, brlp);
+                addDialogMessage(ctx, inner, msg, Gravity.START);
+                // 单按钮：closeLabel 显示为确定按钮样式
+                addDialogButtons(ctx, inner, closeLabel, null, dismiss, null, null);
             }
         });
     }
@@ -1687,69 +1634,17 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
             @Override public void build(ViewGroup host, final Context ctx,
                                         final LinearLayout inner, android.widget.FrameLayout panel,
                                         final Runnable dismiss) {
-                if (msg != null && msg.length() > 0) {
-                    TextView tvM = text(ctx, msg, SUB_SIZE + 2f, TEXT_SECONDARY);
-                    tvM.setGravity(Gravity.CENTER);
-                    tvM.setLineSpacing(dp(ctx, 5f), 1f);
-                    final android.widget.ScrollView msgScroll = new android.widget.ScrollView(ctx);
-                    msgScroll.setVerticalFadingEdgeEnabled(true);
-                    msgScroll.setFadingEdgeLength(dp(ctx, 20f));
-                    msgScroll.setVerticalScrollBarEnabled(false);
-                    msgScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-                    msgScroll.addView(tvM, new android.view.ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.WRAP_CONTENT));
-                    LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.WRAP_CONTENT);
-                    mlp.bottomMargin = dp(ctx, 16f);
-                    inner.addView(msgScroll, mlp);
-
-                    try {
-                        int panelW = ctx.getResources().getDisplayMetrics().widthPixels - dp(ctx, 24f);
-                        int contentW = panelW - dp(ctx, (PAD + 6f) * 2f);
-                        tvM.measure(
-                                View.MeasureSpec.makeMeasureSpec(contentW, View.MeasureSpec.AT_MOST),
-                                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
-                        int maxMsgH = Math.round(ctx.getResources()
-                                .getDisplayMetrics().heightPixels * 0.55f);
-                        int th = tvM.getMeasuredHeight();
-                        if (th > maxMsgH) {
-                            mlp.height = maxMsgH;
-                            msgScroll.setLayoutParams(mlp);
-                        }
-                    } catch (Throwable ignored) {}
-                }
-                LinearLayout btnRow = new LinearLayout(ctx);
-                btnRow.setOrientation(LinearLayout.HORIZONTAL);
-                btnRow.setGravity(Gravity.BOTTOM);
-                TextView btnCancel = dialogButton(ctx, cancelLabel, TEXT_SECONDARY, false, true);
-                btnCancel.setOnClickListener(v -> {
-                    dismiss.run();
-                    if (onCancel != null) {
-                        try { onCancel.onConfirm(); } catch (Throwable ignored) {}
-                    }
-                });
-                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(0, dp(ctx, 46f), 1f);
-                clp.rightMargin = dp(ctx, 8f);
-                btnRow.addView(btnCancel, clp);
-                TextView btnOk = dialogButton(ctx, okLabel, ACCENT, true, true);
-                btnOk.setOnClickListener(v -> {
-                    dismiss.run();
-                    if (onConfirm != null) onConfirm.onConfirm();
-                });
-                LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(0, dp(ctx, 46f), 1f);
-                olp.leftMargin = dp(ctx, 8f);
-                btnRow.addView(btnOk, olp);
-                LinearLayout.LayoutParams brlp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT);
-                brlp.topMargin = dp(ctx, 12f);
-                inner.addView(btnRow, brlp);
+                addDialogMessage(ctx, inner, msg, Gravity.CENTER);
+                addDialogButtons(ctx, inner, cancelLabel, okLabel, dismiss,
+                        onCancel == null ? null : () -> {
+                            try { onCancel.onConfirm(); } catch (Throwable ignored) {}
+                        },
+                        onConfirm == null ? null : () -> {
+                            try { onConfirm.onConfirm(); } catch (Throwable ignored) {}
+                        });
             }
         });
     }
-
     public interface PanelBuilder {
         void build(ViewGroup host, Context ctx, LinearLayout inner, android.widget.FrameLayout panel, Runnable dismiss);
     }
@@ -1941,9 +1836,7 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
     public static View segmentRow(Context c, String title, final String[] labels,
                                   int selected, final IntCb cb) {
         final SegmentedView seg = new SegmentedView(c, labels, selected, cb);
-        LinearLayout line = new LinearLayout(c);
-        line.setOrientation(LinearLayout.HORIZONTAL);
-        line.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout line = hRow(c);
         line.setMinimumHeight(dp(c, ROW_H));
         if (title != null && title.length() > 0) {
             TextView tv = text(c, title, BODY_SIZE, TEXT_PRIMARY);
@@ -2169,6 +2062,90 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         });
         return t;
     }
+    /** 弹窗消息正文：TextView + 可滚动容器 + 按屏高 55% 限高。gravity 传 CENTER / START。 */
+    private static void addDialogMessage(final Context ctx, final LinearLayout inner,
+                                         final String msg, final int gravity) {
+        if (msg == null || msg.length() == 0) return;
+        TextView tvM = text(ctx, msg, SUB_SIZE + 2f, TEXT_SECONDARY);
+        tvM.setGravity(gravity);
+        tvM.setLineSpacing(dp(ctx, 5f), 1f);
+        final android.widget.ScrollView msgScroll = new android.widget.ScrollView(ctx);
+        msgScroll.setVerticalFadingEdgeEnabled(true);
+        msgScroll.setFadingEdgeLength(dp(ctx, 20f));
+        msgScroll.setVerticalScrollBarEnabled(false);
+        msgScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        msgScroll.addView(tvM, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        mlp.bottomMargin = dp(ctx, 16f);
+        inner.addView(msgScroll, mlp);
+        try {
+            int panelW = ctx.getResources().getDisplayMetrics().widthPixels - dp(ctx, 24f);
+            int contentW = panelW - dp(ctx, (PAD + 6f) * 2f);
+            tvM.measure(
+                    View.MeasureSpec.makeMeasureSpec(contentW, View.MeasureSpec.AT_MOST),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+            int maxMsgH = Math.round(ctx.getResources().getDisplayMetrics().heightPixels * 0.55f);
+            int th = tvM.getMeasuredHeight();
+            if (th > maxMsgH) {
+                mlp.height = maxMsgH;
+                msgScroll.setLayoutParams(mlp);
+            }
+        } catch (Throwable ignored) {}
+    }
+    /**
+     * 弹窗按钮行。
+     * okLabel == null → 单按钮（cancelLabel，全宽 filled），点击后 dismiss 并回调 onOk；
+     * 否则 → 取消 + 确定两按钮等宽，点击均先 dismiss，再回调 onCancel / onOk。
+     */
+    private static void addDialogButtons(final Context ctx, final LinearLayout inner,
+                                         final String cancelLabel, final String okLabel,
+                                         final Runnable dismiss,
+                                         final Runnable onCancel, final Runnable onOk) {
+        LinearLayout btnRow = new LinearLayout(ctx);
+        btnRow.setOrientation(LinearLayout.HORIZONTAL);
+        btnRow.setGravity(Gravity.BOTTOM);
+        if (okLabel == null) {
+            TextView btnClose = dialogButton(ctx, cancelLabel, ACCENT, true, true);
+            btnClose.setOnClickListener(v -> {
+                dismiss.run();
+                if (onOk != null) {
+                    try { onOk.run(); } catch (Throwable ignored) {}
+                }
+            });
+            btnRow.addView(btnClose, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(ctx, 46f)));
+        } else {
+            TextView btnCancel = dialogButton(ctx, cancelLabel, TEXT_SECONDARY, false, true);
+            btnCancel.setOnClickListener(v -> {
+                dismiss.run();
+                if (onCancel != null) {
+                    try { onCancel.run(); } catch (Throwable ignored) {}
+                }
+            });
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(0, dp(ctx, 46f), 1f);
+            clp.rightMargin = dp(ctx, 8f);
+            btnRow.addView(btnCancel, clp);
+            TextView btnOk = dialogButton(ctx, okLabel, ACCENT, true, true);
+            btnOk.setOnClickListener(v -> {
+                dismiss.run();
+                if (onOk != null) {
+                    try { onOk.run(); } catch (Throwable ignored) {}
+                }
+            });
+            LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(0, dp(ctx, 46f), 1f);
+            olp.leftMargin = dp(ctx, 8f);
+            btnRow.addView(btnOk, olp);
+        }
+        LinearLayout.LayoutParams brlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        brlp.topMargin = dp(ctx, 12f);
+        inner.addView(btnRow, brlp);
+    }
     private static int darken(int color, float k) {
         int a = (color >>> 24) & 0xFF;
         int r = (int) (((color >> 16) & 0xFF) * k);
@@ -2256,9 +2233,7 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         return r;
     }
     public static View actionArrowBlock(Context c, String title, String subtitle, final OnClick cb) {
-        LinearLayout line = new LinearLayout(c);
-        line.setOrientation(LinearLayout.HORIZONTAL);
-        line.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout line = hRow(c);
         LinearLayout texts = new LinearLayout(c);
         texts.setOrientation(LinearLayout.VERTICAL);
         TextView t1 = text(c, title == null ? "" : title, BODY_SIZE, TEXT_PRIMARY);
@@ -2293,9 +2268,7 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         return outer;
     }
     public static Row actionArrow(Context c, String title, View right, final OnClick cb) {
-        LinearLayout wrap = new LinearLayout(c);
-        wrap.setOrientation(LinearLayout.HORIZONTAL);
-        wrap.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout wrap = hRow(c);
         if (right != null) wrap.addView(right);
         TextView arrow = text(c, "›", BODY_SIZE + 4, TEXT_SECONDARY);
         LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(
@@ -2336,9 +2309,7 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
         col.setOrientation(LinearLayout.VERTICAL);
         col.setMinimumHeight(dp(c, ROW_H));
         col.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout line = new LinearLayout(c);
-        line.setOrientation(LinearLayout.HORIZONTAL);
-        line.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout line = hRow(c);
         LinearLayout texts = new LinearLayout(c);
         texts.setOrientation(LinearLayout.VERTICAL);
         TextView t1 = text(c, title == null ? "" : title, BODY_SIZE, TEXT_PRIMARY);
@@ -2370,9 +2341,7 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
     public static View slider(Context c, String title, float value,
                               float min, float max, final String unit,
                               Slider.OnChange cb) {
-        LinearLayout right = new LinearLayout(c);
-        right.setOrientation(LinearLayout.HORIZONTAL);
-        right.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout right = hRow(c);
         final TextView val = text(c, fmt(value) + (unit == null ? "" : unit),
                 SUB_SIZE, TEXT_SECONDARY);
         LinearLayout.LayoutParams vlp = new LinearLayout.LayoutParams(
