@@ -187,8 +187,44 @@ public final class SoftUi {
         v.setBackground(sl);
         v.setClickable(true);
         v.setFocusable(true);
+        // pressFeedback 用负 InsetDrawable 把按下高亮向外扩出 PAD，
+        // 需要父容器不裁剪该溢出区域，否则点按反馈只覆盖控件本身、无法铺满整行。
+        // 这里向上解除裁剪（遇已放开裁剪的容器即止，避免无谓遍历）。
+        unclampAncestors(v);
 
-try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable ignored) {}
+        try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable ignored) {}
+    }
+
+    /**
+     * 向上解除祖先容器的裁剪，使负 inset 的按压高亮能溢出到整行边界。
+     * 到已放开裁剪的容器（或非 ViewGroup）即停止。
+     */
+    private static void unclampAncestors(View v) {
+        try {
+            android.view.ViewParent p = v == null ? null : v.getParent();
+            if (p == null) {
+                // 尚未挂载到父级（pressFeedback 常在 addView 之前调用）：
+                // 下一帧重试一次，确保挂载后再解除裁剪。
+                if (v != null) {
+                    v.post(new Runnable() {
+                        @Override public void run() { unclampAncestors(v); }
+                    });
+                }
+                return;
+            }
+            int guard = 0;
+            while (p instanceof ViewGroup && guard++ < 8) {
+                ViewGroup g = (ViewGroup) p;
+                boolean changed = g.getClipChildren() || g.getClipToPadding();
+                if (changed) {
+                    g.setClipChildren(false);
+                    g.setClipToPadding(false);
+                }
+                // 已放开裁剪的容器，其上层通常也已放开，无需继续向上。
+                if (!changed) break;
+                p = g.getParent();
+            }
+        } catch (Throwable ignored) {}
     }
 
     private static android.graphics.drawable.Drawable inset(
@@ -938,15 +974,42 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
                 default:       rt = false; rb = false; break;
             }
             SoftUi.pressFeedback(v, fill, r, rt, rb);
-            v.setTag(TAG_PRESS, Boolean.TRUE);
+v.setTag(TAG_PRESS, Boolean.TRUE);
         }
         @Override public void addView(View child, int index, ViewGroup.LayoutParams params) {
-            if (inner != null && child != inner) { inner.addView(child, params); return; }
+            if (inner != null && child != inner) {
+                inner.addView(child, params);
+                scheduleEdgeInsets();
+                return;
+            }
             super.addView(child, index, params);
         }
         @Override public void addView(View child) {
-            if (inner != null && child != inner) { inner.addView(child); return; }
+            if (inner != null && child != inner) {
+                inner.addView(child);
+                scheduleEdgeInsets();
+                return;
+            }
             super.addView(child);
+        }
+        /**
+         * 自动重算按压高亮边界。
+         * pressFeedback 用负 InsetDrawable 把按下高亮向外扩出 PAD，
+         * 若子项是在 applyEdgeInsets() 之后动态加入（或使用者未显式调用），
+         * 溢出部分会被父容器裁剪 → 点按反馈无法铺满整行。
+         * 这里在每次 addView 后把重算收敛到下一帧，让 Card 自洽，
+         * 不依赖外部是否走 card() 工厂或手动调用 applyEdgeInsets()。
+         */
+        private boolean edgeInsetsScheduled = false;
+        private void scheduleEdgeInsets() {
+            if (edgeInsetsScheduled) return;
+            edgeInsetsScheduled = true;
+            post(new Runnable() {
+                @Override public void run() {
+                    edgeInsetsScheduled = false;
+                    applyEdgeInsets(-1f);
+                }
+            });
         }
         public void enableGlass(float radiusDp, int tintColor) {
             if (glass != null) return;
