@@ -24,6 +24,7 @@ import io.github.libxposed.api.XposedModuleInterface;
 import static com.shortcutblur.BlurLib.*;
 import static com.shortcutblur.Symbols.*;
 public class BlurEnhanceModule extends XposedModule {
+
     private final RecentsBlur.HookApi recentsApi = new RecentsBlur.HookApi() {
         @Override public void hook(String id, Executable target, XposedInterface.Hooker hooker) {
             hookEx(id, target, hooker);
@@ -35,44 +36,54 @@ public class BlurEnhanceModule extends XposedModule {
     public void hookPublic(String id, Executable target, XposedInterface.Hooker hooker) {
         hookEx(id, target, hooker);
     }
+
     private static final String PKG_POSTEFFECT = "com.oplus.blur";
     private static final String PKG_QUICKSEARCH = "com.heytap.quicksearchbox";
     private static final String PKG_CLOCK = "com.coloros.alarmclock";
     private static final String PKG_YUYAN = "com.yuyan.pinyin.offline.release";
+
     private static final float BLUR_RADIUS = 64.0f;
     private static final long BLUR_DURATION = 330L;
+    private static final long DEPTH_FALLBACK_DELAY = 500L;
+    private static final long SWALLOW_RESET_DELAY = 450L;
+
     private static final int F_STATIC = 1 << 0;
     private static final int F_ICON = 1 << 1;
     private static final int F_WALL = 1 << 2;
     private static final int F_ICON_ANIM = 1 << 3;
-    private static final long DEPTH_FALLBACK_DELAY = 500L;
-    private volatile ClassLoader cl;
-    private static volatile boolean sScreenReceiverInstalled = false;
-    private static volatile boolean sConfReceiverInstalled = false;
+
     private static final String ACTION_SETCONF = "com.wiselyleo.blurenhance.SETCONF";
     private static final String BUILD_TAG = "v45.5";
-    private volatile boolean installed = false;
-    private final java.util.WeakHashMap<android.view.View, String> sLastClockText = new java.util.WeakHashMap<android.view.View, String>();
-    private volatile boolean postEffectInstalled = false;
-    private final Set<Method> peHooked = new HashSet<>();
 
-    private final Set<String> peScaleLogged = java.util.concurrent.ConcurrentHashMap.newKeySet();
-    private final Map<View, Boolean> armed = new WeakHashMap<>();
-    private final Map<String, ValueAnimator> iconAnims = new ConcurrentHashMap<>();
-    private final Set<String> dumpedCls = new HashSet<>();
-    private final Map<View, Integer> flagsCache = new WeakHashMap<>();
+    private volatile ClassLoader cl;
+    private volatile boolean installed = false;
+    private volatile boolean postEffectInstalled = false;
+    private static volatile boolean sScreenReceiverInstalled = false;
+    private static volatile boolean sConfReceiverInstalled = false;
+
     static volatile boolean sShortcutBlurActive = false;
     private static volatile View sIconBlurLayer = null;
     private static volatile long sPopupSeq = 0L;
     private static volatile long sIconAnimStartedSeq = -1L;
+    private static volatile boolean sFadingOut = false;
+    private static volatile int sSwallowCount = 0;
+
+    private final Map<View, Boolean> armed = new WeakHashMap<>();
+    private final Map<View, Integer> flagsCache = new WeakHashMap<>();
+    private final Map<String, ValueAnimator> iconAnims = new ConcurrentHashMap<>();
+
+    private final Set<Method> peHooked = new HashSet<>();
+
+    private final Set<String> peScaleLogged = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private static volatile boolean sOplusEffectResolved = false;
     private static volatile Class<?> sOplusEffectCls = null;
     private static volatile Method sSetBgRenderEffect = null;
     private static volatile Method sSetRenderEffectViewMethod = null;
     private static volatile boolean sOplusApiDumped = false;
-    private static volatile boolean sFadingOut = false;
-    private static final long SWALLOW_RESET_DELAY = 450L;
-    private static volatile int sSwallowCount = 0;
+    private final Set<String> dumpedCls = new HashSet<>();
+
+    private final java.util.WeakHashMap<android.view.View, String> sLastClockText = new java.util.WeakHashMap<android.view.View, String>();
+
     @Override
     public void onModuleLoaded(XposedModuleInterface.ModuleLoadedParam param) {
     }
@@ -164,6 +175,7 @@ public class BlurEnhanceModule extends XposedModule {
             ModuleLog.e("READY", "onPackageReady failed", t);
         }
     }
+
     private void installScreenReceiverViaApp(XposedModuleInterface.PackageReadyParam param) {
         if (sScreenReceiverInstalled) return;
         synchronized (BlurEnhanceModule.class) {
@@ -311,6 +323,7 @@ public class BlurEnhanceModule extends XposedModule {
         }
         return r;
     }
+
     private int hookPopupFinish(Class<?> cls) {
         int n = 0;
         try {
@@ -986,6 +999,7 @@ public class BlurEnhanceModule extends XposedModule {
             return null;
         }
     }
+
     private boolean installPostEffectHooks(ClassLoader loader) {
         Class<?> cls;
         try {
@@ -1111,6 +1125,7 @@ public class BlurEnhanceModule extends XposedModule {
         return cl;
     }
     private volatile boolean sRemoteViewsHooked = false;
+
     private void hookRemoteViewsApply(ClassLoader cl) {
         if (sRemoteViewsHooked) return;
 
