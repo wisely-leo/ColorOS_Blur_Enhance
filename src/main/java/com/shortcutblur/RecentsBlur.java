@@ -371,7 +371,7 @@ final class RecentsBlur {
             }
         };
         sPendingEnter = r;
-        try { sRecentsHandler.postDelayed(r, STATE_FALLBACK_DELAY_MS); } catch (Throwable ignore) {}
+        try { sRecentsHandler.postDelayed(r, STATE_FALLBACK_DELAY_MS); } catch (Throwable ignore) { ModuleLog.swallow("recents.schedule", ignore); }
     }
     private static void stateFallbackExit(Object lrvSelf, final String why) {
         if (!sStateInOverview) return;
@@ -396,7 +396,7 @@ final class RecentsBlur {
             }
         };
         sPendingExit = r;
-        try { sRecentsHandler.postDelayed(r, STATE_FALLBACK_DELAY_MS); } catch (Throwable ignore) {}
+        try { sRecentsHandler.postDelayed(r, STATE_FALLBACK_DELAY_MS); } catch (Throwable ignore) { ModuleLog.swallow("recents.schedule", ignore); }
     }
     private static void cancelPendingRecentsClear() {
         Runnable r = sPendingClear;

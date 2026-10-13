@@ -8,14 +8,15 @@ public final class BlurLib {
     private BlurLib() {}
     public static volatile ClassLoader LOADER = null;
     public static ClassLoader classLoader() { return LOADER; }
-    public static final String CLS_LAUNCHER = "com.android.launcher.Launcher";
-    public static final String CLS_WORKSPACE_SCRIM = "com.android.launcher3.views.WorkSpaceScrimView";
-    public static final String CLS_OPLUS_DRAGLAYER = "com.android.launcher3.OplusDragLayer";
-    public static final String CLS_LAUNCHER_RECENTS_VIEW = "com.android.quickstep.views.LauncherRecentsView";
-    public static final String CLS_LAUNCHER_STATE = "com.android.launcher3.LauncherState";
-    public static final String M_ON_STATE_TRANSITION_START = "onStateTransitionStart";
-    public static final String M_ON_STATE_TRANSITION_COMPLETE = "onStateTransitionComplete";
-    public static final String M_ON_STATE_TRANSITION_CANCEL = "onStateTransitionCancel";
+    // ===== 符号转发（集中定义见 Symbols，此处保留兼容别名，编译期内联、零开销）=====
+    public static final String CLS_LAUNCHER = Symbols.CLS_LAUNCHER;
+    public static final String CLS_WORKSPACE_SCRIM = Symbols.CLS_WORKSPACE_SCRIM;
+    public static final String CLS_OPLUS_DRAGLAYER = Symbols.CLS_OPLUS_DRAGLAYER;
+    public static final String CLS_LAUNCHER_RECENTS_VIEW = Symbols.CLS_LAUNCHER_RECENTS_VIEW;
+    public static final String CLS_LAUNCHER_STATE = Symbols.CLS_LAUNCHER_STATE;
+    public static final String M_ON_STATE_TRANSITION_START = Symbols.M_ON_STATE_TRANSITION_START;
+    public static final String M_ON_STATE_TRANSITION_COMPLETE = Symbols.M_ON_STATE_TRANSITION_COMPLETE;
+    public static final String M_ON_STATE_TRANSITION_CANCEL = Symbols.M_ON_STATE_TRANSITION_CANCEL;
     public static void setBlurRadius(View v, float radius) {
         if (v == null) return;
         try {

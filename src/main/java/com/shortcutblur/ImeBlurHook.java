@@ -24,7 +24,7 @@ public final class ImeBlurHook {
     private static volatile java.lang.ref.WeakReference<View> sLastView =
             new java.lang.ref.WeakReference<>(null);
 
-    private static final String CLS_VRM = "com.oplus.view.ViewRootManager";
+    private static final String CLS_VRM = Symbols.CLS_VRM;
 
     private static volatile boolean sInstalled = false;
     private static volatile boolean sReflReady = false;
@@ -460,7 +460,7 @@ public final class ImeBlurHook {
                 sLastDark = dark;
                 return dark;
             }
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) { ModuleLog.swallow("ime.isDarkCached", ignored); }
         return sLastDark;
     }
 

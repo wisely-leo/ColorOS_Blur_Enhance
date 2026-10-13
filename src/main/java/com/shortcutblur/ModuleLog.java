@@ -51,6 +51,53 @@ public final class ModuleLog {
         d("INFO", detail);
     }
 
+    // ===== 异常收口（A2）=====
+    // 语义：替代遍布全模块的 catch (Throwable) {} —— 仍"静默"（不产生日志噪声），
+    // 但按 tag 累计计数，便于诊断时用 swallowStats() 一键 dump。
+    // 与日志开关绑定：LOG_ENABLED=false 时直接返回，零开销（连 map 都不碰）。
+    private static final java.util.concurrent.ConcurrentHashMap<String,
+            java.util.concurrent.atomic.AtomicInteger> SWALLOWED =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** 静默吞异常 + 计数（仅日志开启时计数）。 */
+    public static void swallow(String tag, Throwable t) {
+        if (!enabled()) return;
+        try {
+            java.util.concurrent.atomic.AtomicInteger c = SWALLOWED.get(tag);
+            if (c == null) {
+                c = new java.util.concurrent.atomic.AtomicInteger();
+                java.util.concurrent.atomic.AtomicInteger prev = SWALLOWED.putIfAbsent(tag, c);
+                if (prev != null) c = prev;
+            }
+            c.incrementAndGet();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 丢弃计数（例如切前台时重置窗口）。 */
+    public static void resetSwallowStats() {
+        try { SWALLOWED.clear(); } catch (Throwable ignored) {}
+    }
+
+    /** dump 计数快照（按 tag 降序），日志关闭时返回空串。 */
+    public static String swallowStats() {
+        if (!enabled()) return "";
+        try {
+            java.util.List<java.util.Map.Entry<String,
+                    java.util.concurrent.atomic.AtomicInteger>> es =
+                    new java.util.ArrayList<>(SWALLOWED.entrySet());
+            java.util.Collections.sort(es, (a, b) -> b.getValue().get() - a.getValue().get());
+            StringBuilder sb = new StringBuilder("[swallowed] ");
+            for (java.util.Map.Entry<String,
+                    java.util.concurrent.atomic.AtomicInteger> e : es) {
+                sb.append(e.getKey()).append('=').append(e.getValue().get()).append(' ');
+            }
+            return sb.toString().trim();
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
     // 持久输出流：避免每条日志都 open/write/close（高频日志时是严重 IO 抖动）。
     // 用 BufferedWriter 聚合，按行 flush；超过 MAX_LOG_BYTES 后截断重开，防无限增长。
     private static final long MAX_LOG_BYTES = 2L * 1024 * 1024;
