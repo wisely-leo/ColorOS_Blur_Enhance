@@ -64,6 +64,16 @@ public final class SoftUi {
     public static int   PRESS_FILL        = 0x14000000;
     public static int   PRESS_FILL_STRONG = 0x1F000000;
     public static float PRESS_RADIUS      = 22f;
+
+    public static Integer PRESS_FILL_OVERRIDE = null;
+
+    public static void setGlobalPressFill(Integer color) {
+        PRESS_FILL_OVERRIDE = color;
+    }
+
+    static int defaultPressFill() {
+        return PRESS_FILL_OVERRIDE != null ? PRESS_FILL_OVERRIDE : PRESS_FILL;
+    }
     public static float FOOTER_H   = 64f;
     public static float TAB_SIZE   = 15f;
     public static int   TAB_SEL    = 0xFF007AFF;
@@ -163,10 +173,17 @@ public final class SoftUi {
     }
 
     public static void markPressable(View v) {
+        markPressable(v, null);
+    }
+
+    public static void markPressable(View v, Integer fillColor) {
         if (v == null) return;
         v.setClickable(true);
         v.setFocusable(true);
-        try { v.setTag(PRESS_TAG, Boolean.TRUE); } catch (Throwable ignored) {}
+        try {
+            v.setTag(PRESS_TAG, Boolean.TRUE);
+            if (fillColor != null) v.setTag(PRESS_FILL_TAG, fillColor);
+        } catch (Throwable ignored) {}
 
         schedulePressGroupRefresh(v);
     }
@@ -178,6 +195,14 @@ public final class SoftUi {
     }
 
     static final int PRESS_TAG = "softui_press".hashCode();
+
+    static final int PRESS_FILL_TAG = "softui_press_fill".hashCode();
+
+    static Integer getPressFill(View v) {
+        if (v == null) return null;
+        Object t = v.getTag(PRESS_FILL_TAG);
+        return (t instanceof Integer) ? (Integer) t : null;
+    }
 
     public static void markRowGroup(View v) {
         if (v == null) return;
@@ -198,6 +223,11 @@ public final class SoftUi {
     static final int TAG_GROUP = "softui_row_group".hashCode();
 
     static void applyPressFeedback(View v, boolean roundTop, boolean roundBottom) {
+        applyPressFeedback(v, roundTop, roundBottom, null);
+    }
+
+    static void applyPressFeedback(View v, boolean roundTop, boolean roundBottom,
+                                   Integer groupFill) {
         if (v == null) return;
         final Context c = v.getContext();
         final int ex = dp(c, PAD);
@@ -205,12 +235,15 @@ public final class SoftUi {
         final int botEx = roundBottom ? dp(c, PAD / 2f) : 0;
         final float rt = roundTop ? PRESS_RADIUS : 0f;
         final float rb = roundBottom ? PRESS_RADIUS : 0f;
+
+        Integer rowFill = getPressFill(v);
+        final int fill = rowFill != null ? rowFill : (groupFill != null ? groupFill : defaultPressFill());
         android.graphics.drawable.StateListDrawable sl =
                 new android.graphics.drawable.StateListDrawable();
         sl.addState(new int[]{android.R.attr.state_pressed},
-                inset(pressShape(c, PRESS_FILL, rt, rb), -ex, -topEx, -ex, -botEx));
+                inset(pressShape(c, fill, rt, rb), -ex, -topEx, -ex, -botEx));
         sl.addState(new int[]{android.R.attr.state_focused},
-                inset(pressShape(c, PRESS_FILL, rt, rb), -ex, -topEx, -ex, -botEx));
+                inset(pressShape(c, fill, rt, rb), -ex, -topEx, -ex, -botEx));
         sl.addState(new int[]{},
                 inset(pressShape(c, 0x00000000, rt, rb), -ex, -topEx, -ex, -botEx));
         v.setBackground(sl);
@@ -225,8 +258,8 @@ public final class SoftUi {
 
     public static void pressFeedback(View v, int fillColor, float radiusDp,
                                      boolean roundTop, boolean roundBottom) {
-        markPressable(v);
-        applyPressFeedback(v, roundTop, roundBottom);
+        markPressable(v, fillColor);
+        applyPressFeedback(v, roundTop, roundBottom, fillColor);
     }
 
     private static void schedulePressGroupRefresh(final View v) {
@@ -968,10 +1001,24 @@ public final class SoftUi {
 
                 boolean first = (k == 0), last = (k == m - 1);
                 if (SoftUi.isPressable(ch)) {
-                    SoftUi.applyPressFeedback(ch, first, last);
+                    SoftUi.applyPressFeedback(ch, first, last, cardPressFill);
                 }
             }
             inner.setClipChildren(false);
+        }
+
+        private Integer cardPressFill = null;
+
+        public Card setPressFill(int color) {
+            cardPressFill = color;
+            postRefreshPressGroup();
+            return this;
+        }
+
+        public Card clearPressFill() {
+            cardPressFill = null;
+            postRefreshPressGroup();
+            return this;
         }
 
         private static void collectRows(ViewGroup parent, java.util.List<View> out) {
@@ -1058,9 +1105,29 @@ public final class SoftUi {
             if (sw == null) return this;
             setClickable(true);
             setFocusable(true);
-            markPressable(this);
+            markPressable(this, rowPressFill);
             setOnClickListener(v -> sw.setChecked(!sw.isChecked()));
             return this;
+        }
+
+        private Integer rowPressFill = null;
+
+        public Row pressFill(int color) {
+            rowPressFill = color;
+            setTag(PRESS_FILL_TAG, (Integer) color);
+            requestRefresh();
+            return this;
+        }
+
+        public Row clearPressFill() {
+            rowPressFill = null;
+            setTag(PRESS_FILL_TAG, (Integer) null);
+            requestRefresh();
+            return this;
+        }
+
+        private void requestRefresh() {
+            SoftUi.schedulePressGroupRefresh(this);
         }
 
         public Switch switchView() {
@@ -1076,7 +1143,7 @@ public final class SoftUi {
             }
             setClickable(true);
             setFocusable(true);
-            markPressable(this);
+            markPressable(this, rowPressFill);
             setOnClickListener(v -> {
                 if (right instanceof Switch) {
                     Switch sw = (Switch) right;
@@ -2280,6 +2347,10 @@ public final class SoftUi {
         markPressable(r);
         r.setOnClickListener(v -> { if (cb != null) cb.onClick(); });
         return r;
+    }
+
+    public static Row link(Context c, String title, int pressFillColor, final OnClick cb) {
+        return link(c, title, cb).pressFill(pressFillColor);
     }
     public static TextView statusText(Context c, String s) {
         return text(c, s == null ? "" : s, SUB_SIZE, TEXT_SECONDARY);
