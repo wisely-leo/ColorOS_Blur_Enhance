@@ -2382,6 +2382,24 @@ public final class SoftUi {
         t.setLayoutParams(lp);
         return t;
     }
+
+    public static View group(Context c, String title, View action) {
+        LinearLayout line = new LinearLayout(c);
+        line.setOrientation(LinearLayout.HORIZONTAL);
+        line.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams lpl = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lpl.leftMargin = dp(c, SIDE + 4);
+        lpl.rightMargin = dp(c, SIDE);
+        lpl.topMargin = dp(c, 14);
+        lpl.bottomMargin = dp(c, 6);
+        line.setLayoutParams(lpl);
+        TextView t = text(c, title, SUB_SIZE, TEXT_SECONDARY);
+        line.addView(t, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        if (action != null) line.addView(action);
+        return line;
+    }
     public static Row link(Context c, String title, final OnClick cb) {
         TextView arrow = text(c, "›", BODY_SIZE + 4, TEXT_SECONDARY);
         Row r = new Row(c, title, arrow, false);
@@ -2395,6 +2413,19 @@ public final class SoftUi {
     }
     public static TextView statusText(Context c, String s) {
         return text(c, s == null ? "" : s, SUB_SIZE, TEXT_SECONDARY);
+    }
+
+    public static void toast(Context c, String msg) {
+        toast(c, msg, false);
+    }
+
+    public static void toast(Context c, String msg, boolean longDuration) {
+        if (c == null || msg == null || msg.length() == 0) return;
+        try {
+            android.widget.Toast.makeText(c, msg,
+                    longDuration ? android.widget.Toast.LENGTH_LONG
+                                 : android.widget.Toast.LENGTH_SHORT).show();
+        } catch (Throwable ignored) {}
     }
     public static Row action(Context c, String title, View right, final OnClick cb) {
         Row r = new Row(c, title, right, false);
@@ -2506,6 +2537,29 @@ public final class SoftUi {
         markPressable(col);
         col.setOnClickListener(v -> { if (cb != null) cb.onClick(); });
         return col;
+    }
+
+    public static View infoSub(Context c, String title, String subtitle, View right) {
+        LinearLayout texts = new LinearLayout(c);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        TextView t1 = text(c, title == null ? "" : title, BODY_SIZE, TEXT_PRIMARY);
+        t1.setSingleLine(true);
+        t1.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        texts.addView(t1, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        if (subtitle != null && subtitle.length() > 0) {
+            TextView t2 = text(c, subtitle, SUB_SIZE, TEXT_SECONDARY);
+            LinearLayout.LayoutParams lp2 = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp2.topMargin = dp(c, 2f);
+            texts.addView(t2, lp2);
+        }
+        LinearLayout line = hRow(c);
+        line.setMinimumHeight(dp(c, ROW_H));
+        line.addView(texts, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        if (right != null) line.addView(right);
+        return line;
     }
     public interface OnClick { void onClick(); }
     public static View slider(Context c, String title, float value,
