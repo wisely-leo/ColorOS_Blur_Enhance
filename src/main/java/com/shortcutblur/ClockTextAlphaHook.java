@@ -40,6 +40,10 @@ public final class ClockTextAlphaHook {
         }
     }
     private static final class HookColor implements io.github.libxposed.api.XposedInterface.Hooker {
+        // 时钟每秒刷新，setTextColor 会被反复调用且参数高度重复；
+        // 按 id:color:newColor 去重，同一组合只记一次，避免日志刷屏。
+        private final java.util.Set<String> logged =
+                java.util.concurrent.ConcurrentHashMap.newKeySet();
         @Override
         public Object intercept(Chain chain) throws Throwable {
             try {
@@ -61,9 +65,13 @@ public final class ClockTextAlphaHook {
                             }
                             int newColor = (color & 0x00FFFFFF) | (targetAlpha() << 24);
                             try { GlyphBlurRenderer.notifyContentMaybeChangedAll(); } catch (Throwable ignored) {}
-                            ModuleLog.d("CTCH", "setTextColor id=0x" + Integer.toHexString(id)
-                                + " color=0x" + Integer.toHexString(color)
-                                + " -> 0x" + Integer.toHexString(newColor));
+                            // 热路径去重：同 id+color+newColor 只记一次
+                            if (logged.add(Integer.toHexString(id) + ":" + Integer.toHexString(color)
+                                    + ":" + Integer.toHexString(newColor))) {
+                                ModuleLog.d("CTCH", "setTextColor id=0x" + Integer.toHexString(id)
+                                    + " color=0x" + Integer.toHexString(color)
+                                    + " -> 0x" + Integer.toHexString(newColor));
+                            }
                             Object[] newArgs = new Object[args.size()];
                             for (int i = 0; i < args.size(); i++) newArgs[i] = args.get(i);
                             newArgs[1] = Integer.valueOf(newColor);
