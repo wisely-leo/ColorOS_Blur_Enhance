@@ -26,8 +26,9 @@ public class App extends Application {
         } catch (Throwable t) { return false; }
     }
     public static void lg(String s) {
-        if (sApp != null && !logEnabled()) return;
-        android.util.Log.i("BlurUI", s);
+
+        if (!logEnabled()) return;
+        try { android.util.Log.i("BlurUI", s); } catch (Throwable ignored) {}
 
         UiLog.write(s);
     }

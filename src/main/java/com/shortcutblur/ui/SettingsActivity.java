@@ -32,8 +32,9 @@ public class SettingsActivity extends Activity {
 
     private static final String LOG_TAG_VER = "v45.4";
     static void lg(String s) {
+        if (s == null) return;
         if (!App.logEnabled()) return;
-        android.util.Log.i("SoftUi", s);
+        try { android.util.Log.i("SoftUi", s); } catch (Throwable ignored) {}
 
         UiLog.write(s);
     }

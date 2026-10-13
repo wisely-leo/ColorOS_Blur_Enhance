@@ -222,6 +222,8 @@ public final class SoftUi {
 
     static final int TAG_GROUP = "softui_row_group".hashCode();
 
+    static final int TAG_PRESS_FEEDBACK = 0x7F00B1F0;
+
     static void applyPressFeedback(View v, boolean roundTop, boolean roundBottom) {
         applyPressFeedback(v, roundTop, roundBottom, null);
     }
@@ -238,6 +240,15 @@ public final class SoftUi {
 
         Integer rowFill = getPressFill(v);
         final int fill = rowFill != null ? rowFill : (groupFill != null ? groupFill : defaultPressFill());
+
+        final int cacheKey = fill * 31 * 31 + (int) (rt * 7) * 31 + (int) (rb * 7);
+        Object last = v.getTag(TAG_PRESS_FEEDBACK);
+        if (last instanceof Integer && ((Integer) last) == cacheKey
+                && v.getBackground() != null) {
+            v.setClickable(true);
+            v.setFocusable(true);
+            return;
+        }
         android.graphics.drawable.StateListDrawable sl =
                 new android.graphics.drawable.StateListDrawable();
         sl.addState(new int[]{android.R.attr.state_pressed},
@@ -247,6 +258,7 @@ public final class SoftUi {
         sl.addState(new int[]{},
                 inset(pressShape(c, 0x00000000, rt, rb), -ex, -topEx, -ex, -botEx));
         v.setBackground(sl);
+        v.setTag(TAG_PRESS_FEEDBACK, cacheKey);
         v.setClickable(true);
         v.setFocusable(true);
     }
@@ -670,6 +682,10 @@ public final class SoftUi {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint border = new Paint(Paint.ANTI_ALIAS_FLAG);
         private android.graphics.LinearGradient rainbow;
+
+        private float rainbowLeft = Float.NaN, rainbowRight = Float.NaN;
+
+        private final float[] hsv = new float[3];
         private float downX, downY;
         private boolean dragging = false;
         private float touchSlop = -1f;
@@ -693,7 +709,8 @@ public final class SoftUi {
 
         public int currentColor() {
             if (!enabledColor) return 0x9E9E9E;
-            return android.graphics.Color.HSVToColor(new float[]{ frac * 360f, 0.72f, 0.88f });
+            hsv[0] = frac * 360f; hsv[1] = 0.72f; hsv[2] = 0.88f;
+            return android.graphics.Color.HSVToColor(hsv);
         }
 
         private void animatePress(boolean active) {
@@ -715,11 +732,19 @@ public final class SoftUi {
             float cy = h / 2f;
             float left = maxTh, right = w - maxTh;
             track.set(left, cy - trackH / 2f, right, cy + trackH / 2f);
-            if (rainbow == null) {
+
+            if (rainbow == null
+                    || Math.abs(rainbowLeft - left) > 0.5f
+                    || Math.abs(rainbowRight - right) > 0.5f) {
                 int[] colors = new int[37];
-                for (int i = 0; i <= 36; i++) colors[i] = android.graphics.Color.HSVToColor(new float[]{ i * 10f, 0.72f, 0.88f });
+                for (int i = 0; i <= 36; i++) {
+                    hsv[0] = i * 10f; hsv[1] = 0.72f; hsv[2] = 0.88f;
+                    colors[i] = android.graphics.Color.HSVToColor(hsv);
+                }
                 rainbow = new android.graphics.LinearGradient(left, 0, right, 0, colors, null,
                         android.graphics.Shader.TileMode.CLAMP);
+                rainbowLeft = left;
+                rainbowRight = right;
             }
             paint.setShader(enabledColor ? rainbow : null);
             if (!enabledColor) paint.setColor(0xFFD0D0D0);
@@ -734,7 +759,9 @@ public final class SoftUi {
 
             float cx = left + (right - left) * frac;
             if (enabledColor) {
-                paint.setColor(android.graphics.Color.HSVToColor(new float[]{ frac * 360f, 0.72f, 0.88f }));
+
+                hsv[0] = frac * 360f; hsv[1] = 0.72f; hsv[2] = 0.88f;
+                paint.setColor(android.graphics.Color.HSVToColor(hsv));
             } else {
                 paint.setColor(0xFFBDBDBD);
             }
@@ -1592,11 +1619,9 @@ public final class SoftUi {
             }
             if (ticks <= 3 || ticks % 120 == 0) {
                 View h = hooked == null ? null : hooked.get();
-                if (SoftUi.DIAG) {
-                    SoftUi.diag("tick#" + ticks + " 层数=" + alive + " scrollY="
+                SoftUi.diag("tick#" + ticks + " 层数=" + alive + " scrollY="
                             + (h instanceof android.widget.ScrollView
                                 ? ((android.widget.ScrollView) h).getScrollY() : -1));
-                }
             }
         }
         static void refresh() {
@@ -1650,11 +1675,10 @@ public final class SoftUi {
         }
     }
 
-    static boolean DIAG = true;
-
     static void diag(String s) {
-        if (!DIAG) return;
-        android.util.Log.i("SoftUi", s);
+        if (s == null) return;
+        if (!App.logEnabled()) return;
+        try { android.util.Log.i("SoftUi", s); } catch (Throwable ignored) {}
         UiLog.write("[fx] " + s);
     }
 
