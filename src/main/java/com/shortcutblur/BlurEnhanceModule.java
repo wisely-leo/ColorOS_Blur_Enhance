@@ -55,6 +55,8 @@ public class BlurEnhanceModule extends XposedModule {
     private final java.util.WeakHashMap<android.view.View, String> sLastClockText = new java.util.WeakHashMap<android.view.View, String>();
     private volatile boolean postEffectInstalled = false;
     private final Set<Method> peHooked = new HashSet<>();
+
+    private final Set<String> peScaleLogged = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private final Map<View, Boolean> armed = new WeakHashMap<>();
     private final Map<String, ValueAnimator> iconAnims = new ConcurrentHashMap<>();
     private final Set<String> dumpedCls = new HashSet<>();
@@ -1050,12 +1052,16 @@ public class BlurEnhanceModule extends XposedModule {
                             float peTarget = FeatureFlags.SAMPLE_SCALE;
                             if (old != peTarget) {
                                 args[pos] = peTarget;
-                                ModuleLog.d("SCALE", tag + " " + old + " -> " + peTarget);
-                            } else {
-                                ModuleLog.d("SCALE", tag + " keep " + old);
+
+                                if (peScaleLogged.add(tag + ":" + old)) {
+                                    ModuleLog.d("SCALE", tag + " " + old + " -> " + peTarget);
+                                }
+                            } else if (ModuleLog.VERBOSE) {
+
+                                ModuleLog.dv("SCALE", tag + " keep " + old);
                             }
-                        } else {
-                            ModuleLog.d("SCALE", tag + " no float arg (pos=" + pos + ")");
+                        } else if (ModuleLog.VERBOSE) {
+                            ModuleLog.dv("SCALE", tag + " no float arg (pos=" + pos + ")");
                         }
                         return chain.proceed(args);
                     });
