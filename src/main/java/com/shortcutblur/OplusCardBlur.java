@@ -44,27 +44,35 @@ final class OplusCardBlur {
 
     private OplusCardBlur() {}
 
-    private static synchronized boolean ensureReflection() {
+    // 发热优化：最近一次已应用的参数签名（避免重复设置同一组参数引发重绘）。
+    private static final Map<View, Long> sAppliedSig = new WeakHashMap<>();
+
+    private static boolean ensureReflection() {
         if (sReady) return true;
         if (sTried && !sReady) return false;
-        sTried = true;
-        try {
-            Class<?> cls = Reflect.loadClass(CLS_VRM, null);
-            if (cls == null) cls = Class.forName(CLS_VRM);
-            sCtor = cls.getConstructor(View.class);
-            sGetDrawable = cls.getMethod("getBackgroundBlurDrawable");
-            sSetRadius = cls.getMethod("setBlurRadius", int.class);
-            try { sSetColor = cls.getMethod("setColor", int.class); } catch (Throwable ignored) {}
-            try { sSetCorner = cls.getMethod("setCornerRadius", float.class); } catch (Throwable ignored) {}
-            sReady = (sCtor != null && sGetDrawable != null && sSetRadius != null);
-            ModuleLog.d(TAG, "OplusCardBlur reflection ready=" + sReady
-                    + " setColor=" + (sSetColor != null)
-                    + " setCorner=" + (sSetCorner != null));
-        } catch (Throwable t) {
-            sReady = false;
-            ModuleLog.e(TAG, "OplusCardBlur ensureReflection fail", t);
+        synchronized (OplusCardBlur.class) {
+            // 双检：热路径（每次 apply）在 sReady 为 true 时不再进 monitor。
+            if (sReady) return true;
+            if (sTried && !sReady) return false;
+            sTried = true;
+            try {
+                Class<?> cls = Reflect.loadClass(CLS_VRM, null);
+                if (cls == null) cls = Class.forName(CLS_VRM);
+                sCtor = cls.getConstructor(View.class);
+                sGetDrawable = cls.getMethod("getBackgroundBlurDrawable");
+                sSetRadius = cls.getMethod("setBlurRadius", int.class);
+                try { sSetColor = cls.getMethod("setColor", int.class); } catch (Throwable ignored) {}
+                try { sSetCorner = cls.getMethod("setCornerRadius", float.class); } catch (Throwable ignored) {}
+                sReady = (sCtor != null && sGetDrawable != null && sSetRadius != null);
+                ModuleLog.d(TAG, "OplusCardBlur reflection ready=" + sReady
+                        + " setColor=" + (sSetColor != null)
+                        + " setCorner=" + (sSetCorner != null));
+            } catch (Throwable t) {
+                sReady = false;
+                ModuleLog.e(TAG, "OplusCardBlur ensureReflection fail", t);
+            }
+            return sReady;
         }
-        return sReady;
     }
 
     /** 用默认半径（FeatureFlags.SHORTCUT_BLUR_RADIUS）挂模糊。 */
@@ -96,19 +104,21 @@ final class OplusCardBlur {
             Object mgr = null;
             WeakReference<Object> wr = sMgrOf.get(v);
             if (wr != null) mgr = wr.get();
+            // 发热优化：记录 mgr 是否来自缓存（首次必须完整应用一次）。
+            final boolean cachedMgr = (mgr != null);
             Drawable d;
             if (mgr == null) {
                 mgr = sCtor.newInstance(v);
                 d = (Drawable) sGetDrawable.invoke(mgr);
                 if (d == null) {
                     if (retry < MAX_RETRY) {
-                        ModuleLog.d(TAG, "OplusCardBlur drawable null, retry#" + (retry + 1)
+                        ModuleLog.dv(TAG, "OplusCardBlur drawable null, retry#" + (retry + 1)
                                 + " cls=" + v.getClass().getSimpleName());
                         v.postDelayed(new Runnable() {
                             @Override public void run() { doApply(v, radiusPx, retry + 1); }
                         }, RETRY_MS);
                     } else {
-                        ModuleLog.d(TAG, "OplusCardBlur give up (not attached?) cls="
+                        ModuleLog.dv(TAG, "OplusCardBlur give up (not attached?) cls="
                                 + v.getClass().getSimpleName());
                     }
                     return;
@@ -124,25 +134,40 @@ final class OplusCardBlur {
             int ri = (int) r;
             if (ri < 0) ri = 0;
             if (ri > 500) ri = 500;
+            int color = isDark(v) ? FeatureFlags.CARD_BLUR_COLOR_DARK
+                                  : FeatureFlags.CARD_BLUR_COLOR_LIGHT;
+
+            // 圆角：使模糊区域与卡片面板圆角对齐，避免直角糊斑露出圆角外。
+            // 以配置的 dp 为准（见 resolveCornerPx 注释）。
+            float cornerPx = resolveCornerPx(v);
+
+            // 发热优化：幂等短路。
+            // 二级菜单 hook 会多次调度（0 / 80ms）且在切换时重复进入本方法；
+            // 参数完全一致时再设一遍 radius/color/corner/background 只会白白触发重绘。
+            // 仅在 mgr 来自缓存（非首次）时才允许跳过，保证首次一定完整应用。
+            long sig = ri;
+            sig = sig * 31 + color;
+            sig = sig * 31 + Float.floatToIntBits(cornerPx);
+            if (cachedMgr) {
+                Long prev;
+                synchronized (sAppliedSig) { prev = sAppliedSig.get(v); }
+                if (prev != null && prev.longValue() == sig) return;
+            }
+
             sSetRadius.invoke(mgr, ri);
 
             if (sSetColor != null) {
-                int color = isDark(v) ? FeatureFlags.CARD_BLUR_COLOR_DARK
-                                      : FeatureFlags.CARD_BLUR_COLOR_LIGHT;
                 try { sSetColor.invoke(mgr, color); } catch (Throwable ignored) {}
             }
 
-            // 圆角：使模糊区域与卡片面板圆角对齐，避免直角糊斑露出圆角外。
-            // 优先读取目标 View 自身的圆角（COUI RoundFrameLayout 的 f/e 字段），
-            // 否则退回按 dp 估算（CARD_BLUR_CORNER_DP）。
-            float cornerPx = resolveCornerPx(v);
             if (sSetCorner != null) {
                 try { sSetCorner.invoke(mgr, cornerPx); } catch (Throwable ignored) {}
             }
 
             v.setBackground(d);
             v.invalidate();
-            ModuleLog.d(TAG, "OplusCardBlur applied r=" + ri + " corner=" + cornerPx
+            synchronized (sAppliedSig) { sAppliedSig.put(v, sig); }
+            ModuleLog.dv(TAG, "OplusCardBlur applied r=" + ri + " corner=" + cornerPx
                     + " cls=" + v.getClass().getSimpleName()
                     + " " + v.getWidth() + "x" + v.getHeight());
         } catch (Throwable t) {
@@ -195,8 +220,8 @@ final class OplusCardBlur {
 
     private static float readFloatField(Class<?> cls, Object target, String name) {
         try {
-            java.lang.reflect.Field f = cls.getDeclaredField(name);
-            f.setAccessible(true);
+            java.lang.reflect.Field f = Reflect.field(cls, name);
+            if (f == null) return 0f;
             return f.getFloat(target);
         } catch (Throwable t) {
             return 0f;

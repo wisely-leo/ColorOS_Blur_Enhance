@@ -73,6 +73,14 @@ public final class ShortcutBlurFeature {
      * 此时 fade-out 的延迟 remove 回调必须放弃移除，否则会把刚点亮的模糊层清掉（"秒清"）。
      */
     private static volatile boolean sIconBlurRelight = false;
+
+    // 发热优化：OnPreDraw 监听器去重。
+    // 关闭动画入口 hook 在同一次关闭过程中可能被调用多次（动画重启 / 多调用点 /
+    // 一级→二级切换）。原实现每次都新建并注册一个 OnPreDrawListener 与 3 个
+    // postDelayed，叠加后等于「每帧 ×N 次」回调。这里记录当前在跑的那一个。
+    private static volatile android.view.ViewTreeObserver.OnPreDrawListener sRepressListener = null;
+    private static volatile View sRepressHost = null;
+    private static volatile long sRepressFallbackAt = 0L;
     private static volatile boolean sFadingOut = false;
     private static volatile int sSwallowCount = 0;
 
@@ -141,7 +149,7 @@ public final class ShortcutBlurFeature {
                             if (self instanceof View) {
                                 View v = (View) self;
                                 int flags = resolveBlurFlags(v);
-                                ModuleLog.d("FINISH", "flags=" + flags);
+                                ModuleLog.dv("FINISH", "flags=" + flags);
                                 clearBlurFlagsCache(v);
                                 if ((flags & F_WALL) != 0) {
                                     animateDepthBlur(v, 1.0f, 0.0f, BLUR_DURATION);
@@ -199,41 +207,55 @@ public final class ShortcutBlurFeature {
                                     }
                                     if (host != null) {
                                         final View fhost = host;
-                                        // 关键：不用 postDelayed（会晚一帧 → 漏一帧实心）。
-                                        // 改用 OnPreDrawListener：每次绘制前先把面板背景压回半透明，
-                                        // 这样"白底"在真正上屏前就被改掉，杜绝"一帧实心"。
-                                        try {
-                                            final android.view.ViewTreeObserver vto = fhost.getViewTreeObserver();
-                                            final android.view.ViewTreeObserver.OnPreDrawListener l =
-                                                    new android.view.ViewTreeObserver.OnPreDrawListener() {
-                                                private int frames = 0;
-                                                @Override public boolean onPreDraw() {
-                                                    try {
-                                                        repressPanelAlpha(fhost);
-                                                    } catch (Throwable ignored) {}
-                                                    if (++frames >= 24) {   // 约 0.4s 后自动摘除（覆盖 330ms 关闭动画）
+                                        // 发热优化：监听器去重（同一 host 已有在跑的 → 不再重复注册）。
+                                        if (sRepressListener == null || sRepressHost != fhost) {
+                                            // 关键：不用 postDelayed（会晚一帧 → 漏一帧实心）。
+                                            // 改用 OnPreDrawListener：每次绘制前先把面板背景压回半透明，
+                                            // 这样"白底"在真正上屏前就被改掉，杜绝"一帧实心"。
+                                            try {
+                                                final android.view.ViewTreeObserver vto = fhost.getViewTreeObserver();
+                                                final android.view.ViewTreeObserver.OnPreDrawListener l =
+                                                        new android.view.ViewTreeObserver.OnPreDrawListener() {
+                                                    private int frames = 0;
+                                                    @Override public boolean onPreDraw() {
                                                         try {
-                                                            android.view.ViewTreeObserver v = fhost.getViewTreeObserver();
-                                                            if (v.isAlive()) v.removeOnPreDrawListener(this);
+                                                            repressPanelAlpha(fhost);
                                                         } catch (Throwable ignored) {}
+                                                        if (++frames >= 24) {   // 约 0.4s 后自动摘除（覆盖 330ms 关闭动画）
+                                                            try {
+                                                                android.view.ViewTreeObserver v = fhost.getViewTreeObserver();
+                                                                if (v.isAlive()) v.removeOnPreDrawListener(this);
+                                                            } catch (Throwable ignored) {}
+                                                            if (sRepressListener == this) {
+                                                                sRepressListener = null;
+                                                                sRepressHost = null;
+                                                            }
+                                                        }
+                                                        return true;
                                                     }
-                                                    return true;
-                                                }
-                                            };
-                                            vto.addOnPreDrawListener(l);
-                                        } catch (Throwable t) {
-                                            ModuleLog.e("CARDBLUR", "add OnPreDraw failed", t);
+                                                };
+                                                vto.addOnPreDrawListener(l);
+                                                sRepressListener = l;
+                                                sRepressHost = fhost;
+                                            } catch (Throwable t) {
+                                                ModuleLog.e("CARDBLUR", "add OnPreDraw failed", t);
+                                            }
                                         }
                                         // 兜底：再压几次，防止 OnPreDraw 未触发的边界情况。
+                                        // 发热优化：同一 host 300ms 内不重复排队（避免多次 close 叠加）。
                                         // （发热优化④：去掉 0L —— 与 OnPreDraw 首帧重复；仅保留错开的 3 次）
-                                        for (final long d : new long[]{32L, 96L, 160L}) {
-                                            fhost.postDelayed(new Runnable() {
-                                                @Override public void run() {
-                                                    try {
-                                                        repressPanelAlpha(fhost);
-                                                    } catch (Throwable ignored) {}
-                                                }
-                                            }, d);
+                                        final long repressNow = android.os.SystemClock.uptimeMillis();
+                                        if (repressNow - sRepressFallbackAt > 300L) {
+                                            sRepressFallbackAt = repressNow;
+                                            for (final long d : new long[]{32L, 96L, 160L}) {
+                                                fhost.postDelayed(new Runnable() {
+                                                    @Override public void run() {
+                                                        try {
+                                                            repressPanelAlpha(fhost);
+                                                        } catch (Throwable ignored) {}
+                                                    }
+                                                }, d);
+                                            }
                                         }
                                     }
                                 } catch (Throwable t) {
@@ -267,7 +289,7 @@ public final class ShortcutBlurFeature {
                                             Object iconAnim = createIconBlurAnimator(lt, 0.0f, blurRadius(), BLUR_DURATION);
                                             if (iconAnim instanceof ValueAnimator) {
                                                 ((ValueAnimator) iconAnim).start();
-                                                ModuleLog.d("ICONANIM", "open anim -> started icon blur fade-in (sync)");
+                                                ModuleLog.dv("ICONANIM", "open anim -> started icon blur fade-in (sync)");
                                             }
                                         }
                                     }
@@ -311,7 +333,7 @@ public final class ShortcutBlurFeature {
                                 public Object intercept(XposedInterface.Chain chain) throws Throwable {
                                     if (isPause && sShortcutBlurActive) {
                                         sSwallowCount++;
-                                        ModuleLog.d("PAUSE", "swallow pauseWindowBlur during shortcut (#" + sSwallowCount + ")");
+                                        ModuleLog.dv("PAUSE", "swallow pauseWindowBlur during shortcut (#" + sSwallowCount + ")");
                                         return null;
                                     }
                                     return chain.proceed();
@@ -518,7 +540,7 @@ public final class ShortcutBlurFeature {
             float r = cardBlurRadius();
             if (r <= 0.01f) return 0;
             int count = applyCardBlurRec(card, r, 0);
-            ModuleLog.d("CARDBLUR", "apply card blur r=" + r
+            ModuleLog.dv("CARDBLUR", "apply card blur r=" + r
                     + " root=" + card.getClass().getSimpleName()
                     + " " + card.getWidth() + "x" + card.getHeight()
                     + " attached=" + count);
@@ -540,19 +562,30 @@ public final class ShortcutBlurFeature {
             boolean bigEnough = v.getWidth() >= 200 && v.getHeight() >= 200;
             if (hasBg && bigEnough) {
                 // 命中"卡面板"：背景调半透明 + 叠加 Oplus 背景模糊（原方案）。
-                try {
-                    android.graphics.drawable.Drawable mut = bg.mutate();
-                    mut.setAlpha(FeatureFlags.CARD_PANEL_ALPHA);
-                    v.setBackground(mut);
-                } catch (Throwable t) {
-                    ModuleLog.d("CARDBLUR", "  alpha failed: " + t);
+                // 发热优化：先做「已达标即跳过」判定，避免每次布局都 mutate + setBackground
+                // （后者会触发 invalidate/requestLayout，可能再次进入本 hook）。
+                if (!isPanelAlphaOk(v)) {
+                    try {
+                        android.graphics.drawable.Drawable mut = bg.mutate();
+                        mut.setAlpha(FeatureFlags.CARD_PANEL_ALPHA);
+                        v.setBackground(mut);
+                    } catch (Throwable t) {
+                        ModuleLog.dv("CARDBLUR", "  alpha failed: " + t);
+                    }
+                }
+                // 发热优化：RenderEffect 只在首次（或半径变化）挂一次，避免重复建立渲染路径。
+                int radiusKey = Float.floatToIntBits(r);
+                Integer prev;
+                synchronized (sCardBlurDone) { prev = sCardBlurDone.get(v); }
+                if (prev == null || prev.intValue() != radiusKey) {
+                    applyIconBlurRadius(v, r, true);
+                    synchronized (sCardBlurDone) { sCardBlurDone.put(v, radiusKey); }
                 }
                 ModuleLog.dv("CARDBLUR", "  card panel depth=" + depth
                         + " cls=" + v.getClass().getSimpleName()
                         + " " + v.getWidth() + "x" + v.getHeight()
                         + " alpha=0x" + Integer.toHexString(FeatureFlags.CARD_PANEL_ALPHA)
                         + " bg=" + bg.getClass().getSimpleName());
-                applyIconBlurRadius(v, r, true);
                 n++;
                 // 命中面板后不再下探其子项（图标），避免误伤。
                 return n;
@@ -565,7 +598,7 @@ public final class ShortcutBlurFeature {
                 }
             }
         } catch (Throwable t) {
-            ModuleLog.d("CARDBLUR", "  rec err: " + t);
+            ModuleLog.dv("CARDBLUR", "  rec err: " + t);
         }
         return n;
     }
@@ -602,7 +635,7 @@ public final class ShortcutBlurFeature {
                         try {
                             if (result instanceof ViewGroup) {
                                 ViewGroup card = (ViewGroup) result;
-                                ModuleLog.d("CARDBLUR", mid + " ret cls=" + card.getClass().getName()
+                                ModuleLog.dv("CARDBLUR", mid + " ret cls=" + card.getClass().getName()
                                         + " " + card.getWidth() + "x" + card.getHeight()
                                         + " children=" + card.getChildCount()
                                         + " bg=" + (card.getBackground() == null ? "null"
@@ -612,7 +645,7 @@ public final class ShortcutBlurFeature {
                                     @Override
                                     public void run() {
                                         try {
-                                            ModuleLog.d("CARDBLUR", "post layout cls=" + fc.getClass().getName()
+                                            ModuleLog.dv("CARDBLUR", "post layout cls=" + fc.getClass().getName()
                                                     + " " + fc.getWidth() + "x" + fc.getHeight()
                                                     + " children=" + fc.getChildCount());
                                             applyCardBlur(fc);
@@ -668,10 +701,10 @@ try {
                                 boolean orig = (Boolean) chain.getArg(0);
                                 Object self = chain.getThisObject();
                                 String who = (self == null ? "null" : self.getClass().getSimpleName());
-                                ModuleLog.d("CARDBLUR", "setUseBackgroundBlur(" + orig + ", argc=" + argc
+                                ModuleLog.dv("CARDBLUR", "setUseBackgroundBlur(" + orig + ", argc=" + argc
                                         + ") this=" + who);
                                 if (FeatureFlags.SHORTCUT_BLUR && !orig) {
-                                    ModuleLog.d("CARDBLUR", "force coui blur ON (was " + orig + ", argc=" + argc + ")");
+                                    ModuleLog.dv("CARDBLUR", "force coui blur ON (was " + orig + ", argc=" + argc + ")");
                                     Object[] args = new Object[argc];
                                     args[0] = Boolean.TRUE;
                                     for (int i = 1; i < argc; i++) args[i] = chain.getArg(i);
@@ -780,7 +813,7 @@ try {
             }
             int out = ((FeatureFlags.CARD_PANEL_ALPHA & 0xFF) << 24) | base;
             setColor.invoke(gd, out);
-            ModuleLog.d("CARDBLUR", "rounded " + field + " -> 0x" + Integer.toHexString(out));
+            ModuleLog.dv("CARDBLUR", "rounded " + field + " -> 0x" + Integer.toHexString(out));
         } catch (Throwable t) {
             ModuleLog.e("CARDBLUR", "recolorRounded(" + field + ") failed", t);
         }
@@ -868,14 +901,17 @@ try {
                             // ⚠️ MoreFunctionsPopupListWindow 继承 PopupWindow，不是 View！
                             // wrapper（mMainMenuWrapper/mSubMenuWrapper）才是 View。
                             // 用 getContentView()（PopupWindow API）拿根 View，post 后再挂模糊。
-                            ModuleLog.d("CARDBLUR", "mfCtor ret self="
+                            ModuleLog.dv("CARDBLUR", "mfCtor ret self="
                                     + (self == null ? "null" : self.getClass().getName()));
                             if (self != null) {
                                 View anchor = resolvePopupRoot(self);
                                 if (anchor != null) {
                                     // 弹出动画期间就要有模糊 → 不能等 120ms。
-                                    // 立即 post 一次；再补两帧（32ms/80ms）防止 wrapper 尚未 inflate 完。
-                                    final long[] delays = {0L, 32L, 80L};
+                                    // 发热优化：3 次调度（0/32/80ms）收敛为 2 次（0/80ms）。
+                                    // 原第 2 次（32ms）几乎总是重复设置同一组参数——多一次
+                                    // setBackground + invalidate 触发重绘；80ms 那次已足以覆盖
+                                    // 「wrapper 尚未 inflate 完」的时序。
+                                    final long[] delays = {0L, 80L};
                                     for (final long d : delays) {
                                         anchor.postDelayed(new Runnable() {
                                             @Override
@@ -908,22 +944,22 @@ try {
     // 从 PopupWindow 子类（MoreFunctionsPopupListWindow）拿一个可用的 View 作为 post 载体。
     // 优先 getContentView()；拿不到则尝试从 wrapper 字段取。
     private static View resolvePopupRoot(Object self) {
-        // ① PopupWindow.getContentView()
+        // 发热优化：改用 Reflect.method（带缓存 + 负缓存），避免每次弹窗重新 getMethod。
         try {
-            Method gcv = self.getClass().getMethod("getContentView");
-            Object c = gcv.invoke(self);
-            if (c instanceof View) return (View) c;
+            Method gcv = Reflect.method(self.getClass(), "getContentView", 0);
+            if (gcv == null) {
+                try { gcv = self.getClass().getMethod("getContentView"); } catch (Throwable ignore) {}
+            }
+            if (gcv != null) {
+                Object c = gcv.invoke(self);
+                if (c instanceof View) return (View) c;
+            }
         } catch (Throwable ignored) {}
         // ② 反射取 mMainMenuWrapper / mSubMenuWrapper
         for (String fn : new String[]{"mMainMenuWrapper", "mSubMenuWrapper"}) {
             try {
-                Field f = null;
-                Class<?> c = self.getClass();
-                while (c != null && f == null) {
-                    try { f = c.getDeclaredField(fn); } catch (NoSuchFieldException e) { c = c.getSuperclass(); }
-                }
+                Field f = Reflect.field(self.getClass(), fn);
                 if (f == null) continue;
-                f.setAccessible(true);
                 Object v = f.get(self);
                 if (v instanceof View) return (View) v;
             } catch (Throwable ignored) {}
@@ -945,17 +981,14 @@ try {
         int hit = 0;
         for (String fn : new String[]{"mMainMenuWrapper", "mSubMenuWrapper"}) {
             try {
-                Field f = null;
-                Class<?> c = window.getClass();
-                while (c != null && f == null) {
-                    try { f = c.getDeclaredField(fn); } catch (NoSuchFieldException e) { c = c.getSuperclass(); }
-                }
+                // 发热优化：改用 Reflect.field（统一字段缓存 + 负缓存），
+                // 原实现每次弹窗都要沿继承链 getDeclaredField + setAccessible。
+                Field f = Reflect.field(window.getClass(), fn);
                 if (f == null) continue;
-                f.setAccessible(true);
                 Object v = f.get(window);
                 if (!(v instanceof View)) continue;
                 View vv = (View) v;
-                ModuleLog.d("CARDBLUR", "secondary " + fn + " cls=" + vv.getClass().getName()
+                ModuleLog.dv("CARDBLUR", "secondary " + fn + " cls=" + vv.getClass().getName()
                         + " " + vv.getWidth() + "x" + vv.getHeight()
                         + " bg=" + (vv.getBackground() == null ? "null" : vv.getBackground().getClass().getName()));
                 // 走 Oplus 私有模糊（ViewRootManager）。
@@ -965,7 +998,7 @@ try {
                 ModuleLog.e("CARDBLUR", "secondary " + fn + " err", t);
             }
         }
-        ModuleLog.d("CARDBLUR", "apply secondary oplus blur r=" + radius + " hit=" + hit);
+        ModuleLog.dv("CARDBLUR", "apply secondary oplus blur r=" + radius + " hit=" + hit);
     }
 
     // ========================================================================
@@ -976,7 +1009,7 @@ try {
             if (pbv == null) return null;
             Object parent = pbv.getParent();
             if (!(parent instanceof ViewGroup)) {
-                ModuleLog.d("ICONBLUR", "pbv parent not ViewGroup: " + (parent == null ? "null" : parent.getClass().getName()));
+                ModuleLog.dv("ICONBLUR", "pbv parent not ViewGroup: " + (parent == null ? "null" : parent.getClass().getName()));
                 return null;
             }
             ViewGroup vg = (ViewGroup) parent;
@@ -1006,7 +1039,7 @@ try {
     private static void fadeOutAndRemoveIconBlur() {
         final View layer = sIconBlurLayer;
         if (sFadingOut) {
-            ModuleLog.d("ICONANIM", "already fading out, skip duplicate fade-out");
+            ModuleLog.dv("ICONANIM", "already fading out, skip duplicate fade-out");
             return;
         }
         sFadingOut = true;
@@ -1024,11 +1057,18 @@ try {
             final ValueAnimator va = ValueAnimator.ofFloat(blurRadius(), 0.0f);
             va.setDuration(BLUR_DURATION);
             va.setInterpolator(new DecelerateInterpolator());
+            // 发热优化：补上与 createIconBlurAnimator 一致的 0.5f 节流。
+            // 原实现每帧无条件 applyIconBlurRadius → 每帧 new RenderEffect + 反射 invoke
+            // （330ms ≈ 20 帧），是关闭弹窗时最集中的一次功耗尖峰；同一功能的 fade-in
+            // 路径本来就有该节流，这里属实现不对称。
             va.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+                private float last = Float.NaN;
                 @Override
                 public void onAnimationUpdate(ValueAnimator a) {
                     try {
                         float r = (Float) a.getAnimatedValue();
+                        if (!Float.isNaN(last) && Math.abs(r - last) < 0.5f) return;
+                        last = r;
                         applyIconBlurRadius(layer, r, true);
                     } catch (Throwable ignore) {}
                 }
@@ -1037,14 +1077,14 @@ try {
                 iconAnims.put(layer, va);
             }
             va.start();
-            ModuleLog.d("ICONANIM", "fade-out " + blurRadius() + "->0.0 dur=" + BLUR_DURATION);
+            ModuleLog.dv("ICONANIM", "fade-out " + blurRadius() + "->0.0 dur=" + BLUR_DURATION);
             layer.postDelayed(new Runnable() {
                 @Override
                 public void run() {
                     try {
                         removeAnimation(layer);
                         if (sIconBlurLayer != layer) {
-                            ModuleLog.d("ICONANIM", "fade-out done, layer already replaced, skip remove");
+                            ModuleLog.dv("ICONANIM", "fade-out done, layer already replaced, skip remove");
                             sFadingOut = false;
                             return;
                         }
@@ -1052,7 +1092,7 @@ try {
                         // 说明这不是"真正关闭"，而是"切换到下一个弹窗"。
                         // 此时保留模糊层（它已被新 open 重新 fade-in），不要移除。
                         if (sIconBlurRelight) {
-                            ModuleLog.d("ICONANIM", "fade-out done but relit (next popup opened), skip remove");
+                            ModuleLog.dv("ICONANIM", "fade-out done but relit (next popup opened), skip remove");
                             sFadingOut = false;
                             return;
                         }
@@ -1095,7 +1135,7 @@ try {
                 @Override
                 public void run() {
                     sShortcutBlurActive = false;
-                    ModuleLog.d("PAUSE", "window CLOSE (delayed reset, exit anim done)");
+                    ModuleLog.dv("PAUSE", "window CLOSE (delayed reset, exit anim done)");
                 }
             }, SWALLOW_RESET_DELAY);
         } catch (Throwable t) {
@@ -1158,9 +1198,9 @@ try {
                 if (sIconAnimStartedSeq != seq) {
                     sIconAnimStartedSeq = seq;
                     try { applyIconBlurRadius(itv, 0.01f, false); } catch (Throwable ignore) { ModuleLog.swallow("module.iconApply", ignore); }
-                    ModuleLog.d("ICONANIM", "arm icon (defer anim to open, seq=" + seq + ")");
+                    ModuleLog.dv("ICONANIM", "arm icon (defer anim to open, seq=" + seq + ")");
                 } else {
-                    ModuleLog.d("ICONANIM", "same popup round, skip re-arm (seq=" + seq + ")");
+                    ModuleLog.dv("ICONANIM", "same popup round, skip re-arm (seq=" + seq + ")");
                 }
             }
             if ((flags & F_WALL) == 0) return;
@@ -1170,20 +1210,20 @@ try {
                     try {
                         Object launcher = getLauncherQuietly(fv);
                         if (launcher == null) {
-                            ModuleLog.d("DEPTH", "launcher null, skip retry");
+                            ModuleLog.dv("DEPTH", "launcher null, skip retry");
                             return;
                         }
                         Object dc = Reflect.call(launcher, "getDepthController");
                         if (dc == null) {
-                            ModuleLog.d("DEPTH", "depthController null");
+                            ModuleLog.dv("DEPTH", "depthController null");
                             return;
                         }
                         Object g = Reflect.call(dc, "getCurrentBlur");
                         float v = (g instanceof Float) ? (Float) g : -1f;
-                        ModuleLog.d("DEPTH", "currentBlur=" + v);
+                        ModuleLog.dv("DEPTH", "currentBlur=" + v);
                         if (v <= 0.05f) {
                             boolean ok = setDepthBlur(fv, 1.0f);
-                            ModuleLog.d("DEPTH", "fallback setBlur=1 ok=" + ok);
+                            ModuleLog.dv("DEPTH", "fallback setBlur=1 ok=" + ok);
                         }
                     } catch (Throwable t) {
                         ModuleLog.e("DEPTH", "retry failed", t);
@@ -1199,10 +1239,37 @@ try {
         applyIconBlurRadius(view, radius, true);
     }
 
+    // 发热优化：RenderEffect 复用。
+    // createBlurEffect 会创建 native 层对象；同一半径会被反复使用（每次布局同一个 r、
+    // 卡片一级/二级共用同一配置值、动画相邻帧落在同一取值）。按「完全相同半径」缓存，
+    // 容量小、零视觉风险（不做量化，避免模糊半径跳变）。
+    private static final Map<Integer, RenderEffect> sEffectCache = new java.util.HashMap<>();
+
+    private static RenderEffect effectFor(float radius) {
+        int key = Float.floatToIntBits(radius);
+        synchronized (sEffectCache) {
+            RenderEffect hit = sEffectCache.get(key);
+            if (hit != null) return hit;
+        }
+        RenderEffect e = RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.MIRROR);
+        synchronized (sEffectCache) {
+            if (sEffectCache.size() >= 32) sEffectCache.clear();
+            sEffectCache.put(key, e);
+        }
+        return e;
+    }
+
+    // 发热优化：卡片模糊「已应用」标记（View → 上次应用时的半径位模式）。
+    // 原实现每次 applyCardBlurRec 命中面板都会 mutate 背景 + setBackground + 重挂
+    // RenderEffect；而本方法被挂在布局阶段方法（assignMarginsAndBackgrounds）上，
+    // 弹窗期间可能被多次触发，形成「改背景 → 重布局 → 再改背景」的重复开销。
+    private static final Map<View, Integer> sCardBlurDone =
+            new java.util.WeakHashMap<>();
+
     private static void applyIconBlurRadius(View view, float radius, boolean useOplus) {
         if (view == null) return;
         try {
-            RenderEffect effect = RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.MIRROR);
+            RenderEffect effect = effectFor(radius);
             if (!useOplus) {
                 trySetViewRenderEffect(view, effect);
                 return;
@@ -1296,7 +1363,7 @@ try {
                 try { f.setBoolean(view, true); } catch (Throwable ignore) {}
             }
             Reflect.call(view, "invalidate");
-            ModuleLog.d("CLEAR", "staticLayers wall=" + wall + " drag=" + drag);
+            ModuleLog.dv("CLEAR", "staticLayers wall=" + wall + " drag=" + drag);
         } catch (Throwable t) {
             ModuleLog.e("CLEAR", "clearStaticLayers failed", t);
         }
@@ -1408,7 +1475,7 @@ try {
             synchronized (iconAnims) {
                 iconAnims.put(view, va);
             }
-            ModuleLog.d("ICONANIM", "create icon animator " + from + "->" + to + " dur=" + duration);
+            ModuleLog.dv("ICONANIM", "create icon animator " + from + "->" + to + " dur=" + duration);
             return va;
         } catch (Throwable t) {
             ModuleLog.e("ICONANIM", "createIconBlurAnimator failed", t);
@@ -1452,7 +1519,7 @@ try {
         try {
             return f.get(dc);
         } catch (Throwable t) {
-            ModuleLog.d("DEPTH", "BLUR field not static nor instance-accessible: " + t);
+            ModuleLog.dv("DEPTH", "BLUR field not static nor instance-accessible: " + t);
             return null;
         }
     }

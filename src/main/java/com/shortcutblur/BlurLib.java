@@ -70,13 +70,31 @@ public final class BlurLib {
         return v == null ? ""
                 : (v.getClass().getName() + "@" + Integer.toHexString(System.identityHashCode(v)));
     }
+    // 发热优化：结果缓存。
+    // currentAppContext() 被 GlassColorHook.isDarkMode / GlyphBlurRenderer.isUiDarkMode 等
+    // 高频路径当作「取 Context 工具」反复调用（滚动、内容变化、重建链路）。
+    // 原实现每次都 Class.forName + 反射 invoke；Application 实例与进程同生命周期，
+    // 因此缓存 30s 即可（极端情况如 Application 被替换也能在 30s 内自愈）。
+    private static volatile android.content.Context sAppCtx = null;
+    private static volatile long sAppCtxAt = 0L;
+    private static final long APP_CTX_TTL_MS = 30_000L;
+
     public static android.content.Context currentAppContext() {
+        android.content.Context cached = sAppCtx;
+        if (cached != null
+                && (android.os.SystemClock.uptimeMillis() - sAppCtxAt) < APP_CTX_TTL_MS) {
+            return cached;
+        }
         try {
             Class<?> at = Class.forName(CLS_ACTIVITY_THREAD);
             Object app = Reflect.callStatic(at, M_CURRENT_APPLICATION);
-            if (app instanceof android.content.Context) return (android.content.Context) app;
+            if (app instanceof android.content.Context) {
+                sAppCtx = (android.content.Context) app;
+                sAppCtxAt = android.os.SystemClock.uptimeMillis();
+                return (android.content.Context) app;
+            }
         } catch (Throwable ignore) {}
-        return null;
+        return cached;   // 失败时回退上次可用值（可能为 null）
     }
     public static Object getLauncherQuietly(View view) {
         try {
