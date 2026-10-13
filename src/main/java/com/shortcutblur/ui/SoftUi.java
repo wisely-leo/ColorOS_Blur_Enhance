@@ -188,7 +188,36 @@ public final class SoftUi {
         v.setClickable(true);
         v.setFocusable(true);
 
-try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable ignored) {}
+        unclampAncestors(v);
+
+        try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable ignored) {}
+    }
+
+    private static void unclampAncestors(View v) {
+        try {
+            android.view.ViewParent p = v == null ? null : v.getParent();
+            if (p == null) {
+
+                if (v != null) {
+                    v.post(new Runnable() {
+                        @Override public void run() { unclampAncestors(v); }
+                    });
+                }
+                return;
+            }
+            int guard = 0;
+            while (p instanceof ViewGroup && guard++ < 8) {
+                ViewGroup g = (ViewGroup) p;
+                boolean changed = g.getClipChildren() || g.getClipToPadding();
+                if (changed) {
+                    g.setClipChildren(false);
+                    g.setClipToPadding(false);
+                }
+
+                if (!changed) break;
+                p = g.getParent();
+            }
+        } catch (Throwable ignored) {}
     }
 
     private static android.graphics.drawable.Drawable inset(
@@ -936,15 +965,35 @@ try { v.setTag("softui_press".hashCode(), Boolean.TRUE); } catch (Throwable igno
                 default:       rt = false; rb = false; break;
             }
             SoftUi.pressFeedback(v, fill, r, rt, rb);
-            v.setTag(TAG_PRESS, Boolean.TRUE);
+v.setTag(TAG_PRESS, Boolean.TRUE);
         }
         @Override public void addView(View child, int index, ViewGroup.LayoutParams params) {
-            if (inner != null && child != inner) { inner.addView(child, params); return; }
+            if (inner != null && child != inner) {
+                inner.addView(child, params);
+                scheduleEdgeInsets();
+                return;
+            }
             super.addView(child, index, params);
         }
         @Override public void addView(View child) {
-            if (inner != null && child != inner) { inner.addView(child); return; }
+            if (inner != null && child != inner) {
+                inner.addView(child);
+                scheduleEdgeInsets();
+                return;
+            }
             super.addView(child);
+        }
+
+        private boolean edgeInsetsScheduled = false;
+        private void scheduleEdgeInsets() {
+            if (edgeInsetsScheduled) return;
+            edgeInsetsScheduled = true;
+            post(new Runnable() {
+                @Override public void run() {
+                    edgeInsetsScheduled = false;
+                    applyEdgeInsets(-1f);
+                }
+            });
         }
         public void enableGlass(float radiusDp, int tintColor) {
             if (glass != null) return;
