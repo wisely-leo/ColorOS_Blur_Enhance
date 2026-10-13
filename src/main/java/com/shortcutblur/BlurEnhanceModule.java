@@ -68,7 +68,7 @@ public class BlurEnhanceModule extends XposedModule {
 
     // ---- ② 常量：广播 / 版本 ----
     private static final String ACTION_SETCONF = "com.wiselyleo.blurenhance.SETCONF";
-    private static final String BUILD_TAG = "v45.5";
+    private static final String BUILD_TAG = "v45.5.1";
 
     // ---- ② 安装状态 ----
     private volatile ClassLoader cl;
