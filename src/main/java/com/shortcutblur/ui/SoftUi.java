@@ -303,12 +303,27 @@ public final class SoftUi {
 
     /** 请求最近按压组容器重算圆角；未挂载时等下一帧再试。 */
     private static void schedulePressGroupRefresh(final View v) {
+        schedulePressGroupRefresh(v, 0);
+    }
+    // 最大重试次数：视图尚未挂载到父节点时允许延后重试，但必须有上限，
+    // 否则“始终无父节点”的视图会让 post 自旋任务塞满主线程消息队列，
+    // 导致首帧无法绘制（表现为 GUI 打不开 / 卡死）。
+    private static final int PRESS_REFRESH_MAX_RETRY = 3;
+    private static void schedulePressGroupRefresh(final View v, final int attempt) {
         if (v == null) return;
         try {
             final android.view.ViewParent p = v.getParent();
             if (p == null) {
+                if (attempt >= PRESS_REFRESH_MAX_RETRY) {
+                    // 超过重试上限仍未挂载：降级为对自身应用一次全圆角按压，
+                    // 保证有反馈的同时不再无限重投。
+                    if (isPressable(v) && v.getBackground() == null) {
+                        applyPressFeedback(v, true, true, null);
+                    }
+                    return;
+                }
                 v.post(new Runnable() {
-                    @Override public void run() { schedulePressGroupRefresh(v); }
+                    @Override public void run() { schedulePressGroupRefresh(v, attempt + 1); }
                 });
                 return;
             }
@@ -571,6 +586,7 @@ public final class SoftUi {
         private float touchSlop = -1f;
         private final RectF track = new RectF();
         private float min, max, value;
+        private float step = 0f;   // 0 = 连续；>0 = 吸附到最近的 step 整数倍
         private OnChange cb;
         private float pressScale = 0.82f;
         private ValueAnimator scaleAnimator;
@@ -580,10 +596,33 @@ public final class SoftUi {
             setClickable(true);
             touchSlop = android.view.ViewConfiguration.get(c).getScaledTouchSlop();
         }
+        /**
+         * 设置当前值（若已配置 step，会吸附到最近档位）。
+         */
         public void setValue(float v) {
-            value = Math.max(min, Math.min(max, v));
+            value = snapValue(v);
             invalidate();
         }
+        /**
+         * 设置离散档位：>0 时滑块吸附到 min + k*step（如 setStep(1f) 只取整数）。
+         * 便于“模糊强度 1x/2x/3x/4x”这类档位设置，避免“拖到 2.4 显示 2”的割裂。
+         */
+        public Slider setStep(float step) {
+            this.step = step > 0f ? step : 0f;
+            snap();
+            invalidate();
+            return this;
+        }
+        private float snapValue(float v) {
+            float clamped = Math.max(min, Math.min(max, v));
+            if (step <= 0f) return clamped;
+            // 吸附到 min + k*step（k 取整），再做浮点收敛
+            float k = Math.round((clamped - min) / step);
+            float snapped = min + k * step;
+            snapped = Math.max(min, Math.min(max, snapped));
+            return Math.round(snapped * 1e6f) / 1e6f;
+        }
+        private void snap() { value = snapValue(value); }
         public Slider setOnChange(OnChange c) { this.cb = c; return this; }
 
         private void animatePress(boolean active) {
@@ -672,7 +711,7 @@ public final class SoftUi {
             float left = th, right = getWidth() - th;
             float frac = (right > left) ? (x - left) / (right - left) : 0f;
             frac = Math.max(0f, Math.min(1f, frac));
-            value = min + (max - min) * frac;
+            value = snapValue(min + (max - min) * frac);
             invalidate();
             if (cb != null) cb.onChange(value);
         }
@@ -858,6 +897,54 @@ public final class SoftUi {
 
     public interface ColorInputCb { void onColor(int rgb, boolean valid); }
 
+    public interface OnInput { void onInput(String text); }
+    /**
+     * 文本输入行：左侧标题 + 右侧输入框（无底框、右对齐）。
+     * 输入框样式由 {@link #buildInput} 统一（背景 / 描边 / 光标色）。
+     */
+    public static Row input(Context c, String title, String hint, String value,
+                            OnInput onInput) {
+        return input(c, title, hint, value,
+                android.text.InputType.TYPE_CLASS_TEXT, onInput);
+    }
+    public static Row input(Context c, String title, String hint, String value,
+                            int inputType, final OnInput onInput) {
+        final android.widget.EditText et = buildInput(c, BODY_SIZE);
+        et.setBackground(null);
+        et.setPadding(0, 0, 0, 0);
+        et.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        et.setInputType(inputType);
+        if (hint != null) et.setHint(hint);
+        if (value != null) et.setText(value);
+        et.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s2, int a, int b, int d) {}
+            @Override public void onTextChanged(CharSequence s2, int a, int b, int d) {}
+            @Override public void afterTextChanged(android.text.Editable e) {
+                if (onInput != null) onInput.onInput(e == null ? "" : e.toString());
+            }
+        });
+        Row row = new Row(c, title, et, false);
+        return row;
+    }
+    /**
+     * 构建统一样式的输入框（背景 / 描边 / 圆角 / 内边距 / 光标色）。
+     * 供 {@code input()} 与内部对话框复用，避免手搓样式不一致。
+     */
+    static android.widget.EditText buildInput(Context ctx, float textSize) {
+        android.widget.EditText et = new android.widget.EditText(ctx);
+        et.setTextSize(textSize);
+        et.setTextColor(TEXT_PRIMARY);
+        et.setSingleLine(true);
+        et.setHintTextColor(TEXT_SECONDARY);
+        et.setBackground(roundRect(INPUT_FILL, 12f, ACCENT, 1.6f, ctx));
+        int ep = (int) dp(ctx, 14f);
+        et.setPadding(ep, ep, ep, ep);
+        et.setHighlightColor(ACCENT & 0x33FFFFFF);
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            try { et.setTextCursorDrawable(null); } catch (Throwable ignored) {}
+        }
+        return et;
+    }
     public static android.widget.EditText findEditText(View root) {
         if (root instanceof android.widget.EditText) return (android.widget.EditText) root;
         if (root instanceof android.view.ViewGroup) {
@@ -885,22 +972,13 @@ public final class SoftUi {
                 plp.rightMargin = dp(ctx, 12f);
                 line.addView(preview, plp);
 
-                final android.widget.EditText et = new android.widget.EditText(ctx);
+                final android.widget.EditText et = buildInput(ctx, BODY_SIZE + 4f);
                 et.setText(String.format("%06X", initialRgb & 0xFFFFFF));
-                et.setTextSize(BODY_SIZE + 4f);
-                et.setTextColor(TEXT_PRIMARY);
-                et.setSingleLine(true);
                 et.setGravity(Gravity.CENTER);
                 et.setHint("RRGGBB");
-                et.setHintTextColor(TEXT_SECONDARY);
                 et.setInputType(android.text.InputType.TYPE_CLASS_TEXT
                         | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
                         | android.text.InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
-                final android.graphics.drawable.GradientDrawable etBg =
-                        roundRect(INPUT_FILL, 12f, ACCENT, 1.6f, ctx);
-                et.setBackground(etBg);
-                int ep = (int) dp(ctx, 14f);
-                et.setPadding(ep, ep, ep, ep);
                 et.setFilters(new android.text.InputFilter[]{
                         new android.text.InputFilter.LengthFilter(7),
                         new android.text.InputFilter() {
@@ -2416,6 +2494,27 @@ public final class SoftUi {
         t.setLayoutParams(lp);
         return t;
     }
+    /**
+     * 带右侧动作的分组标题（如“其他 · 全部重置”按钮）。
+     * 右侧 action 为 null 时退化为普通分组标题（但返回类型为 View，保持布局一致）。
+     */
+    public static View group(Context c, String title, View action) {
+        LinearLayout line = new LinearLayout(c);
+        line.setOrientation(LinearLayout.HORIZONTAL);
+        line.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams lpl = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lpl.leftMargin = dp(c, SIDE + 4);
+        lpl.rightMargin = dp(c, SIDE);
+        lpl.topMargin = dp(c, 14);
+        lpl.bottomMargin = dp(c, 6);
+        line.setLayoutParams(lpl);
+        TextView t = text(c, title, SUB_SIZE, TEXT_SECONDARY);
+        line.addView(t, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        if (action != null) line.addView(action);
+        return line;
+    }
     public static Row link(Context c, String title, final OnClick cb) {
         TextView arrow = text(c, "›", BODY_SIZE + 4, TEXT_SECONDARY);
         Row r = new Row(c, title, arrow, false);
@@ -2430,6 +2529,22 @@ public final class SoftUi {
     }
     public static TextView statusText(Context c, String s) {
         return text(c, s == null ? "" : s, SUB_SIZE, TEXT_SECONDARY);
+    }
+    /** 统一的短 Toast。 */
+    public static void toast(Context c, String msg) {
+        toast(c, msg, false);
+    }
+    /**
+     * 统一的 Toast 封装（默认 LENGTH_SHORT，longDuration=true 时为 LENGTH_LONG）。
+     * 所有提示走这里，便于后续统一换 Snackbar / 去重。
+     */
+    public static void toast(Context c, String msg, boolean longDuration) {
+        if (c == null || msg == null || msg.length() == 0) return;
+        try {
+            android.widget.Toast.makeText(c, msg,
+                    longDuration ? android.widget.Toast.LENGTH_LONG
+                                 : android.widget.Toast.LENGTH_SHORT).show();
+        } catch (Throwable ignored) {}
     }
     public static Row action(Context c, String title, View right, final OnClick cb) {
         Row r = new Row(c, title, right, false);
@@ -2542,10 +2657,44 @@ public final class SoftUi {
         col.setOnClickListener(v -> { if (cb != null) cb.onClick(); });
         return col;
     }
+    /**
+     * 三栏信息行：左侧「标题 + 副标题」竖排，右侧可挂任意控件（开关/数值/按钮）。
+     * 相比 infoBlock 多了右侧控件位，相比 action 多了副标题。
+     */
+    public static View infoSub(Context c, String title, String subtitle, View right) {
+        LinearLayout texts = new LinearLayout(c);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        TextView t1 = text(c, title == null ? "" : title, BODY_SIZE, TEXT_PRIMARY);
+        t1.setSingleLine(true);
+        t1.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        texts.addView(t1, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        if (subtitle != null && subtitle.length() > 0) {
+            TextView t2 = text(c, subtitle, SUB_SIZE, TEXT_SECONDARY);
+            LinearLayout.LayoutParams lp2 = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp2.topMargin = dp(c, 2f);
+            texts.addView(t2, lp2);
+        }
+        LinearLayout line = hRow(c);
+        line.setMinimumHeight(dp(c, ROW_H));
+        line.addView(texts, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        if (right != null) line.addView(right);
+        return line;
+    }
     public interface OnClick { void onClick(); }
     public static View slider(Context c, String title, float value,
                               float min, float max, final String unit,
                               Slider.OnChange cb) {
+        return slider(c, title, value, min, max, unit, 0f, cb);
+    }
+    /**
+     * 带离散档位的 slider：step > 0 时吸附到档位（如 1f 表示只取整数档）。
+     */
+    public static View slider(Context c, String title, float value,
+                              float min, float max, final String unit,
+                              final float step, Slider.OnChange cb) {
         LinearLayout right = hRow(c);
         final TextView val = text(c, fmt(value) + (unit == null ? "" : unit),
                 SUB_SIZE, TEXT_SECONDARY);
@@ -2554,6 +2703,7 @@ public final class SoftUi {
         vlp.rightMargin = dp(c, 8);
         right.addView(val, vlp);
         final Slider sl = new Slider(c, value, min, max);
+        if (step > 0f) sl.setStep(step);
         sl.setOnChange(new Slider.OnChange() {
             @Override public void onChange(float v) {
                 val.setText(fmt(v) + (unit == null ? "" : unit));

@@ -288,9 +288,8 @@ private SettingsStore store;
             }
             runOnUiThread(() -> {
                 if (destroyed) return;
-                android.widget.Toast.makeText(SettingsActivity.this,
-                        pkg + " -> " + (r.startsWith("!") ? "失败" : "已重启"),
-                        android.widget.Toast.LENGTH_SHORT).show();
+                SoftUi.toast(SettingsActivity.this,
+                        pkg + " -> " + (r.startsWith("!") ? "失败" : "已重启"));
                 lg("restart scope result: " + r);
             });
         }, "adb-scope-one").start();
@@ -305,9 +304,8 @@ private SettingsStore store;
             }
             runOnUiThread(() -> {
                 if (destroyed) return;
-                android.widget.Toast.makeText(SettingsActivity.this,
-                        "重启全部 -> " + (r.startsWith("!") ? "失败（见日志）" : "已重启"),
-                        android.widget.Toast.LENGTH_SHORT).show();
+                SoftUi.toast(SettingsActivity.this,
+                        "重启全部 -> " + (r.startsWith("!") ? "失败（见日志）" : "已重启"));
                 lg("restart ALL result: " + r);
             });
         }, "adb-scope-all").start();
@@ -351,9 +349,8 @@ private SettingsStore store;
             long size = querySize(uri);
             if (size > MAX_BG_BYTES) {
                 lg("背景图过大: " + (size / 1024 / 1024) + "MB > " + MAX_BG_MB + "MB，已拒绝");
-                android.widget.Toast.makeText(this,
-                        "图片过大（超过 " + MAX_BG_MB + "MB），请换一张",
-                        android.widget.Toast.LENGTH_LONG).show();
+                SoftUi.toast(this,
+                        "图片过大（超过 " + MAX_BG_MB + "MB），请换一张", true);
                 return false;
             }
             java.io.InputStream in = getContentResolver().openInputStream(uri);
@@ -373,9 +370,8 @@ private SettingsStore store;
             if (tooBig) {
                 dst.delete();
                 lg("背景图实际超过 " + MAX_BG_MB + "MB，已中止并删除");
-                android.widget.Toast.makeText(this,
-                        "图片过大（超过 " + MAX_BG_MB + "MB），请换一张",
-                        android.widget.Toast.LENGTH_LONG).show();
+                SoftUi.toast(this,
+                        "图片过大（超过 " + MAX_BG_MB + "MB），请换一张", true);
                 return false;
             }
             store.setBgFile("bg.jpg");
