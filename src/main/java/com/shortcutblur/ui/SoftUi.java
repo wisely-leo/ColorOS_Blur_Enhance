@@ -82,7 +82,7 @@ public final class SoftUi {
 
     public static int   SCRIM       = 0x4D000000;
 
-    private static final int EXTRA_PAD_TAG = View.generateViewId();
+    private static final int EXTRA_PAD_TAG = 0x7F00B101;
 
     public static int   BTN_SUBTLE      = 0x14000000;
     public static int   BTN_SUBTLE_PRESS = 0x28000000;
@@ -263,12 +263,24 @@ public final class SoftUi {
     }
 
     private static void schedulePressGroupRefresh(final View v) {
+        schedulePressGroupRefresh(v, 0);
+    }
+
+    private static final int PRESS_REFRESH_MAX_RETRY = 3;
+    private static void schedulePressGroupRefresh(final View v, final int attempt) {
         if (v == null) return;
         try {
             final android.view.ViewParent p = v.getParent();
             if (p == null) {
+                if (attempt >= PRESS_REFRESH_MAX_RETRY) {
+
+                    if (isPressable(v) && v.getBackground() == null) {
+                        applyPressFeedback(v, true, true, null);
+                    }
+                    return;
+                }
                 v.post(new Runnable() {
-                    @Override public void run() { schedulePressGroupRefresh(v); }
+                    @Override public void run() { schedulePressGroupRefresh(v, attempt + 1); }
                 });
                 return;
             }
@@ -832,6 +844,7 @@ public final class SoftUi {
     }
 
     public interface ColorInputCb { void onColor(int rgb, boolean valid); }
+
     public interface OnInput { void onInput(String text); }
 
     public static Row input(Context c, String title, String hint, String value,
