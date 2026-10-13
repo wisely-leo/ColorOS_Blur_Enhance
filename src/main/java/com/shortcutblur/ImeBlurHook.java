@@ -9,7 +9,7 @@ import java.lang.reflect.Method;
 
 import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedModuleInterface;
-
+import static com.shortcutblur.Symbols.*;
 public final class ImeBlurHook {
 
     private static final String TAG = "IMEBLUR";
@@ -23,8 +23,6 @@ public final class ImeBlurHook {
 
     private static volatile java.lang.ref.WeakReference<View> sLastView =
             new java.lang.ref.WeakReference<>(null);
-
-    private static final String CLS_VRM = Symbols.CLS_VRM;
 
     private static volatile boolean sInstalled = false;
     private static volatile boolean sReflReady = false;

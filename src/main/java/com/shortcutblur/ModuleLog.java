@@ -52,14 +52,13 @@ public final class ModuleLog {
     }
 
     // ===== 异常收口（A2）=====
-    // 语义：替代遍布全模块的 catch (Throwable) {} —— 仍"静默"（不产生日志噪声），
-    // 但按 tag 累计计数，便于诊断时用 swallowStats() 一键 dump。
+    // 语义：替代遍布全模块的 catch (Throwable) {} —— 仍"静默"（不刷屏），
+    // 但**每个 tag 首次吞并时写一行日志**（方案 B），事后可查"哪里出过异常"。
     // 与日志开关绑定：LOG_ENABLED=false 时直接返回，零开销（连 map 都不碰）。
     private static final java.util.concurrent.ConcurrentHashMap<String,
             java.util.concurrent.atomic.AtomicInteger> SWALLOWED =
             new java.util.concurrent.ConcurrentHashMap<>();
-
-    /** 静默吞异常 + 计数（仅日志开启时计数）。 */
+    /** 静默吞异常 + 计数；每个 tag 首次吞并写一行日志（首个即记录，之后仅计数）。 */
     public static void swallow(String tag, Throwable t) {
         if (!enabled()) return;
         try {
@@ -68,6 +67,21 @@ public final class ModuleLog {
                 c = new java.util.concurrent.atomic.AtomicInteger();
                 java.util.concurrent.atomic.AtomicInteger prev = SWALLOWED.putIfAbsent(tag, c);
                 if (prev != null) c = prev;
+                // 首次：写一行（含异常类型与首帧位置），之后仅计数不刷屏。
+                if (prev == null) {
+                    String detail = "swallow[" + tag + "] first";
+                    if (t != null) {
+                        detail += " " + t.getClass().getSimpleName() + ":" + t.getMessage();
+                        try {
+                            StackTraceElement[] st = t.getStackTrace();
+                            if (st != null && st.length > 0) {
+                                detail += "@" + st[0].getClassName() + "." + st[0].getMethodName()
+                                        + ":" + st[0].getLineNumber();
+                            }
+                        } catch (Throwable ignored) {}
+                    }
+                    d("SWALLOW", detail);
+                }
             }
             c.incrementAndGet();
         } catch (Throwable ignored) {

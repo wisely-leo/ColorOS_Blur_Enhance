@@ -6,6 +6,7 @@ import android.widget.TextView;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import static com.shortcutblur.Symbols.*;
 public class GlyphBlurRenderer {
     private static final int MAX_RETRY = 12;
     private static final float GLYPH_DY = 0.0f;
@@ -130,7 +131,7 @@ public class GlyphBlurRenderer {
             GlyphSnapshot[] snaps = sSnapsMap.get(container);
             if (snaps == null || snaps.length == 0) { return; }
             ModuleLog.d("GB", "snapshot n=" + snaps.length);
-            Class<?> iface = Class.forName(Symbols.CLS_BLUR_PATH_PROVIDER, false, cl);
+            Class<?> iface = Class.forName(CLS_BLUR_PATH_PROVIDER, false, cl);
             Object provider = Proxy.newProxyInstance(cl, new Class<?>[]{ iface }, new InvocationHandler() {
                 @Override public Object invoke(Object proxy, Method method, Object[] args) {
                     try {
@@ -203,7 +204,7 @@ public class GlyphBlurRenderer {
     static void applyGlassColor(Object blurDrawable, ClassLoader cl) {
         try {
             if (blurDrawable == null) return;
-            Class<?> paramCls = Class.forName(Symbols.CLS_BLUR_PARAM, false, cl);
+            Class<?> paramCls = Class.forName(CLS_BLUR_PARAM, false, cl);
 
             Method getBP = Reflect.method(blurDrawable.getClass(), "getBlurParam", 0);
             if (getBP == null) { ModuleLog.e("GLASS", "getBlurParam not found", null); return; }

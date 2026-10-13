@@ -4,19 +4,11 @@ import android.graphics.RenderEffect;
 import android.graphics.Shader;
 import android.view.View;
 import java.lang.reflect.Method;
+import static com.shortcutblur.Symbols.*;
 public final class BlurLib {
     private BlurLib() {}
     public static volatile ClassLoader LOADER = null;
     public static ClassLoader classLoader() { return LOADER; }
-    // ===== 符号转发（集中定义见 Symbols，此处保留兼容别名，编译期内联、零开销）=====
-    public static final String CLS_LAUNCHER = Symbols.CLS_LAUNCHER;
-    public static final String CLS_WORKSPACE_SCRIM = Symbols.CLS_WORKSPACE_SCRIM;
-    public static final String CLS_OPLUS_DRAGLAYER = Symbols.CLS_OPLUS_DRAGLAYER;
-    public static final String CLS_LAUNCHER_RECENTS_VIEW = Symbols.CLS_LAUNCHER_RECENTS_VIEW;
-    public static final String CLS_LAUNCHER_STATE = Symbols.CLS_LAUNCHER_STATE;
-    public static final String M_ON_STATE_TRANSITION_START = Symbols.M_ON_STATE_TRANSITION_START;
-    public static final String M_ON_STATE_TRANSITION_COMPLETE = Symbols.M_ON_STATE_TRANSITION_COMPLETE;
-    public static final String M_ON_STATE_TRANSITION_CANCEL = Symbols.M_ON_STATE_TRANSITION_CANCEL;
     public static void setBlurRadius(View v, float radius) {
         if (v == null) return;
         try {

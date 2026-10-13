@@ -4,12 +4,9 @@ import java.lang.reflect.Executable;
 import java.lang.reflect.Method;
 import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedModule;
-
+import static com.shortcutblur.Symbols.*;
 public final class GlassColorHook {
     private static volatile boolean sInstalled = false;
-    private static final String CLS_CONTINUOUS = Symbols.CLS_CONTINUOUS;
-    private static final String CLS_BLUR_PARAM = Symbols.CLS_BLUR_PARAM;
-
     private GlassColorHook() {}
 
     public static void install(XposedModule mod, ClassLoader cl) {

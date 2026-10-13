@@ -7,14 +7,13 @@ import java.lang.reflect.Executable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import io.github.libxposed.api.XposedInterface;
+import static com.shortcutblur.Symbols.*;
 public final class QuickSearchBlur {
     private static final String TAG = "QSBLUR";
     private static final Drawable TRANSPARENT = new ColorDrawable(0x00000000);
     private static final int ENTER_SOURCE_ASSISTANT_SCREEN = 2;
     private static final int ENTER_SOURCE_ASSISTANT_INFO = 4;
     private static final int ENTER_SOURCE_UNKNOWN = -1;
-    private static final String CLS_RUN_TIME_CONFIG = Symbols.CLS_RUN_TIME_CONFIG;
-    private static final String FLD_QS_ENTER_SOURCE_FLAG = Symbols.FLD_QS_ENTER_SOURCE_FLAG;
     private static volatile boolean sInstalled = false;
     private static volatile ClassLoader sLoader = null;
     private QuickSearchBlur() {}
