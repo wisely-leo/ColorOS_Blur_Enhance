@@ -61,6 +61,14 @@ public final class QuickSearchBlur {
     private static void installWindowHook(BlurEnhanceModule module, ClassLoader loader) throws Throwable {
         if (sWindowHookInstalled) return;   // 幂等
         Method m = Window.class.getDeclaredMethod("setBackgroundDrawable", Drawable.class);
+        // Window 是抽象类，setBackgroundDrawable 为抽象方法；LSPosed 不能 hook 抽象方法
+        // （IllegalArgumentException: Cannot hook abstract methods）。此处直接跳过，
+        // 避免 install failed 噪声 —— 透明化已由 View.setBackground 那条 hook 覆盖。
+        if (java.lang.reflect.Modifier.isAbstract(m.getModifiers())) {
+            sWindowHookInstalled = true;
+            ModuleLog.d(TAG, "[hook] Window.setBackgroundDrawable skipped (abstract)");
+            return;
+        }
         m.setAccessible(true);
         module.hookPublic("qs.window.setBg", (Executable) m, new XposedInterface.Hooker() {
             @Override
