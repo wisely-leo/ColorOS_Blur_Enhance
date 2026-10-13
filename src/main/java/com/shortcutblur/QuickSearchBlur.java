@@ -2,7 +2,6 @@ package com.shortcutblur;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.view.View;
-import android.view.Window;
 import java.lang.reflect.Executable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -24,7 +23,6 @@ public final class QuickSearchBlur {
             if (sInstalled) return;
             try {
                 installViewHook(module, loader);
-                installWindowHook(module, loader);
                 sInstalled = true;
                 ModuleLog.d(TAG, "install done classLoader=" + (loader != null));
             } catch (Throwable t) {
@@ -34,7 +32,7 @@ public final class QuickSearchBlur {
     }
     private static volatile boolean sViewHookInstalled = false;
     private static void installViewHook(BlurEnhanceModule module, ClassLoader loader) throws Throwable {
-        if (sViewHookInstalled) return;   // 幂等：避免 installWindowHook 失败后重试时重复 hook
+        if (sViewHookInstalled) return;   // 幂等：避免重复 hook
         Method m = View.class.getDeclaredMethod("setBackground", Drawable.class);
         m.setAccessible(true);
         module.hookPublic("qs.view.setBg", (Executable) m, new XposedInterface.Hooker() {
@@ -56,38 +54,6 @@ public final class QuickSearchBlur {
         });
         sViewHookInstalled = true;
         ModuleLog.d(TAG, "[hook] View.setBackground");
-    }
-    private static volatile boolean sWindowHookInstalled = false;
-    private static void installWindowHook(BlurEnhanceModule module, ClassLoader loader) throws Throwable {
-        if (sWindowHookInstalled) return;   // 幂等
-        Method m = Window.class.getDeclaredMethod("setBackgroundDrawable", Drawable.class);
-        // Window 是抽象类，setBackgroundDrawable 为抽象方法；LSPosed 不能 hook 抽象方法
-        // （IllegalArgumentException: Cannot hook abstract methods）。此处直接跳过，
-        // 避免 install failed 噪声 —— 透明化已由 View.setBackground 那条 hook 覆盖。
-        if (java.lang.reflect.Modifier.isAbstract(m.getModifiers())) {
-            sWindowHookInstalled = true;
-            ModuleLog.d(TAG, "[hook] Window.setBackgroundDrawable skipped (abstract)");
-            return;
-        }
-        m.setAccessible(true);
-        module.hookPublic("qs.window.setBg", (Executable) m, new XposedInterface.Hooker() {
-            @Override
-            public Object intercept(XposedInterface.Chain chain) throws Throwable {
-                try {
-                    if (shouldTransparent()) {
-                        Object[] args = chain.getArgs().toArray();
-                        if (args.length >= 1) {
-                            ModuleLog.d(TAG, "hit window.setBackgroundDrawable -> transparent");
-                            args[0] = TRANSPARENT;
-                            return chain.proceed(args);
-                        }
-                    }
-                } catch (Throwable ignore) {}
-                return chain.proceed();
-            }
-        });
-        sWindowHookInstalled = true;
-        ModuleLog.d(TAG, "[hook] Window.setBackgroundDrawable");
     }
     private static boolean shouldTransparent() {
         try {
