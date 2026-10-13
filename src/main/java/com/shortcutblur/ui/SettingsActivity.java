@@ -30,7 +30,7 @@ public class SettingsActivity extends Activity {
     private static final int MAX_BG_MB = 15;
     private static final long MAX_BG_BYTES = MAX_BG_MB * 1024L * 1024L;
 
-    private static final String LOG_TAG_VER = "v45.5";
+    private static final String LOG_TAG_VER = "v45.5.1";
     static void lg(String s) {
         if (s == null) return;
         if (!App.logEnabled()) return;
@@ -406,7 +406,14 @@ private SettingsStore store;
     }
 
     private static final String CHANGELOG =
-            "v45.5\n"
+            "v45.5.1\n"
+            + "· 最近任务缩放下限由 0.92 调整为 0.96（卡片不再缩得过小，观感更稳）\n"
+            + "· 修复全局搜索进不去背景模糊偶发报错（移除已失效的窗口背景 Hook）\n"
+            + "· 日志降噪：模糊采样率 / 时钟文字颜色两类高频日志按状态去重，避免刷屏\n"
+            + "· 稳定性与可维护性内部改进（异常收口、反射符号集中、代码结构整理）\n"
+            + "· 内部版本号同步至 v45.5.1\n"
+            + "\n"
+            + "v45.5\n"
             + "· 统一日志开关：界面日志 / 功能日志共用同一开关\n"
             + "  · 关闭日志后不再有任何后台写文件，减少无谓 IO\n"
             + "  · 修复个别日志在开关关闭时仍会写入的问题\n"
