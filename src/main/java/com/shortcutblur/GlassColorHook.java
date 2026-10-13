@@ -53,8 +53,7 @@ public final class GlassColorHook {
 
     private static boolean isDarkMode(Object param) {
         try {
-            Class<?> appCls = Class.forName("android.app.ActivityThread", false, null);
-            Object app = appCls.getMethod("currentApplication").invoke(null);
+            Object app = BlurLib.currentAppContext();
             if (app instanceof android.app.Application) {
                 android.content.res.Resources res = ((android.app.Application) app).getResources();
                 if (res != null) {

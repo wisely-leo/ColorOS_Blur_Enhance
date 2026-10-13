@@ -102,10 +102,10 @@ public final class ImeBlurHook {
             Class<?> clsH7 = Class.forName("h7", false, cl);
             Class<?> clsD7 = Class.forName("d7", false, cl);
             Class<?> clsJz = Class.forName("jz", false, cl);
-            sFldH7k = clsH7.getField("k");
-            sFldD7c = clsH7.getField("c");
-            sFldD7l = clsD7.getField("l");
-            sFldD7m = clsD7.getField("m");
+            sFldH7k = Reflect.field(clsH7, "k");
+            sFldD7c = Reflect.field(clsH7, "c");
+            sFldD7l = Reflect.field(clsD7, "l");
+            sFldD7m = Reflect.field(clsD7, "m");
             sMtdJzGet = clsJz.getMethod("g");
             sFloatProbeReady = true;
         } catch (Throwable t) {

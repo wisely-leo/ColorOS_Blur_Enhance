@@ -58,8 +58,8 @@ public final class BlurLib {
         try {
             Class<?> ls = Reflect.loadClass(CLS_LAUNCHER_STATE, classLoader());
             if (ls == null) return null;
-            java.lang.reflect.Field f = ls.getField(name);
-            return f.get(null);
+            java.lang.reflect.Field f = Reflect.field(ls, name);
+            return f == null ? null : f.get(null);
         } catch (Throwable ignore) {}
         return null;
     }
@@ -72,9 +72,8 @@ public final class BlurLib {
     }
     public static android.content.Context currentAppContext() {
         try {
-            Class<?> at = Class.forName("android.app.ActivityThread");
-            java.lang.reflect.Method m = at.getMethod("currentApplication");
-            Object app = m.invoke(null);
+            Class<?> at = Class.forName(CLS_ACTIVITY_THREAD);
+            Object app = Reflect.callStatic(at, M_CURRENT_APPLICATION);
             if (app instanceof android.content.Context) return (android.content.Context) app;
         } catch (Throwable ignore) {}
         return null;

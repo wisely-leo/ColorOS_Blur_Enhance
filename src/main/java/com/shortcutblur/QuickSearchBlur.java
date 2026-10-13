@@ -3,7 +3,6 @@ import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.view.View;
 import java.lang.reflect.Executable;
-import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import io.github.libxposed.api.XposedInterface;
 import static com.shortcutblur.Symbols.*;
@@ -60,8 +59,7 @@ public final class QuickSearchBlur {
             ClassLoader cl = sLoader;
             if (cl == null) cl = QuickSearchBlur.class.getClassLoader();
             Class<?> rc = Class.forName(CLS_RUN_TIME_CONFIG, false, cl);
-            Field f = rc.getField(FLD_QS_ENTER_SOURCE_FLAG);
-            int flag = f.getInt(null);
+            int flag = Reflect.readStaticInt(rc, FLD_QS_ENTER_SOURCE_FLAG, ENTER_SOURCE_UNKNOWN);
             boolean ok = flag != ENTER_SOURCE_ASSISTANT_SCREEN
                     && flag != ENTER_SOURCE_ASSISTANT_INFO
                     && flag != ENTER_SOURCE_UNKNOWN;

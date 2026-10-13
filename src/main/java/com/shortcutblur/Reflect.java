@@ -153,4 +153,37 @@ public final class Reflect {
             }
         }
     }
+
+    /**
+     * 读取静态字段的 int 值；失败返回 {@code def}。
+     * 用于替代各 Hook 内重复的 {@code Class.forName(...).getField(...).getInt(null)} 样板。
+     */
+    public static int readStaticInt(Class<?> c, String name, int def) {
+        if (c == null || name == null) return def;
+        Field f = field(c, name);
+        if (f == null) return def;
+        try {
+            return f.getInt(null);
+        } catch (Throwable t) {
+            try {
+                return f.get(null) instanceof Integer ? (Integer) f.get(null) : def;
+            } catch (Throwable t2) {
+                return def;
+            }
+        }
+    }
+
+    /**
+     * 调用无参静态方法（如 {@code ActivityThread.currentApplication()}）；失败返回 null。
+     */
+    public static Object callStatic(Class<?> c, String name) {
+        if (c == null || name == null) return null;
+        Method m = method(c, name, 0);
+        if (m == null) return null;
+        try {
+            return m.invoke(null);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
 }
