@@ -38,8 +38,7 @@ public class GlyphBlurRenderer {
     }
     private static final java.util.WeakHashMap<View, GlyphSnapshot[]> sSnapsMap = new java.util.WeakHashMap<View, GlyphSnapshot[]>();
     private static volatile boolean sScreenOn = true;
-    // key 弱引用 View，value 也须弱引用：StateMachine 强引用 container，
-// 否则 entry 永远无法回收（值是 key 的持有者）。
+
     private static final java.util.WeakHashMap<View, java.lang.ref.WeakReference<ClockBlurStateMachine>> sRunners =
             new java.util.WeakHashMap<View, java.lang.ref.WeakReference<ClockBlurStateMachine>>();
 
@@ -54,8 +53,6 @@ public class GlyphBlurRenderer {
         return list;
     }
 
-    // 时钟模糊 drawable 登记表：仅用于识别「是不是时钟的模糊 drawable」。
-    // 必须用弱引用，否则会随每次时钟重建累积并拖住其回调的 View 树，造成内存泄漏。
     private static final java.util.WeakHashMap<Object, Boolean> sClockBlurDrawables =
             new java.util.WeakHashMap<Object, Boolean>();
     public static void registerBlurDrawable(Object bd) {
@@ -98,17 +95,14 @@ public class GlyphBlurRenderer {
     public static void setScreenOn(boolean on) {
         boolean changed = (sScreenOn != on);
         sScreenOn = on;
-        // 亮屏事件（SCREEN_ON / USER_PRESENT）必须每次都推进一次重建：
-        // 不能因 sScreenOn 值未变（进程在灭屏时被拉起、初值与真实一致）而短路，
-        // 否则状态机可能停在「无任务」死角，导致长时间待机后亮屏不刷新。
+
         if (!changed && !on) return;
         try {
             for (ClockBlurStateMachine pr : runnersSnapshot()) pr.onScreenStateChanged();
         } catch (Throwable t) { ModuleLog.e("GB", "screenStateChanged fail", t); }
     }
     public static void notifyContentMaybeChangedAll() {
-        // 高频入口（RemoteViews.apply/reapply 等每帧级回调）：只做读锁快照，
-        // 不持有 sRunners 锁调用回调（避免与 View/Handler 的锁形成顺序反转）。
+
         try {
             for (ClockBlurStateMachine pr : runnersSnapshot()) pr.onContentChanged();
         } catch (Throwable t) { ModuleLog.e("GB", "kickAll fail", t); }
@@ -272,7 +266,7 @@ public class GlyphBlurRenderer {
     }
     private static void retry(final View container, final ClassLoader cl, final int attempt, final String why) {
         if (attempt >= MAX_RETRY) { ModuleLog.e("GB", "give up: " + why, null); return; }
-        // 已脱离窗口说明该 View 不会再展示，重试无意义，直接停。
+
         try { if (!container.isAttachedToWindow()) return; } catch (Throwable ignore) {}
         if (attempt == 0 || attempt == MAX_RETRY - 1) ModuleLog.d("GB", "retry(" + attempt + "): " + why);
         container.postDelayed(new Runnable() {
@@ -308,7 +302,7 @@ public class GlyphBlurRenderer {
             }
             if (w <= 0) w = 1;
             if (h <= 0) h = 1;
-            // 仅在确实需要时创建位图；若尺寸过大，先按比例缩到上限，避免全尺寸 ARGB_8888 分配。
+
             final int MAX_DIM = 192;
             int cw = w, ch = h;
             if (w > MAX_DIM || h > MAX_DIM) {
@@ -318,8 +312,7 @@ public class GlyphBlurRenderer {
             android.graphics.Bitmap out = android.graphics.Bitmap.createBitmap(
                     cw, ch, android.graphics.Bitmap.Config.ARGB_8888);
             android.graphics.Canvas c = new android.graphics.Canvas(out);
-            // 保存/恢复 bounds：d 是 ImageView 自己的 drawable，
-            // 直接改 bounds 会破坏它的后续绘制（图标错位/拉伸）。
+
             android.graphics.Rect oldBounds = d.copyBounds();
             try {
                 d.setBounds(0, 0, cw, ch);
@@ -335,7 +328,7 @@ public class GlyphBlurRenderer {
     }
     private static void appendWeatherIconSnapshots(View container, View base, java.util.ArrayList<GlyphSnapshot> list) {
         int[] iconIds = ClockIds.ICON_IDS;
-        // 复用单个 Rect 与 Region：避免在像素扫描的双重循环里反复 new（原实现每行 new Rect）。
+
         final android.graphics.Rect reuseRect = new android.graphics.Rect();
         for (int id : iconIds) {
             try {
@@ -366,8 +359,7 @@ public class GlyphBlurRenderer {
                 try {
                     small.getPixels(px, 0, bw, 0, 0, bw, bh);
                 } finally {
-                    // small 一定是本方法新建的（createScaledBitmap），用完立刻回收，降低 GC 压力。
-                    // 注意：bmp 可能是 ImageView 自己的 BitmapDrawable 位图，绝不能 recycle。
+
                     try { small.recycle(); } catch (Throwable ignore) {}
                 }
                 android.graphics.Region region = new android.graphics.Region();
@@ -472,15 +464,11 @@ public class GlyphBlurRenderer {
                 if (!(v instanceof TextView)) continue;
                 TextView tv = (TextView) v;
                 if (ClockIds.isRealmeLockId(id)) {
-                    // 真我 (realme) 时钟：文字用 View 级 alpha（与天气图标同机制）。
-                    // 原因：时钟 App 会通过 RemoteViews.setTextColor 反复推送"实心白"，
-                    // 单纯改 setTextColor 会被其覆盖（闪成实心白）；
-                    // 而 View.setAlpha 是整层透明度，任何 setTextColor 都无法把它拉回不透明，
-                    // 从而稳定露出容器上的模糊层。
+
                     float fa = a / 255f;
                     if (Math.abs(tv.getAlpha() - fa) > 0.01f) {
                         tv.setAlpha(fa);
-                        // 真我文字透明度来源唯一（视图级），记录以便排查
+
                         ModuleLog.dv("TALPHA", "id=0x" + Integer.toHexString(id)
                                 + " cls=" + tv.getClass().getSimpleName()
                                 + " viewAlpha=" + fa);
@@ -538,9 +526,7 @@ public class GlyphBlurRenderer {
                 list.add(new GlyphSnapshot(localPath, dx, dy));
             }
             appendWeatherIconSnapshots(container, base, list);
-            // 注意：不能在此 reset/recycle 旧快照的 Path —— sIconCache 中的图标 Path 是
-            // 跨次复用共享的（缓存命中时被直接放进新快照），reset 会破坏缓存导致图标错误。
-            // 旧 Path 交给 GC（NativeAllocationRegistry）回收即可。
+
             sSnapsMap.put(container, list.isEmpty() ? null : list.toArray(new GlyphSnapshot[0]));
             applyIconAlpha(container);
             applyTextAlpha(container);
@@ -589,8 +575,7 @@ public class GlyphBlurRenderer {
     }
     private static final long FALLBACK_CHECK_MS = 2000L;
     private static final long FALLBACK_SCREENOFF_MS = 8000L;
-    // 可见性待恢复时的探测间隔：这是「短时不可见 → 可见」的响应粒度，属性能敏感路径，
-    // 必须保持较高频率（250ms）。不可贸然放宽，否则不可见期间的时间变动会延迟刷新。
+
     private static final long FALLBACK_HIDDEN_PROBE_MS = 250L;
     private static final long REBUILD_SETTLE_MS = 50L;
     private static final class ClockBlurStateMachine {
@@ -600,7 +585,7 @@ public class GlyphBlurRenderer {
         private static final int PAUSED = 3;
         private final View container;
         private final Object blurDrawable;
-        // state 仅在本类 synchronized 方法内读写，无需 volatile（避免与 synchronized 混用造成语义混乱）。
+
         private int state = IDLE;
         private String lastStateSig = null;
         private String lastFingerprint = null;
@@ -612,9 +597,7 @@ public class GlyphBlurRenderer {
         private final Runnable fallbackTask = new Runnable() {
             @Override public void run() { fallbackCheck(); }
         };
-        // 重建前等待 preDraw 的监听器：必须保留引用，以便 View 脱离窗口时主动移除。
-        // 否则若 invalidate() 后 View 立即 detach，onPreDraw 永不触发，
-        // listener 会滞留在 ViewTreeObserver 上并强引用 container（泄漏）。
+
         private android.view.ViewTreeObserver.OnPreDrawListener pendingPreDrawListener = null;
         ClockBlurStateMachine(View container, Object blurDrawable) {
             this.container = container;
@@ -624,42 +607,35 @@ public class GlyphBlurRenderer {
             transitionToDirty();
         }
         synchronized void onContentChanged() {
-            // 灭屏期间的更新由亮屏时的无条件重建统一兑现（见 onScreenStateChanged），此处直接丢弃即可。
+
             if (!sScreenOn) return;
             transitionToDirty();
         }
         synchronized void onScreenStateChanged() {
             if (sScreenOn) {
-                // 亮屏后强制推进一次重建（覆盖 IDLE/DIRTY 死角，或灭屏期间被丢弃的更新）。
-                // 注意：统一走 transitionToDirty()，不要直接 postOnAnimation，
-                // 否则会绕过 MIN_REBUILD_INTERVAL_MS 节流并造成重建堆积（发热）。
-                // 先把状态复位到可推进态（DIRTY/REBUILDING 会被 transitionToDirty 去重拦截）。
+
                 if (state == DIRTY || state == REBUILDING) {
-                    // 已有重建在路上：置回 IDLE 以便重新触发（旧任务会被 rebuildTask 内的状态校验丢弃）
+
                     state = IDLE;
                 }
                 transitionToDirty();
             } else {
                 state = PAUSED;
                 container.removeCallbacks(rebuildTask);
-                // 不再移除 fallbackTask：让低频探测在灭屏期间续排，
-                // 保证亮屏后即使广播丢失也能自行恢复（见 fallbackCheck）。
-                // ★ 先 removeCallbacks 再 postDelayed：避免重复的 SCREEN_OFF 广播导致任务堆积
-                //   （与 scheduleFallback/scheduleScreenOffProbe 保持一致）。
+
                 sHandler.removeCallbacks(fallbackTask);
                 sHandler.postDelayed(fallbackTask, FALLBACK_SCREENOFF_MS);
             }
         }
         private long lastRebuildAt = 0L;
-        // 「不可见期间收到内容变更」的标记：一旦可见性恢复，立即重建（不依赖探测周期）。
+
         private volatile boolean pendingRebuild = false;
         private static final long MIN_REBUILD_INTERVAL_MS = 100L;
         private synchronized void transitionToDirty() {
             if (state == PAUSED && !sScreenOn) return;
             if (state == DIRTY || state == REBUILDING) return;
             state = DIRTY;
-            // rebuildTask 排在 View 的 Handler 上，取消也必须用同一个 Handler（container），
-            // 否则 removeCallbacks 对另一个 Handler 无效，会造成重建任务堆积（发热）。
+
             container.removeCallbacks(rebuildTask);
             sHandler.removeCallbacks(fallbackTask);
             long now = android.os.SystemClock.uptimeMillis();
@@ -675,14 +651,13 @@ public class GlyphBlurRenderer {
             container.removeCallbacks(rebuildTask);
             if (state == PAUSED && !sScreenOn) return;
             if (!sScreenOn) {
-                // 灭屏否决重建时必须保留低频探测，否则状态机将停在「无任务」状态，
-                // 亮屏后若没有新的屏事件就永远不会重建。
+
                 state = PAUSED;
                 scheduleScreenOffProbe();
                 return;
             }
             if (!ViewUtils.isReallyVisible(container)) {
-                // 不可见期间到达的内容变更不丢弃：置标记，待可见性恢复时立即重建。
+
                 pendingRebuild = true;
                 state = IDLE;
                 scheduleFallbackSoon();
@@ -698,8 +673,7 @@ public class GlyphBlurRenderer {
                         if (cur != null && cur.isAlive()) cur.removeOnPreDrawListener(this);
                         pendingPreDrawListener = null;
                         synchronized (ClockBlurStateMachine.this) {
-                            // 仅在本次重建仍有效（REBUILDING）时执行，
-                            // 避免亮屏重排/状态切换后旧监听器造成重复重建。
+
                             if (state != REBUILDING) return true;
                             try {
                                 doRebuild();
@@ -755,14 +729,12 @@ public class GlyphBlurRenderer {
             sHandler.postDelayed(fallbackTask, FALLBACK_SCREENOFF_MS);
         }
         private synchronized void fallbackCheck() {
-            // 容器已脱离窗口（时钟被移除/重建）时终止轮询，
-            // 否则静态 Handler 会一直持有本状态机（进而持有 View）造成泄漏。
+
             if (!container.isAttachedToWindow()) {
                 state = IDLE;
                 container.removeCallbacks(rebuildTask);
                 sHandler.removeCallbacks(fallbackTask);
-                // 移除可能残留的 preDraw 监听器（若 invalidate 后 View 立即 detach，
-                // onPreDraw 可能永不触发，listener 会滞留在 ViewTreeObserver 上造成泄漏）。
+
                 if (pendingPreDrawListener != null) {
                     try {
                         android.view.ViewTreeObserver vo = container.getViewTreeObserver();
@@ -771,20 +743,19 @@ public class GlyphBlurRenderer {
                     pendingPreDrawListener = null;
                 }
                 synchronized (sRunners) { sRunners.remove(container); }
-                // 显式清理该容器的快照与图标缓存，避免 WeakHashMap 中旧条目滞留。
+
                 try { sSnapsMap.remove(container); } catch (Throwable ignored) {}
                 try { sIconCache.remove(container); } catch (Throwable ignored) {}
                 return;
             }
             if (!sScreenOn) {
-                // 灭屏不再让轮询自终止（原实现 return 后无人再排任务，
-                // 一旦 SCREEN_ON 广播丢失/延迟就会永久停摆）。改为低频续排。
+
                 state = PAUSED;
                 scheduleScreenOffProbe();
                 return;
             }
             if (!ViewUtils.isReallyVisible(container)) { scheduleFallbackSoon(); return; }
-            // 可见性已恢复：若不可见期间有内容变更，立即重建（无需等指纹比对，响应≈0）。
+
             if (pendingRebuild) {
                 pendingRebuild = false;
                 transitionToDirty();
@@ -854,7 +825,7 @@ public class GlyphBlurRenderer {
             }
             return sb.toString();
         }
-        // 一次遍历同时产出 signature 与 fingerprint，避免 doRebuild 里重复整树遍历。
+
         private void computeBoth(StringBuilder sigOut, StringBuilder fpOut) {
             sigOut.setLength(0);
             fpOut.setLength(0);
@@ -885,10 +856,10 @@ public class GlyphBlurRenderer {
         }
         private void doRebuild() {
             rebuildSnapshots(container);
-            // 重建已完成：清除「待重建」标记（本次已消费不可见期间的变更）。
+
             pendingRebuild = false;
             try { applyGlassColor(blurDrawable, container.getContext().getClassLoader()); } catch (Throwable ignored) {}
-            // 一次遍历同时得到 signature 与 fingerprint（原实现分两次整树遍历）。
+
             computeBoth(sb, sb2);
             lastStateSig = sb.toString();
             lastFingerprint = sb2.toString();

@@ -30,9 +30,6 @@ public final class ImeBlurHook {
     private static final int GLOW_COLOR = 0x66FFFFFF;
     private static final float GLOW_FEATHER_DP = 8f;
 
-    // 注意：value 必须弱引用！sMgrOf 的 value（ViewRootManager）由 View 构造、强引用该 View，
-    // 若 value 为强引用会导致 WeakHashMap 的 key 永远不可达，entry 永久滞留（典型泄漏）。
-    // 弱引用后若被 GC，doBlur 会按需重建（见 doBlur 里 mgr==null 分支）。
     private static final java.util.WeakHashMap<View, java.lang.ref.WeakReference<Drawable>> sBlurOf =
             new java.util.WeakHashMap<>();
     private static final java.util.WeakHashMap<View, java.lang.ref.WeakReference<Object>> sMgrOf =
@@ -45,9 +42,7 @@ public final class ImeBlurHook {
     private static volatile int sLastUiMode = -1;
     private static volatile boolean sLastDark = false;
 
-    // IME 应用 Context，用于判断系统深浅色（按键覆盖色跟随深/浅色）。
     private static volatile android.content.Context sImeContext = null;
-
 
     private static volatile boolean sFloatProbeReady = false;
     private static volatile ClassLoader sHostCl = null;
@@ -202,8 +197,7 @@ public final class ImeBlurHook {
                                XposedModuleInterface.PackageReadyParam param) {
         final ClassLoader cl = param.getClassLoader();
         if (cl == null) return;
-        // 幂等：避免 onPackageReady(PKG_YUYAN) 被框架重试/多进程多次调用时重复 hook
-        // （重复 hook 会让 onAttachedToWindow 每次触发多次 applyBlur）。
+
         if (sInstalled) return;
         synchronized (ImeBlurHook.class) {
             if (sInstalled) return;
@@ -374,9 +368,6 @@ public final class ImeBlurHook {
         }
     }
 
-    // 监听系统深浅色（uiMode）切换：切换后让键盘重新应用按键配色与背景。
-    // 键盘按键颜色由被 hook 的 Theme.e/d/k 返回，只有重新绘制才会生效，
-    // 因此在 InputMethodService 收到 configuration 变化时主动触发一次重绘。
     private static void installConfigChangeWatch(final BlurEnhanceModule mod, final ClassLoader cl) {
         try {
             Class<?> ims;
@@ -408,7 +399,7 @@ public final class ImeBlurHook {
                         public Object intercept(XposedInterface.Chain chain) throws Throwable {
                             Object r = chain.proceed();
                             try {
-                                // uiMode 可能变化，清掉缓存以便重新判定深浅色
+
                                 sLastUiMode = -1;
                                 reapply();
                                 View v = sLastView == null ? null : sLastView.get();
@@ -433,19 +424,15 @@ public final class ImeBlurHook {
         }
     }
 
-    // 键盘按键覆盖色：浅色模式=半透明白玻璃；深色模式=半透明黑玻璃。
-    // 之前写死为白色，导致切到深色模式后按键仍保持白色、与暗色背景割裂。
     private static final int KEY_OVERLAY_COLOR_LIGHT = 0xCCffffff;
     private static final int KEY_OVERLAY_COLOR_DARK = 0xCC1C1C1E;
 
     private static final String[] KEY_OVERLAY_METHODS = { "e", "d", "k" };
 
-    // 判断按键覆盖色时应使用的颜色（跟随系统深浅色）。
     private static int keyOverlayColor() {
         return isDarkCached() ? KEY_OVERLAY_COLOR_DARK : KEY_OVERLAY_COLOR_LIGHT;
     }
 
-    // 读取系统 uiMode 判断当前是否深色模式（带缓存，见 isDark(View)）。
     private static boolean isDarkCached() {
         try {
             android.content.Context ctx = sImeContext;
@@ -503,7 +490,6 @@ public final class ImeBlurHook {
 
         sLastView = new java.lang.ref.WeakReference<>(v);
 
-        // 保存 IME Context（用于判断系统深浅色 → 按键覆盖色跟随明暗）。
         try {
             android.content.Context ctx = v.getContext();
             if (ctx != null) sImeContext = ctx.getApplicationContext() != null

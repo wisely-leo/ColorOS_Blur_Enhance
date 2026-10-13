@@ -20,7 +20,7 @@ final class RecentsBlur {
     private static HookApi API;
     private static volatile boolean sStateInOverview = false;
     private static volatile float RECENTS_BLUR_MAX = 64.0f;
-    // 缩放下限：DragLayer 的 scale 最小到该值为止（最大缩到 0.96），不允许更小。
+
     private static volatile float sScaleClampMin = 0.96f;
     private static volatile long sConfLastRead = 0L;
     private static final String CONF_PATH = "/sdcard/Download/ColorOSBlurEnhance.conf";
@@ -29,9 +29,6 @@ final class RecentsBlur {
     private static volatile float sRecentsLastRadius = -1.0f;
     private static volatile float sRecentsAnimRadius = 0.0f;
 
-    // 当前模糊目标 View：必须弱引用！
-    // 它由 hook 回调赋值、仅在 exit 动画结束时清空；若某次 exit 动画未走完
-    // （状态被其他路径置 false），强引用会永久钉住 DragLayer 子树 → 泄漏。
     private static volatile java.lang.ref.WeakReference<View> sRecentsBlurView = null;
     private static volatile float sRecentsTargetRadius = -1.0f;
     private static volatile int sRecentsPhase = 0;
@@ -46,20 +43,14 @@ final class RecentsBlur {
             new android.os.Handler(android.os.Looper.getMainLooper());
     private static Runnable sPendingClear = null;
     private static volatile Runnable sPendingEnter = null;
-    // 壁纸判据日志节流：上一次记录时间。
+
     private static volatile long sWzLastLogMs = 0L;
-    // 【壁纸判据】进入/退出唯一来源：
-    // OplusDepthController.startWallpaperAnimation 的 type
-    // （app_recent_enter=进入 / app_recent_exit=退出）。
-    // 旧判据（scale/alpha/gts/vis）已移除，状态机判据仅作兜底。
+
     private static volatile boolean sWallpaperJudgeEnabled = true;
-    // 壁纸判据为主判断：记录「壁纸信号最后一次生效时间」。
-    // 状态机判据到达时，若距此时间在 WALLPAPER_MAIN_WINDOW_MS 内，
-    // 视为同一次转场的重复信号而忽略；否则延迟兜底。
+
     private static volatile long sLastWallpaperHandledMs = 0L;
     private static final long WALLPAPER_MAIN_WINDOW_MS = 400L;
-    // 状态机兜底延迟：壁纸信号通常更快，状态机慢一拍等它。
-    // 实测壁纸信号可能晚到 ~400ms，故兜底延迟设为 250ms。
+
     private static final long STATE_FALLBACK_DELAY_MS = 250L;
     private static volatile boolean sTintEnabled = false;
     private static volatile java.lang.ref.WeakReference<View> sLastAnchor = null;
@@ -69,15 +60,9 @@ final class RecentsBlur {
     private static volatile boolean sSelfAlphaCall = false;
     private static volatile boolean sForceIconBlur = false;
 
-    // 目标 View 列表：必须用弱引用！
-    // 原先用 List<View> 强引用，若进入 recents 后未走 exit 路径（异常/切换/相
-    // 位卡住），会长期钉住 OplusDragLayer 及其整棵子树，造成大块内存泄漏。
-    // 改为 WeakReference<View> 后，即使漏掉一次 clear()，GC 也能回收 View 树。
     private static final java.util.List<java.lang.ref.WeakReference<View>> sBlurTargets =
             new java.util.ArrayList<java.lang.ref.WeakReference<View>>();
 
-    // 最近任务视图实例（LauncherRecentsView）：必须弱引用！
-    // 它是 View 且只在 stateStart 赋值、从不清空 → 强引用会钉住整棵 recents View 树。
     private static volatile java.lang.ref.WeakReference<Object> sRecentsViewObj = null;
     private static volatile String sBlurMode = "draglayer";
     private static volatile boolean sClampEnabled = true;
@@ -244,12 +229,7 @@ final class RecentsBlur {
     }
     private static int installEarlySignalProbes(ClassLoader loader) {
         int n = 0;
-        // 【壁纸缩放探针 v2】hook OplusDepthController.startWallpaperAnimation(boolean, String)
-        // 实测：ColorOS 桌面「壁纸缩放」不走 setWallpaperZoomOut，
-        // 而是走 OplusDepthController.startWallpaperAnimation(Z,String) ->
-        //   getAnimationParams(type,bool) -> sendWallpaperCommand("oplus.wallpaper.animation")。
-        // 该入口在进/出最近任务转场时必然被调用，参数携带方向(bool)与类型(type)。
-        // 仅记录日志，不改任何逻辑。
+
         try {
             Class<?> odc = Reflect.loadClass(
                     "com.android.launcher3.uioverrides.states.OplusDepthController", loader);
@@ -269,9 +249,7 @@ final class RecentsBlur {
                                         Object[] a = chain.getArgs().toArray();
                                         String type = (a.length > 1 && a[1] != null)
                                                 ? String.valueOf(a[1]) : "?";
-                                        // 【主判据】壁纸缩放驱动进入/退出。
-                                        // type 语义（实测）：app_recent_enter=进入最近任务；
-                                        // app_recent_exit=退出；app_exit/app_launch/folder_open_close=无关，忽略。
+
                                         if (sWallpaperJudgeEnabled) {
                                             boolean enter = "app_recent_enter".equals(type);
                                             boolean exit = !enter && "app_recent_exit".equals(type);
@@ -342,13 +320,7 @@ final class RecentsBlur {
             sPendingExit = null;
         }
     }
-    // 【状态机兜底】壁纸为主判断：状态机信号到达时，
-    //  - 若壁纸刚处理过（WALLPAPER_MAIN_WINDOW_MS 内）-> 忽略（同一次转场的重复信号）；
-    //  - 否则延迟 STATE_FALLBACK_DELAY_MS 等壁纸信号，仍没来再兜底生效。
-    //
-    // 注意（内存）：Runnable 会强引用 lrvSelf（View）。为避免转场中堆积、
-    // 并防止已 detach 的 View 被延迟任务长期持有，这里把任务存入
-    // sPendingEnter/sPendingExit，下一次同类转场先取消旧的（只保留最新一个）。
+
     private static void stateFallbackEnter(Object lrvSelf) {
         if (sStateInOverview) return;
         final java.lang.ref.WeakReference<Object> ref = new java.lang.ref.WeakReference<>(lrvSelf);
@@ -490,8 +462,6 @@ final class RecentsBlur {
                 sRecentsArmed = false;
                 clearPendingArm();
 
-                // 退出完成：显式清空目标列表，及时释放 DragLayer 子树引用
-                // （即便弱引用已兜底，也主动断链，避免列表长期留存死引用）。
                 sBlurTargets.clear();
                 if (v != null) { try { v.setRenderEffect(null); } catch (Throwable ignore) {} }
                 ModuleLog.d("DRAGALPHA", why + " -> exit fade-out done (phase=IDLE)");
@@ -540,7 +510,7 @@ final class RecentsBlur {
             ModuleLog.e("BLURAPPLY", "setRenderEffect failed r=" + rApplied, t);
         }
     }
-    // 幂等：避免上游 critical==0 重试时重复 hook
+
     private static volatile boolean sProbesInstalled = false;
     private static int installRecentsIconBlurProbe(ClassLoader loader) {
         if (sProbesInstalled) return 0;
@@ -597,7 +567,7 @@ final class RecentsBlur {
                                             View v = (View) self;
                                             sCachedDragLayer = new java.lang.ref.WeakReference<>(v);
                                             if (a < 0.999f) {
-                                                // 热路径（每帧调用）：仅在 VERBOSE 时才计算日志参数。
+
                                                 if (ModuleLog.VERBOSE) {
                                                     ModuleLog.dv("DRAGALPHA", "setAlpha a=" + a
                                                             + " cur=" + v.getAlpha()
@@ -641,7 +611,7 @@ final class RecentsBlur {
                                             reloadConfigIfStale();
                                             float clamped = sClampEnabled ? Math.max(f, sScaleClampMin) : f;
                                             if (clamped != f) {
-                                                // 热路径（每帧调用）：仅在 VERBOSE 时才计算日志参数。
+
                                                 if (ModuleLog.VERBOSE) {
                                                     ModuleLog.dv("SCALECLAMP", tag + " " + f + " -> " + clamped);
                                                 }
@@ -665,7 +635,7 @@ final class RecentsBlur {
         }
         return n;
     }
-    // 幂等：避免重复 hook
+
     private static volatile boolean sStateHooksInstalled = false;
     private static int installRecentsStateBlurHooks(ClassLoader loader) {
         if (sStateHooksInstalled) return 0;
@@ -695,7 +665,7 @@ final class RecentsBlur {
                                 ModuleLog.d("STATEBLUR", "onStateTransitionStart toState="
                                         + stateName(toState) + " toOverview=" + toOverview
                                         + " toNormal=" + toNormal);
-                                // 【状态机兜底】壁纸为主判断：此处仅作延迟兜底（见 stateFallbackEnter/Exit）。
+
                                 if (toOverview) {
                                     stateFallbackEnter(self);
                                 } else if (toNormal) {
@@ -722,7 +692,7 @@ final class RecentsBlur {
                                 ModuleLog.d("STATEBLUR", "onStateTransitionComplete finalState="
                                         + stateName(finalState) + " toNormal=" + toNormal
                                         + " inOverview=" + sStateInOverview);
-                                // 【状态机兜底】壁纸为主判断：仅延迟兜底退出。
+
                                 if (toNormal && sStateInOverview) {
                                     stateFallbackExit(self, "stateComplete:NORMAL");
                                 }
@@ -742,7 +712,7 @@ final class RecentsBlur {
                             public Object intercept(XposedInterface.Chain chain) throws Throwable {
                                 Object self = chain.getThisObject();
                                 ModuleLog.d("STATEBLUR", "onStateTransitionCancel inOverview=" + sStateInOverview);
-                                // 【状态机兜底】壁纸为主判断：仅延迟兜底退出。
+
                                 if (sStateInOverview) {
                                     stateFallbackExit(self, "stateCancel");
                                 }
@@ -834,7 +804,7 @@ final class RecentsBlur {
             if (tn != null) sTintEnabled = !tn.trim().equalsIgnoreCase("off");
             String dg = i.getStringExtra("diag");
             if (dg != null) sDiagEnabled = !dg.trim().equalsIgnoreCase("off");
-            // 【壁纸判据】总开关（默认 on）。
+
             String wj = i.getStringExtra("walljudge");
             if (wj != null) sWallpaperJudgeEnabled = !wj.trim().equalsIgnoreCase("off");
             if (anchorChanged) {
@@ -901,8 +871,7 @@ final class RecentsBlur {
                 }
                 sConfErrorLogged = false;
             } finally {
-                // 必须 finally 关闭：若上面 parseFloat 抛异常，原先的 br.close()
-                // 会被跳过 → 每 2 秒重试一次即泄漏一个 fd，最终 "Too many open files"。
+
                 if (br != null) { try { br.close(); } catch (Throwable ignored) {} }
             }
         } catch (Throwable t) {

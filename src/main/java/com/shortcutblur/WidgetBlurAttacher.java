@@ -8,8 +8,7 @@ public class WidgetBlurAttacher {
     private static final long ATTACH_RETRY_MS = 200L;
     private static final int ATTACH_MAX_RETRY = 16;
     private static final java.util.WeakHashMap<View, Boolean> sDone = new java.util.WeakHashMap<View, Boolean>();
-    // host -> container：container 是 host 的子孙，持有 parent 引用会反向强引用 host，
-    // 因此 value 也必须用弱引用，否则 WeakHashMap 的 entry 永远无法回收（View 树泄漏）。
+
     private static final java.util.WeakHashMap<View, java.lang.ref.WeakReference<View>> sDoneHost =
             new java.util.WeakHashMap<View, java.lang.ref.WeakReference<View>>();
     private static final java.util.WeakHashMap<View, Boolean> sGaveUp = new java.util.WeakHashMap<View, Boolean>();
@@ -46,11 +45,11 @@ public class WidgetBlurAttacher {
         try {
             View host = ViewUtils.ancestorOfType(root, "AppWidgetHostView");
             if (host == null) { ModuleLog.e("BW", tag + " host not found", null); return; }
-            // 重试场景下若 root 已脱离窗口，重试无意义（避免持有 View 到超时）。
+
             if (attempt > 0) {
                 try { if (!root.isAttachedToWindow()) return; } catch (Throwable ignore) {}
             }
-            // 已绑定过同一 host 且仍有效 → 直接跳过（避免重复挂载）。
+
             View bound = doneHostOf(host);
             if (bound != null) {
                 boolean already;
@@ -58,11 +57,10 @@ public class WidgetBlurAttacher {
                 if (already) return;
             }
             View containerEarly = ViewUtils.findByViewId(root, ClockIds.TARGET_ROOT);
-            // 真我 (realme) 时钟：TARGET_ROOT(0x7f0a017b) 在真我上是 date_week_text（非容器），
-            // 真正的模糊背景容器是 RM_CONTAINER(0x7f0a04b2，bg=widget_top_bg)。优先用它。
+
             View rmContainer = ViewUtils.findByViewId(root, ClockIds.RM_CONTAINER);
             if (rmContainer == null) {
-                // 真我 (realme) 天气/日历横向小组件：根容器 weather_widget_layout
+
                 rmContainer = ViewUtils.findByViewId(root, ClockIds.RM_W_LAYOUT);
                 if (rmContainer != null) {
                     ModuleLog.d("BW", tag + " realme weather_widget_layout found");
@@ -129,15 +127,15 @@ public class WidgetBlurAttacher {
                         + " -> " + promoted.getClass().getSimpleName() + " " + promoted.getWidth() + "x" + promoted.getHeight());
                 container = promoted;
             }
-            // 统一"先 sDoneHost 后 sDone"的加锁顺序，避免与 doneHostOf 形成反向嵌套死锁。
-            View boundNow = doneHostOf(host);   // 内部只用 sDoneHost 锁
+
+            View boundNow = doneHostOf(host);
             synchronized (sDone) {
                 if (boundNow == container || Boolean.TRUE.equals(sDone.get(container))) {
                     return;
                 }
                 sDone.put(container, Boolean.TRUE);
             }
-            putDoneHost(host, container);       // 内部只用 sDoneHost 锁
+            putDoneHost(host, container);
             ModuleLog.d("BW", "container=" + container.getClass().getName() + " " + container.getWidth() + "x" + container.getHeight());
             try { container.setTag("OplusBlurBg"); } catch (Throwable t) { ModuleLog.e("BW", "setTag fail", t); }
             boolean ok = tryCardBlurManager(launcher, container);

@@ -40,8 +40,7 @@ public final class ClockTextAlphaHook {
         }
     }
     private static final class HookColor implements io.github.libxposed.api.XposedInterface.Hooker {
-        // 时钟每秒刷新，setTextColor 会被反复调用且参数高度重复；
-        // 按 id:color:newColor 去重，同一组合只记一次，避免日志刷屏。
+
         private final java.util.Set<String> logged =
                 java.util.concurrent.ConcurrentHashMap.newKeySet();
         @Override
@@ -56,16 +55,13 @@ public final class ClockTextAlphaHook {
                         int color = (Integer) a1;
                         if (isClockTextId(id)) {
                             if (ClockIds.isRealmeLockId(id)) {
-                                // 真我 (realme) 时钟：文字透明度【只用 View.setAlpha】控制
-                                // （见 GlyphBlurRenderer.applyTextAlpha），此处不再改写
-                                // setTextColor 的 alpha，避免「色 alpha × View alpha」双重叠加
-                                // 导致文字过淡或闪烁。仅通知重采样。
+
                                 try { GlyphBlurRenderer.notifyContentMaybeChangedAll(); } catch (Throwable ignored) {}
                                 return chain.proceed();
                             }
                             int newColor = (color & 0x00FFFFFF) | (targetAlpha() << 24);
                             try { GlyphBlurRenderer.notifyContentMaybeChangedAll(); } catch (Throwable ignored) {}
-                            // 热路径去重：同 id+color+newColor 只记一次
+
                             if (logged.add(Integer.toHexString(id) + ":" + Integer.toHexString(color)
                                     + ":" + Integer.toHexString(newColor))) {
                                 ModuleLog.d("CTCH", "setTextColor id=0x" + Integer.toHexString(id)

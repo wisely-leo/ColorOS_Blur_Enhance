@@ -28,7 +28,7 @@ public class ScopeService extends Service {
                     es = p.getErrorStream();
                     while ((n = es.read(buf)) > 0) bo.write(buf, 0, n);
                 } finally {
-                    // finally 关闭：读取过程中抛异常也要释放 fd（否则长期运行会耗 fd）。
+
                     if (is != null) { try { is.close(); } catch (Throwable ignored) {} }
                     if (es != null) { try { es.close(); } catch (Throwable ignored) {} }
                 }
