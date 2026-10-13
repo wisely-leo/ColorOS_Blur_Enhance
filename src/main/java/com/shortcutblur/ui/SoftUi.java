@@ -1124,6 +1124,22 @@ public final class SoftUi {
             super.addView(child);
         }
         private boolean pressGroupScheduled = false;
+
+        /**
+         * 从任意子视图出发，请求其所属 Card 重算按压组。
+         * （折叠动画后 holder 的可见性变化会影响首/尾圆角，需重算。）
+         * 若祖先链中没有 Card，则什么都不做。
+         */
+        public static void requestRefresh(View v) {
+            try {
+                android.view.ViewParent p = v == null ? null : v.getParent();
+                while (p instanceof android.view.View) {
+                    if (p instanceof Card) { ((Card) p).postRefreshPressGroup(); return; }
+                    p = ((android.view.View) p).getParent();
+                }
+            } catch (Throwable ignored) {}
+        }
+
         /** 合并同一帧内的多次请求，下一帧刷新按压组（圆角 + 裁剪）。 */
         public void postRefreshPressGroup() {
             if (pressGroupScheduled) return;
@@ -1731,14 +1747,14 @@ public final class SoftUi {
             holder.setLayoutParams(lp);
             holder.setVisibility(visible ? View.VISIBLE : View.GONE);
             holder.setAlpha(1f);
-            reapplyEdgeInsets(holder);
+            Card.requestRefresh(holder);
             return;
         }
         final int targetH = measureContentHeight(holder);
         if (visible) {
 
             holder.setVisibility(View.VISIBLE);
-            reapplyEdgeInsets(holder);
+            Card.requestRefresh(holder);
             holder.measure(
                     android.view.View.MeasureSpec.makeMeasureSpec(
                             holder.getWidth() > 0 ? holder.getWidth()
@@ -1759,13 +1775,13 @@ public final class SoftUi {
                 @Override public void onAnimationEnd(android.animation.Animator a) {
                     lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
                     holder.setLayoutParams(lp);
-                    reapplyEdgeInsets(holder);
+                    Card.requestRefresh(holder);
                 }
             });
             holder.setTag(FOLD_ANIM_TAG, va);
             va.start();
         } else {
-            reapplyEdgeInsets(holder);
+            Card.requestRefresh(holder);
             int fromH = holder.getHeight() > 0 ? holder.getHeight() : measureContentHeight(holder);
             ValueAnimator va = ValueAnimator.ofInt(fromH, 0);
             va.setDuration(180);
@@ -1780,7 +1796,7 @@ public final class SoftUi {
                     holder.setLayoutParams(lp);
                     holder.setVisibility(View.GONE);
                     // 折叠完成后重新计算：开关行恢复全圆角
-                    reapplyEdgeInsets(holder);
+                    Card.requestRefresh(holder);
                 }
             });
             holder.setTag(FOLD_ANIM_TAG, va);
@@ -1789,15 +1805,6 @@ public final class SoftUi {
     }
     private static final int FOLD_ANIM_TAG = "softui_fold_anim".hashCode();
 
-    private static void reapplyEdgeInsets(View v) {
-        try {
-            android.view.ViewParent p = v == null ? null : v.getParent();
-            while (p instanceof android.view.View) {
-                if (p instanceof Card) { ((Card) p).postRefreshPressGroup(); return; }
-                p = ((android.view.View) p).getParent();
-            }
-        } catch (Throwable ignored) {}
-    }
     public interface ConfirmCb {
         void onConfirm();
     }
