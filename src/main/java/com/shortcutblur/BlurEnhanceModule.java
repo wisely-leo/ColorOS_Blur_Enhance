@@ -55,6 +55,8 @@ public class BlurEnhanceModule extends XposedModule {
     private final java.util.WeakHashMap<android.view.View, String> sLastClockText = new java.util.WeakHashMap<android.view.View, String>();
     private volatile boolean postEffectInstalled = false;
     private final Set<Method> peHooked = new HashSet<>();
+    /** SCALE 热路径去重：同 tag+old 只记一次，避免每帧刷屏。 */
+    private final Set<String> peScaleLogged = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private final Map<View, Boolean> armed = new WeakHashMap<>();
     private final Map<String, ValueAnimator> iconAnims = new ConcurrentHashMap<>();
     private final Set<String> dumpedCls = new HashSet<>();
@@ -1051,12 +1053,16 @@ public class BlurEnhanceModule extends XposedModule {
                             float peTarget = FeatureFlags.SAMPLE_SCALE;
                             if (old != peTarget) {
                                 args[pos] = peTarget;
-                                ModuleLog.d("SCALE", tag + " " + old + " -> " + peTarget);
-                            } else {
-                                ModuleLog.d("SCALE", tag + " keep " + old);
+                                // 热路径（每帧调用）：同 tag 的同一 old 值只记一次，避免刷屏。
+                                if (peScaleLogged.add(tag + ":" + old)) {
+                                    ModuleLog.d("SCALE", tag + " " + old + " -> " + peTarget);
+                                }
+                            } else if (ModuleLog.VERBOSE) {
+                                // keep：默认不打印（仅 VERBOSE 时记录）
+                                ModuleLog.dv("SCALE", tag + " keep " + old);
                             }
-                        } else {
-                            ModuleLog.d("SCALE", tag + " no float arg (pos=" + pos + ")");
+                        } else if (ModuleLog.VERBOSE) {
+                            ModuleLog.dv("SCALE", tag + " no float arg (pos=" + pos + ")");
                         }
                         return chain.proceed(args);
                     });
