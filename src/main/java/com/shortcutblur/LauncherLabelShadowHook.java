@@ -203,7 +203,12 @@ final class LauncherLabelShadowHook {
                                 Object self = chain.getThisObject();
                                 if (self instanceof TextView && FeatureFlags.LAUNCHER_LABEL_SHADOW
                                         && !isNotDesktopLabel((View) self)) {
-                                    applyTo((TextView) self);
+                                    final TextView tv = (TextView) self;
+                                    applyTo(tv);
+                                    // 改名会伴随一段淡入动画（changeTextWithFade → setTextAlpha
+                                    // → refreshShadowLayer，动画期间 alpha=0 的分支会把阴影清掉）。
+                                    // 这里在动画时长期内补几次，保证收尾时阴影仍在。
+                                    scheduleReapply(tv);
                                 }
                             } catch (Throwable t) {
                                 ModuleLog.swallow("launcher.label.bind", t);
@@ -219,6 +224,36 @@ final class LauncherLabelShadowHook {
     }
 
     /** 直接给某个应用名 View 挂上 iOS 风阴影（会再次进入上面的拦截，参数一致，不会递归）。 */
+    /**
+     * 在改名淡入动画期间补几次阴影。
+     *
+     * <p>改名链路：{@code applyLabel → changeTextWithFade → 逐帧 setTextAlpha}
+     * → 每一帧都会 {@code refreshShadowLayer()}，而 {@code mTextAlpha == 0} 的分支会
+     * 把阴影清成 {@code (0,0,0,0)}。动画结束后不会再触发任何刷新，于是阴影就没了。
+     *
+     * <p>与其去 hook 动画的每一帧，不如在 applyLabel 之后按动画时长补几次（幂等，
+     * 且只在开关仍打开、仍是桌面应用名时执行）。
+     */
+    private static void scheduleReapply(final TextView tv) {
+        if (tv == null) return;
+        final Runnable again = new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    if (!FeatureFlags.LAUNCHER_LABEL_SHADOW) return;
+                    if (isNotDesktopLabel(tv)) return;
+                    applyTo(tv);
+                } catch (Throwable t) {
+                    ModuleLog.swallow("launcher.label.reapply", t);
+                }
+            }
+        };
+        // 淡入动画约 200ms；覆盖 6 个时间点，跨过整段动画。
+        for (int delay : new int[]{60, 120, 200, 300, 450, 700}) {
+            tv.postDelayed(again, delay);
+        }
+    }
+
     private static void applyTo(TextView tv) {
         try {
             float density = densityOf(tv);
@@ -254,9 +289,22 @@ final class LauncherLabelShadowHook {
             if (Boolean.TRUE.equals(getTagCompat(tv, SHADOW_OVERFLOW_TAG))) return;   // 已处理过
             setTagCompat(tv, SHADOW_OVERFLOW_TAG, Boolean.TRUE);
             setClipToPaddingCompat(tv, false);
+            // 关键：不能只解开「直接父容器」。
+            // 应用名的宽度受格子限制，名字长时文字/阴影会横向溢出 TextView 矩形；
+            // 若上层还有 ShortcutAndWidgetContainer / CellLayout 在 clipChildren，
+            // 阴影照样会在格子边界被切。这里沿父链把若干层都解开，
+            // 一直到 Workspace / Folder 这类「不会因为不裁剪而画错」的容器为止。
             android.view.ViewParent vp = tv.getParent();
-            if (vp instanceof android.view.ViewGroup) {
-                ((android.view.ViewGroup) vp).setClipChildren(false);
+            for (int i = 0; i < 6 && vp != null; i++) {
+                if (!(vp instanceof android.view.ViewGroup)) break;
+                android.view.ViewGroup vg = (android.view.ViewGroup) vp;
+                String cn = vg.getClass().getName();
+                if (cn.equals("com.android.launcher3.Workspace")
+                        || cn.startsWith("com.android.launcher3.folder.")) {
+                    break;                          // 到工作区/文件夹容器就停，不再往上
+                }
+                vg.setClipChildren(false);
+                vp = vg.getParent();
             }
         } catch (Throwable t) {
             ModuleLog.swallow("launcher.label.overflow", t);
@@ -268,10 +316,13 @@ final class LauncherLabelShadowHook {
      * 这里按文字行高做软上限，避免用户把滑块拉到底后出现难看的截断。
      */
     private static float clampRadius(TextView tv, float radiusPx) {
+        // 注意：改名 / 换行时 getLineHeight() 可能短暂返回 0 或异常小值，
+        // 此时绝不能拿它当上限——否则半径会被钳成 0，表现为「改名后阴影没了」。
+        // 因此只在该值「看起来合理」（≥ 12px，约等于一行小字）时才参与上限计算。
         try {
             int fh = tv.getLineHeight();
-            if (fh <= 0) return radiusPx;
-            float max = fh * 0.5f;      // 不超过半行高
+            if (fh < 12) return radiusPx;
+            float max = fh * 0.75f;     // 不超过 3/4 行高
             return Math.min(radiusPx, max);
         } catch (Throwable t) {
             return radiusPx;
