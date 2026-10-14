@@ -39,17 +39,17 @@ public final class FeatureFlags {
     /** 内发光跟随的圆角半径（dp）；< 0 表示与键盘自身的圆角保持一致。 */
     public static volatile float IME_GLOW_CORNER_DP = -1f;
 
-    // ---- 桌面应用名阴影（iOS 风常驻柔和阴影）----
+    // ---- 桌面应用名阴影（常驻柔和阴影）----
     // 原生只在「暗壁纸 + 默认主题色」时给应用名挂 8px / 0x4d000000 的阴影，亮壁纸直接清空；
-    // 这里改成常驻：亮色文字配暗色阴影（iOS 观感），暗色文字配亮色阴影（保证可读）。
+    // 这里改成常驻：亮色文字配暗色阴影，暗色文字配亮色阴影（保证可读）。
     public static volatile boolean LAUNCHER_LABEL_SHADOW = true;
-    /** 阴影模糊半径（dp）。iOS 约 2~3dp。0 = 硬阴影。 */
+    /** 阴影模糊半径（dp）。0 = 硬阴影。 */
     /** 阴影半径（dp）。已固定，不再开放调节。 */
     public static volatile float LAUNCHER_LABEL_SHADOW_RADIUS_DP = 4.0f;
-    /** 阴影垂直偏移（dp，正值向下）。iOS 的阴影比原生多这一点点下坠感。 */
+    /** 阴影垂直偏移（dp，正值向下）。比原生多这一点点下坠感。 */
     /** 阴影向下偏移（dp）。已固定，不再开放调节。 */
     public static volatile float LAUNCHER_LABEL_SHADOW_DY_DP = 1.0f;
-    /** 亮色文字时使用的阴影色（ARGB）。默认暗色，即 iOS 观感。 */
+    /** 亮色文字时使用的阴影色（ARGB）。默认暗色。 */
     public static volatile int LAUNCHER_LABEL_SHADOW_DARK = 0x70000000;
     /** 暗色文字（亮壁纸）时使用的阴影色（ARGB）。 */
 

@@ -6,7 +6,7 @@ import io.github.libxposed.api.XposedInterface;
 import java.lang.reflect.Method;
 
 /**
- * 桌面应用名阴影（iOS 风：常驻的柔和暗色阴影，贴在文字下方）。
+ * 桌面应用名阴影（常驻的柔和暗色阴影，贴在文字下方）。
  *
  * <p>依据反编译的 OplusLauncher 16.6.17（Operit/archives/OplusLauncher_16.6.17）梳理出的原生链路：
  * <ul>
@@ -20,7 +20,7 @@ import java.lang.reflect.Method;
  *       桌面 / 全部应用 / 文件夹里的应用名都是它们。</li>
  * </ul>
  *
- * <p>因此原生阴影是「有时有、有时没有」，而且没有向下偏移。这里改成 iOS 那样的常驻柔和阴影：
+ * <p>因此原生阴影是「有时有、有时没有」，而且没有向下偏移。这里改成常驻柔和阴影：
  * <ol>
  *   <li>拦截 {@code TextView#setShadowLayer}：宿主是桌面应用名 View 时换成我们的参数。
  *       连「清除阴影」的调用也会被换成阴影 → 阴影不会被主题 / 壁纸 / 透明度动画清掉；</li>
@@ -160,7 +160,7 @@ final class LauncherLabelShadowHook {
         return n;
     }
 
-    /** ① 拦截 TextView#setShadowLayer：桌面自己设/清阴影时一律换成 iOS 风参数。 */
+    /** ① 拦截 TextView#setShadowLayer：桌面自己设/清阴影时一律换成统一的柔和阴影参数。 */
     private static int hookSetShadowLayer(final BlurEnhanceModule mod, final ClassLoader cl) {
         try {
             Class<?> tvCls = Class.forName(CLS_TEXTVIEW, false, cl);
@@ -193,7 +193,7 @@ final class LauncherLabelShadowHook {
                             // 放宽 View 的裁剪范围给阴影腾出空间。
                             enableShadowOverflow(tv);
                             args[0] = clampRadius(tv, FeatureFlags.LAUNCHER_LABEL_SHADOW_RADIUS_DP * density);
-                            args[1] = 0f;   // iOS 的阴影没有水平偏移
+                            args[1] = 0f;   // 阴影没有水平偏移
                             args[2] = FeatureFlags.LAUNCHER_LABEL_SHADOW_DY_DP * density;
                             args[3] = shadowColorFor(tv);
                             return chain.proceed(args);
@@ -288,7 +288,7 @@ final class LauncherLabelShadowHook {
         }
     }
 
-    /** 直接给某个应用名 View 挂上 iOS 风阴影（会再次进入上面的拦截，参数一致，不会递归）。 */
+    /** 直接给某个应用名 View 挂上柔和阴影（会再次进入上面的拦截，参数一致，不会递归）。 */
     /**
      * 在改名淡入动画期间补几次阴影。
      *
@@ -711,7 +711,7 @@ final class LauncherLabelShadowHook {
      * 阴影颜色：恒为纯黑，只从参数里取「浓度」（alpha）。
      *
      * <p>不做「亮色文字配亮色阴影」的自适应：应用名阴影只能是黑色，亮色阴影在视觉上
-     * 会变成外发光而不是阴影，反而破坏 iOS 观感。参数里即使带了非黑色相，RGB 也会被
+     * 会变成外发光而不是阴影，反而破坏观感。参数里即使带了非黑色相，RGB 也会被
      * 归一为黑，只保留它的 alpha。
      */
     private static int shadowColorFor(TextView tv) {

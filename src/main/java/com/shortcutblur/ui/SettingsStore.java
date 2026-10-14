@@ -261,7 +261,7 @@ public final class SettingsStore {
     public boolean isLog()         { return sp.getBoolean(KEY_LOG, DEF_LOG); }
     public boolean isQsProbe()     { return sp.getBoolean(KEY_QS_PROBE, DEF_QS_PROBE); }
     public boolean isGalleryLight(){ return sp.getBoolean(KEY_GALLERY_LIGHT, DEF_GALLERY_LIGHT); }
-    /** 桌面应用名阴影（iOS 风）。 */
+    /** 桌面应用名阴影。 */
     public boolean isLabelShadow() { return sp.getBoolean(KEY_LABEL_SHADOW, DEF_LABEL_SHADOW); }
     /** 半径已固定为 DEF_LS_RADIUS（4dp），忽略历史偏好。 */
     public float   getLabelShadowRadius() { return DEF_LS_RADIUS; }

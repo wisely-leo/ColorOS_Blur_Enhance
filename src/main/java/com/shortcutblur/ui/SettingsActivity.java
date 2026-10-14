@@ -421,7 +421,7 @@ private SettingsStore store;
 
     private static final String CHANGELOG =
             "v46.2\n"
-            + "· 新增「桌面应用名阴影（iOS 风）」\n"
+            + "· 新增「桌面应用名阴影」\n"
             + "  · 应用名常驻一层柔和阴影，亮 / 暗壁纸下都清晰（原生只在暗壁纸下才有）\n"
             + "  · 原生亮壁纸会直接清空阴影；现改为常驻，主题 / 壁纸 / 透明度动画都清不掉\n"
             + "  · 阴影恒为纯黑（不做亮色文字配亮色阴影的自适应），只有浓度可调\n"
@@ -529,7 +529,7 @@ private SettingsStore store;
             + "· 内部清理与优化：移除大量无用代码，降低内存与体积\n"
             + "\n"
             + "v45.1\n"
-            + "· 键盘按键配色优化：按键背景改为「半透明白玻璃」观感（仿 iOS）\n"
+            + "· 键盘按键配色优化：按键背景改为「半透明白玻璃」观感\n"
             + "  · 回车键保持系统强调色（原生行为）\n"
             + "· 稳定性与内存优化\n"
             + "  · 修复多处内存泄漏与资源未释放问题，降低长时间使用后的内存占用\n"
@@ -889,35 +889,13 @@ private SettingsStore store;
                         lsDarkRef[0] = argb;
                         store.setLabelShadowDark(argb);
                     });
-            View[] lsRows = SoftUi.toggleWithDependents(this, "桌面应用名阴影（iOS 风）",
+            View[] lsRows = SoftUi.toggleWithDependents(this, "桌面应用名阴影",
                     store.isLabelShadow(), null, lsDarkRow);
             final SoftUi.Row lsToggleRow = (SoftUi.Row) lsRows[0];
             final View lsFoldHolder = lsRows[1];
             lsToggleRow.setOnToggle(v -> {
-                final SoftUi.Switch sw = lsToggleRow.switchView();
-                if (!v) {
-                    store.setLabelShadow(false);
-                    SoftUi.applyFold(lsFoldHolder, false, true);
-                    return;
-                }
-                SoftUi.confirm(shell,
-                        "启用桌面应用名阴影",
-                        "把桌面应用名换成 iOS 风的常驻柔和阴影：\n"
-                                + "· 亮 / 暗壁纸下都有阴影（原生只在暗壁纸下才有）\n"
-                                + "· 阴影为纯黑柔和投影，半径 4dp / 向下偏移 1dp（固定）\n"
-                                + "· 深浅由下面「阴影浓度」调节（0~100%）\n"
-                                + "· 原生只为默认主题文字色生效，这里统一接管\n\n"
-                                + "开关在运行期即时生效：新绑定的应用名立刻带上阴影，已经画在屏上的图标"
-                                + "下次重绑（切页 / 换壁纸 / 密码解锁）或重启桌面后生效。\n\n确定启用吗？",
-                        "确定启用", "取消",
-                        () -> {
-                            store.setLabelShadow(true);
-                            SoftUi.applyFold(lsFoldHolder, true, true);
-                        },
-                        () -> {
-                            if (sw != null) sw.setCheckedImmediate(false);
-                            SoftUi.applyFold(lsFoldHolder, false, false);
-                        });
+                store.setLabelShadow(v);
+                SoftUi.applyFold(lsFoldHolder, v, true);
             });
             SoftUi.Card cardLabelShadow = SoftUi.card(this, lsToggleRow, lsFoldHolder);
 
