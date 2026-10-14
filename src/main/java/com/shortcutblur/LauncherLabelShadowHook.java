@@ -29,7 +29,7 @@ import java.lang.reflect.Method;
  *   <li>在 {@code BubbleTextView#applyLabel(...)} 之后补一次，
  *       让 GUI（{@code launcher_label_shadow} 开关）刚打开时能尽快铺到已有图标上。</li>
  * </ol>
- * 颜色按文字明暗自适应：亮色文字 → 暗色阴影（iOS 观感）；暗色文字（亮壁纸）→ 亮色阴影（保证可读）。
+ * 阴影恒为纯黑，只有「浓度」（alpha）可调；不做亮色文字配亮色阴影的自适应。
  * 全部参数走 FeatureFlags，可热更（LAUNCHER_LABEL_SHADOW*）。
  */
 final class LauncherLabelShadowHook {
@@ -39,8 +39,8 @@ final class LauncherLabelShadowHook {
     private static final String CLS_OPLUS_BTV = "com.android.launcher3.OplusBubbleTextView";
     private static final String CLS_TEXTVIEW = "android.widget.TextView";
 
-    /** 亮度阈值：≥ 该值视为「亮色文字」（用暗色阴影）。 */
-    private static final int LUM_LIGHT_TEXT = 128;
+    /** 阴影色相的固定部分：阴影恒为纯黑，只有 alpha（浓度）可调。 */
+    private static final int SHADOW_RGB_BLACK = 0x000000;
 
     private static volatile boolean sInstalled = false;
     private static volatile Class<?> sLabelCls = null;
@@ -201,13 +201,15 @@ final class LauncherLabelShadowHook {
         }
     }
 
-    /** 亮色文字用暗色阴影（iOS 观感）；暗色文字（亮壁纸）用亮色阴影保证可读。 */
+    /**
+     * 阴影颜色：恒为纯黑，只从参数里取「浓度」（alpha）。
+     *
+     * <p>不做「亮色文字配亮色阴影」的自适应：应用名阴影只能是黑色，亮色阴影在视觉上
+     * 会变成外发光而不是阴影，反而破坏 iOS 观感。参数里即使带了非黑色相，RGB 也会被
+     * 归一为黑，只保留它的 alpha。
+     */
     private static int shadowColorFor(TextView tv) {
-        int tc = tv.getCurrentTextColor();
-        int lum = ((((tc >> 16) & 0xFF) * 77) + (((tc >> 8) & 0xFF) * 150) + ((tc & 0xFF) * 29)) >> 8;
-        return lum >= LUM_LIGHT_TEXT
-                ? FeatureFlags.LAUNCHER_LABEL_SHADOW_DARK
-                : FeatureFlags.LAUNCHER_LABEL_SHADOW_LIGHT;
+        return (FeatureFlags.LAUNCHER_LABEL_SHADOW_DARK & 0xFF000000) | SHADOW_RGB_BLACK;
     }
 
     private static float densityOf(View v) {

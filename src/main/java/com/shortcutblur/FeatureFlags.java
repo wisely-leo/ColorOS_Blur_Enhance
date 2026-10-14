@@ -50,7 +50,6 @@ public final class FeatureFlags {
     /** 亮色文字时使用的阴影色（ARGB）。默认暗色，即 iOS 观感。 */
     public static volatile int LAUNCHER_LABEL_SHADOW_DARK = 0x70000000;
     /** 暗色文字（亮壁纸）时使用的阴影色（ARGB）。 */
-    public static volatile int LAUNCHER_LABEL_SHADOW_LIGHT = 0x40FFFFFF;
 
     // 快捷菜单（ShortcutBlur）模糊半径：图标模糊动画的目标半径。0=不模糊，上限 200。
     public static volatile float SHORTCUT_BLUR_RADIUS = 64.0f;
@@ -370,9 +369,6 @@ public final class FeatureFlags {
             case "launcher_label_shadow_dark":
                 try { LAUNCHER_LABEL_SHADOW_DARK = (int) Long.parseLong(v.trim(), 16); } catch (Throwable ignored) {}
                 break;
-            case "launcher_label_shadow_light":
-                try { LAUNCHER_LABEL_SHADOW_LIGHT = (int) Long.parseLong(v.trim(), 16); } catch (Throwable ignored) {}
-                break;
             default:
                 ModuleLog.d(TAG, "unknown key: " + k);
                 break;
@@ -444,8 +440,6 @@ public final class FeatureFlags {
             if (v != null) { float old = LAUNCHER_LABEL_SHADOW_DY_DP; applyKey("launcher_label_shadow_dy_dp", v); changed |= (old != LAUNCHER_LABEL_SHADOW_DY_DP); }
             v = i.getStringExtra("launcher_label_shadow_dark");
             if (v != null) { int old = LAUNCHER_LABEL_SHADOW_DARK; applyKey("launcher_label_shadow_dark", v); changed |= (old != LAUNCHER_LABEL_SHADOW_DARK); }
-            v = i.getStringExtra("launcher_label_shadow_light");
-            if (v != null) { int old = LAUNCHER_LABEL_SHADOW_LIGHT; applyKey("launcher_label_shadow_light", v); changed |= (old != LAUNCHER_LABEL_SHADOW_LIGHT); }
             v = i.getStringExtra("shortcut_blur_radius");
             if (v != null) { float old = SHORTCUT_BLUR_RADIUS; applyKey("shortcut_blur_radius", v); changed |= (old != SHORTCUT_BLUR_RADIUS); }
             v = i.getStringExtra("shortcut_window_blur_radius");
