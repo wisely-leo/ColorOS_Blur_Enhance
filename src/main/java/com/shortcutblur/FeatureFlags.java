@@ -25,13 +25,19 @@ public final class FeatureFlags {
     public static volatile boolean IME_BLUR = false;
     public static volatile int IME_BLUR_RADIUS = 100;
 
-    // 键盘边缘「内发光描边」的强度（alpha，0x00~0xFF）。0 = 关闭描边。
-    // 深色模式用白色描边、浅色模式用暗色描边：同一种颜色不可能在两种背景上都清晰
-    // —— 白色描边放在浅色键盘上几乎看不见，放在深色键盘上又容易过于抢眼。
-    public static volatile int IME_GLOW_ALPHA_DARK = 0x45;
-    public static volatile int IME_GLOW_ALPHA_LIGHT = 0x38;
-    /** 内发光羽化宽度（dp）：由边缘向内渐隐的总宽度。 */
-    public static volatile float IME_GLOW_FEATHER_DP = 8f;
+    // 键盘边缘「内发光」的强度（alpha，0x00~0xFF）。0 = 关闭发光。
+    // 内发光 = 贴边最亮、向内渐隐（不是暗色内阴影），所以基色始终是亮色；
+    // 深浅两种背景只调整强度：深色键盘上白线对比强 → alpha 取低一点避免"抢眼"；
+    // 浅色键盘本身偏亮 → 白线需要更高 alpha 才看得出"发光"。
+    public static volatile int IME_GLOW_ALPHA_DARK = 0x44;
+    public static volatile int IME_GLOW_ALPHA_LIGHT = 0x60;
+    /** 内发光基色（RGB，仅低 24 位有效）。默认纯白。 */
+    public static volatile int IME_GLOW_COLOR_DARK = 0xFFFFFF;
+    public static volatile int IME_GLOW_COLOR_LIGHT = 0xFFFFFF;
+    /** 内发光带宽度（dp）：从边缘向内衰减完的总宽度。 */
+    public static volatile float IME_GLOW_FEATHER_DP = 3f;
+    /** 内发光跟随的圆角半径（dp）；< 0 表示与键盘自身的圆角保持一致。 */
+    public static volatile float IME_GLOW_CORNER_DP = -1f;
 
     // 快捷菜单（ShortcutBlur）模糊半径：图标模糊动画的目标半径。0=不模糊，上限 200。
     public static volatile float SHORTCUT_BLUR_RADIUS = 64.0f;
@@ -314,6 +320,23 @@ public final class FeatureFlags {
                     if (f >= 0f && f <= 40f) IME_GLOW_FEATHER_DP = f;
                 } catch (Throwable ignored) {}
                 break;
+            case "ime_glow_color_dark":
+                try {
+                    IME_GLOW_COLOR_DARK = (int) (Long.parseLong(v.trim(), 16) & 0xFFFFFFL);
+                } catch (Throwable ignored) {}
+                break;
+            case "ime_glow_color_light":
+                try {
+                    IME_GLOW_COLOR_LIGHT = (int) (Long.parseLong(v.trim(), 16) & 0xFFFFFFL);
+                } catch (Throwable ignored) {}
+                break;
+            case "ime_glow_corner":
+            case "ime_glow_corner_dp":
+                try {
+                    float f = Float.parseFloat(v.trim());
+                    if (f >= -1f && f <= 100f) IME_GLOW_CORNER_DP = f;
+                } catch (Throwable ignored) {}
+                break;
             default:
                 ModuleLog.d(TAG, "unknown key: " + k);
                 break;
@@ -368,6 +391,13 @@ public final class FeatureFlags {
             v = i.getStringExtra("ime_glow_feather_dp");
             if (v == null) v = i.getStringExtra("ime_glow_feather");
             if (v != null) { float old = IME_GLOW_FEATHER_DP; applyKey("ime_glow_feather_dp", v); changed |= (old != IME_GLOW_FEATHER_DP); }
+            v = i.getStringExtra("ime_glow_color_dark");
+            if (v != null) { int old = IME_GLOW_COLOR_DARK; applyKey("ime_glow_color_dark", v); changed |= (old != IME_GLOW_COLOR_DARK); }
+            v = i.getStringExtra("ime_glow_color_light");
+            if (v != null) { int old = IME_GLOW_COLOR_LIGHT; applyKey("ime_glow_color_light", v); changed |= (old != IME_GLOW_COLOR_LIGHT); }
+            v = i.getStringExtra("ime_glow_corner_dp");
+            if (v == null) v = i.getStringExtra("ime_glow_corner");
+            if (v != null) { float old = IME_GLOW_CORNER_DP; applyKey("ime_glow_corner_dp", v); changed |= (old != IME_GLOW_CORNER_DP); }
             v = i.getStringExtra("shortcut_blur_radius");
             if (v != null) { float old = SHORTCUT_BLUR_RADIUS; applyKey("shortcut_blur_radius", v); changed |= (old != SHORTCUT_BLUR_RADIUS); }
             v = i.getStringExtra("shortcut_window_blur_radius");
