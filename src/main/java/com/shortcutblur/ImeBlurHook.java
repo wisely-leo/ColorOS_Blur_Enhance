@@ -27,8 +27,17 @@ public final class ImeBlurHook {
     private static volatile boolean sInstalled = false;
     private static volatile boolean sReflReady = false;
 
-    private static final int GLOW_COLOR = 0x66FFFFFF;
-    private static final float GLOW_FEATHER_DP = 8f;
+    /**
+     * 内发光描边的基色（RGB 部分）。
+     * 同一种颜色无法在深浅两种键盘背景上都有合适对比度，故按模式区分：
+     * - 深色键盘：白色发光（模拟"玻璃高光"）；
+     * - 浅色键盘：近黑发光（白线在浅底上几乎不可见，改用暗色才有轮廓）。
+     * 强度（alpha）与羽化宽度由 FeatureFlags 热更控制：
+     * IME_GLOW_ALPHA_DARK / IME_GLOW_ALPHA_LIGHT / IME_GLOW_FEATHER_DP。
+     */
+    private static final int GLOW_RGB_DARK = 0x00FFFFFF;
+    /** 浅色键盘：近黑内发光（白线在浅底上不可见，需暗色才形成轮廓）。 */
+    private static final int GLOW_RGB_LIGHT = 0x00202020;
 
     // 注意：value 必须弱引用！sMgrOf 的 value（ViewRootManager）由 View 构造、强引用该 View，
     // 若 value 为强引用会导致 WeakHashMap 的 key 永远不可达，entry 永久滞留（典型泄漏）。
@@ -707,8 +716,9 @@ public final class ImeBlurHook {
             int radius = FeatureFlags.IME_BLUR_RADIUS;
             sSetBlurRadius.invoke(mgr, radius);
 
-            int color = isDark(v) ? FeatureFlags.IME_BLUR_COLOR_DARK
-                                  : FeatureFlags.IME_BLUR_COLOR_LIGHT;
+            boolean dark = isDark(v);
+            int color = dark ? FeatureFlags.IME_BLUR_COLOR_DARK
+                             : FeatureFlags.IME_BLUR_COLOR_LIGHT;
 
             color = applyMaskAlpha(color, FeatureFlags.IME_BLUR_MASK_ALPHA);
             if (sSetColor != null) {
@@ -747,8 +757,19 @@ public final class ImeBlurHook {
             }
 
             float density = v.getResources().getDisplayMetrics().density;
+            // 内发光描边：强度（alpha）与基色都随深浅色切换。
+            // - 深色键盘（dark）：白色发光 + 较低 alpha，避免"太抢眼"；
+            // - 浅色键盘：近黑发光 + 较高 alpha，否则白线在浅底上"不明显"。
+            // 羽化宽度取 FeatureFlags，可热更调参（0 = 关闭描边）。
+            float glowFeatherDp = FeatureFlags.IME_GLOW_FEATHER_DP;
+            int glowAlpha = dark ? FeatureFlags.IME_GLOW_ALPHA_DARK
+                                 : FeatureFlags.IME_GLOW_ALPHA_LIGHT;
+            if (glowAlpha < 0) glowAlpha = 0;
+            if (glowAlpha > 0xFF) glowAlpha = 0xFF;
+            int glowColor = (glowAlpha << 24)
+                    | ((dark ? GLOW_RGB_DARK : GLOW_RGB_LIGHT) & 0x00FFFFFF);
             ImeGlowStrokeDrawable glow = new ImeGlowStrokeDrawable(
-                    GLOW_COLOR, GLOW_FEATHER_DP * density, cornerPx);
+                    glowColor, glowFeatherDp * density, cornerPx);
             glow.setMode(floating ? ImeGlowStrokeDrawable.MODE_ALL
                                   : ImeGlowStrokeDrawable.MODE_TOP_ONLY);
             android.graphics.drawable.LayerDrawable layer =
