@@ -31,6 +31,8 @@ final class IconBlurOverlayView extends View {
     private static final int PAD = 32;
 
     private View mTarget;
+    /** 挂在目标 View 上的 layout 监听；持有它才能在被移除时摘干净。 */
+    private OnLayoutChangeListener mTargetListener;
     private final Rect mTmp = new Rect();
 
     IconBlurOverlayView(Context c) {
@@ -43,21 +45,50 @@ final class IconBlurOverlayView extends View {
      * 让本层在目标每次重排后都能跟上它的位置和大小。
      */
     void bindTarget(final View target) {
+        // 先摘掉可能存在的旧监听，避免反复绑定造成监听器累积。
+        detachTargetListener();
         mTarget = target;
         if (target == null) return;
-        target.addOnLayoutChangeListener(new OnLayoutChangeListener() {
+        // 监听器是挂在「目标 View」上的：如果直接捕获 this，目标 View 只要还活着，
+        // 就会把本层一直钉住 —— 当本层已被 removeView 时，这就是内存泄漏。
+        // 因此这里只捕获弱引用；再配合 onDetachedFromWindow 里主动摘除，双向都不滞留。
+        final java.lang.ref.WeakReference<IconBlurOverlayView> self =
+                new java.lang.ref.WeakReference<IconBlurOverlayView>(this);
+        mTargetListener = new OnLayoutChangeListener() {
             @Override
             public void onLayoutChange(View v, int l, int t, int r, int b,
                                        int ol, int ot, int or, int ob) {
-                syncGeometry();
+                IconBlurOverlayView me = self.get();
+                if (me != null) me.syncGeometry();
             }
-        });
+        };
+        target.addOnLayoutChangeListener(mTargetListener);
         post(new Runnable() {
             @Override
             public void run() {
-                syncGeometry();
+                IconBlurOverlayView me = self.get();
+                if (me != null) me.syncGeometry();
             }
         });
+    }
+
+    /** 摘掉挂在目标 View 上的 layout 监听（幂等）。 */
+    private void detachTargetListener() {
+        final View t = mTarget;
+        final OnLayoutChangeListener l = mTargetListener;
+        if (t != null && l != null) {
+            try { t.removeOnLayoutChangeListener(l); } catch (Throwable ignored) {}
+        }
+        mTargetListener = null;
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        // 一旦离开 View 树：不再回填几何，也立刻断掉与目标 View 的互相引用，
+        // 避免「覆盖层已移除但目标还活着」或反之造成的对象滞留。
+        detachTargetListener();
+        mTarget = null;
     }
 
     /** 把本层的布局参数对齐到目标图标的坐标与尺寸（含给模糊核预留的 PAD）。 */
@@ -83,11 +114,9 @@ final class IconBlurOverlayView extends View {
         lp.width = w;
         lp.height = h;
         setLayoutParams(lp);
-        if (this instanceof View) {
-            // 依赖父容器的 absolute 定位：用 translation 把本层搬到图标左上角 - PAD。
-            setTranslationX(left - getLeft());
-            setTranslationY(top - getTop());
-        }
+        // 本层依赖父容器的绝对定位：用 translation 把它搬到图标左上角 - PAD。
+        setTranslationX(left - getLeft());
+        setTranslationY(top - getTop());
         invalidate();
     }
 

@@ -50,6 +50,8 @@ final class LauncherLabelShadowHook {
     private static final String FLD_WIDGET_NAME = "widgetName";
     /** BubbleTextView 用来裁剪文字画布的 Path；阴影被切成矩形就是它在作怪。 */
     private static final String FLD_TEXT_CLIP_PATH = "mTextClipPath";
+    /** TextView.mShadowRadius：当前阴影半径（float）。属于 @hide，只能反射读。 */
+    private static final String FLD_SHADOW_RADIUS = "mShadowRadius";
     /** 应用 / 快捷方式（含文件夹里的应用）——这些才是要加阴影的。 */
     private static final String CLS_WORKSPACE_ITEM_INFO = "com.android.launcher3.model.data.WorkspaceItemInfo";
     /** 文件夹图标自身——文件夹名不该有应用名阴影。 */
@@ -67,8 +69,12 @@ final class LauncherLabelShadowHook {
     private static final String CLS_APPWIDGET_INFO = "com.android.launcher3.model.data.LauncherAppWidgetInfo";
     /** 小组件标题 View 所在的宿主类，用于父链识别。 */
     private static final String CLS_WIDGET_HOST_VIEW = "com.android.launcher3.widget.BaseLauncherAppWidgetHostView";
-    /** 小组件标题 View 的资源 id 名（布局里是 widget_name）。 */
-    private static final String CLS_WIDGET_HOST_VIEW_IMPL = "com.android.launcher3.widget.CustomLauncherAppWidgetHostView";
+    /** 父链向上查找的最大层数（桌面图标 → 工作区的深度远小于此）。 */
+    private static final int MAX_PARENT_WALK = 10;
+    /** 外扩裁剪时额外多留的余量（px），保证阴影边缘不被切得发干。 */
+    private static final float PAD_EXTRA_PX = 2f;
+    /** 改名淡入动画期间补阴影的时间点（ms）。动画约 200ms，覆盖到收尾即可。 */
+    private static final int[] REAPPLY_DELAYS = {120, 300, 600};
 
     /** 阴影色相的固定部分：阴影恒为纯黑，只有 alpha（浓度）可调。 */
     private static final int SHADOW_RGB_BLACK = 0x000000;
@@ -79,23 +85,36 @@ final class LauncherLabelShadowHook {
     private static volatile java.lang.reflect.Field sWidgetNameField = null;
     /** BubbleTextView.mTextClipPath 反射句柄。 */
     private static volatile java.lang.reflect.Field sTextClipField = null;
+    /** TextView.mShadowRadius 的反射句柄（惰性获取一次，避免反复查找）。 */
+    private static volatile java.lang.reflect.Field sShadowRadiusField = null;
+    private static volatile boolean sShadowRadiusTried = false;
     /**
-     * clipPath 重入保护：
-     * 我们把 Path 改写后要交回原始 clipPath 去执行，而那会再次进入本 hook
-     * （登记表按对象同一性识别，Path 还是同一个），因此必须挡住第二次。
-     * 裁剪只发生在绘制线程，用 ThreadLocal 最轻量。
+     * 「当前正在绘制的文字裁剪 Path」及其宿主。
+     *
+     * <p>性能核心：{@code BubbleTextView#drawText} 与它内部那唯一一处
+     * {@code Canvas#clipPath} 是「外层设、内层用」的关系。把这两个值在 drawText 入口
+     * 缓存下来，clipPath 拦截里只需 <b>一次静态字段读取</b> 就能判断命中 ——
+     * 不必再 {@code getArgs().toArray()}（每帧分配数组）、
+     * 也不必 WeakHashMap + synchronizedMap（每帧加锁 + 哈希 + GC 开销）。
+     *
+     * <p>绘制都在 UI 线程；volatile 保证可见性，成对 set/restore 以支持嵌套绘制。
      */
-    private static final ThreadLocal<Boolean> sClipReentry =
-            new ThreadLocal<Boolean>();
-    /** mTextClipPath 对象 -> 所属应用名 View；用于按「对象同一性」识别是谁在裁画布。 */
-    private static final java.util.Map<android.graphics.Path, java.lang.ref.WeakReference<TextView>>
-            sTextClipOwners = java.util.Collections.synchronizedMap(
-                    new java.util.WeakHashMap<android.graphics.Path, java.lang.ref.WeakReference<TextView>>());
+    private static volatile TextView sDrawingOwner = null;
+    private static volatile android.graphics.Path sDrawingPath = null;
+
+    /** 反射句柄缓存：View 的 @hide 方法每次查找都很贵，必须缓存。 */
+    private static volatile java.lang.reflect.Method sSetClipToPaddingM = null;
+    private static volatile java.lang.reflect.Method sGetTagM = null;
+    private static volatile java.lang.reflect.Method sSetTagM = null;
 
     private static volatile Class<?> sWorkspaceItemCls = null;
     private static volatile Class<?> sFolderInfoCls = null;
     private static volatile Class<?> sAppWidgetInfoCls = null;
     private static volatile Class<?> sWidgetHostCls = null;
+    /** 预解析：任务栏 / 预测图标的双阴影 View。原实现每次调用都 loadClass，太贵。 */
+    private static volatile Class<?> sDoubleShadowCls = null;
+    /** 预解析：桌面工作区容器类。 */
+    private static volatile Class<?> sWorkspaceCls = null;
     /** 标记「已为该 View 开启过阴影越界」，避免重复设置。 */
     private static final int SHADOW_OVERFLOW_TAG = 0x7f0e0462;
     private static volatile Class<?> sLabelCls = null;
@@ -122,6 +141,8 @@ final class LauncherLabelShadowHook {
             sFolderInfoCls = Reflect.loadClass(CLS_FOLDER_INFO, cl);
             sAppWidgetInfoCls = Reflect.loadClass(CLS_APPWIDGET_INFO, cl);
             sWidgetHostCls = Reflect.loadClass(CLS_WIDGET_HOST_VIEW, cl);
+            sDoubleShadowCls = Reflect.loadClass(CLS_DOUBLE_SHADOW_BTV, cl);
+            sWorkspaceCls = Reflect.loadClass("com.android.launcher3.Workspace", cl);
             sInfoField = Reflect.field(label, FLD_MINFO);
         } catch (Throwable t) {
             ModuleLog.e(TAG, "resolve label class failed", t);
@@ -132,6 +153,7 @@ final class LauncherLabelShadowHook {
         n += hookRefreshShadowLayer(mod);
         n += hookApplyLabel(mod);
         n += hookClipPath(mod, cl);
+        n += hookDrawText(mod);
         n += hookOnSizeChanged(mod);
         n += hookWidgetTitleBind(mod);
         ModuleLog.d(TAG, "installed hooks=" + n + " label=" + sLabelCls.getName());
@@ -155,9 +177,9 @@ final class LauncherLabelShadowHook {
                         @Override
                         public Object intercept(XposedInterface.Chain chain) throws Throwable {
                             Object self = chain.getThisObject();
-                            // 热路径过滤：非桌面应用名 View / 开关关闭时原样放行，零额外分配。
-                            if (!(self instanceof TextView) || !isLabel(self)
-                                    || !FeatureFlags.LAUNCHER_LABEL_SHADOW
+                            // 热路径过滤：最便宜的两项放前面（isLabel 已内含类型检查），
+                            // 非桌面应用名 View / 开关关闭时原样放行，零额外分配。
+                            if (!FeatureFlags.LAUNCHER_LABEL_SHADOW || !isLabel(self)
                                     || isNotDesktopLabel((View) self)) {
                                 return chain.proceed();
                             }
@@ -203,8 +225,8 @@ final class LauncherLabelShadowHook {
                             Object r = chain.proceed();
                             try {
                                 Object self = chain.getThisObject();
-                                if (self instanceof TextView) rememberTextClipPath((TextView) self);
-                                if (self instanceof TextView && FeatureFlags.LAUNCHER_LABEL_SHADOW
+                                if (FeatureFlags.LAUNCHER_LABEL_SHADOW
+                                        && self instanceof TextView
                                         && !isNotDesktopLabel((View) self)) {
                                     applyTo((TextView) self);
                                 }
@@ -283,6 +305,9 @@ final class LauncherLabelShadowHook {
             @Override
             public void run() {
                 try {
+                    // View 已被移除 / 复用出窗口时直接放弃：既避免无谓绘制（发热），
+                    // 也让 post 队列能尽快丢掉对它的引用（防滞留）。
+                    if (!tv.isAttachedToWindow()) return;
                     if (!FeatureFlags.LAUNCHER_LABEL_SHADOW) return;
                     if (isNotDesktopLabel(tv)) return;
                     applyTo(tv);
@@ -291,8 +316,7 @@ final class LauncherLabelShadowHook {
                 }
             }
         };
-        // 淡入动画约 200ms；覆盖 6 个时间点，跨过整段动画。
-        for (int delay : new int[]{60, 120, 200, 300, 450, 700}) {
+        for (int delay : REAPPLY_DELAYS) {
             tv.postDelayed(again, delay);
         }
     }
@@ -310,13 +334,22 @@ final class LauncherLabelShadowHook {
      * </pre>
      * 阴影一旦越出这个矩形就被硬切，所以看起来「阴影是个矩形」。
      *
-     * <p>这是 View 内部直接对 Canvas 做的裁剪，{@code setClipChildren(false)} 完全无效。
-     * 而且行 2 的 {@code set(...)} 发生在 clipPath 之前，hook drawText 后置扩张只能影响
-     * <b>下一帧</b>、下一帧又被覆盖，永远差一拍。所以只能在 clipPath 处拦：
-     * 认出「这是某个桌面应用名的 mTextClipPath」，就替它裁一个<b>外扩后的矩形</b>
-     * （用 clipRect 而不是 clipPath，避免再撞上同一个 Path 造成递归）。
+     * <p>这是 View 内部直接对 Canvas 做的裁剪，{@code setClipChildren(false)} 完全无效；
+     * 又因为 {@code mTextClipRectF.set(...)} 发生在 clipPath 之前，hook drawText 后置扩张
+     * 永远差一拍。所以只能在 clipPath 处拦，且只改写它自己那个 Path 的内容
+     * （绝不能自己 canvas.save() 后跳过原生调用 —— 那会泄漏 Canvas 栈层，
+     * 残留裁剪会把整个图标裁掉，表现为图标消失、点一下桌面才恢复）。
      *
-     * <p>判定用「对象同一性」而非形状，避免误伤别处的裁剪。
+     * <p><b>性能</b>：{@code clipPath} 是超高频繁调用（每一帧、每个文字 View 都走），
+     * 因此这里做成零分配：
+     * <ul>
+     *   <li>能否命中由 {@code drawText} 预先缓存的 {@code sDrawingPath} 决定，
+     *       只读两个静态字段，<b>不调用 {@code getArgs()}</b>（避免每帧分配数组）；</li>
+     *   <li>不再用 WeakHashMap + synchronizedMap 做对象同一性比对，
+     *       省掉每帧的加锁、哈希与 GC 开销；</li>
+     *   <li>改写后先清空缓存再 {@code proceed()}：重入时直接放行，
+     *       因此也不需要额外的 ThreadLocal 重入标记。</li>
+     * </ul>
      */
     private static int hookClipPath(final BlurEnhanceModule mod, final ClassLoader cl) {
         try {
@@ -332,44 +365,31 @@ final class LauncherLabelShadowHook {
                     .intercept(new XposedInterface.Hooker() {
                         @Override
                         public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                            // 热路径：与文字阴影无关的 clipPath 占绝大多数，这里零分配放行。
+                            android.graphics.Path target = sDrawingPath;
+                            if (target == null) return chain.proceed();
+                            TextView owner = sDrawingOwner;
+                            if (owner == null) return chain.proceed();
+                            // 先清空：改写完交回原生 clipPath 会再次进入本 hook，
+                            // 那时 target 已是 null → 直接放行，不会递归。
+                            sDrawingPath = null;
+                            sDrawingOwner = null;
                             try {
-                                if (!FeatureFlags.LAUNCHER_LABEL_SHADOW) return chain.proceed();
-                                Object[] args = chain.getArgs().toArray();
-                                if (args.length < 1 || !(args[0] instanceof android.graphics.Path)) {
-                                    return chain.proceed(args);
-                                }
-                                // 防重入：本次改写后交回原生 clipPath 时不要再处理一遍
-                                if (Boolean.TRUE.equals(sClipReentry.get())) {
-                                    return chain.proceed(args);
-                                }
-                                TextView owner = ownerOfTextClipPath((android.graphics.Path) args[0]);
-                                if (owner == null) return chain.proceed(args);
-
-                                // 是桌面应用名的文字区域裁剪：把这块矩形「外扩」后再让原生裁。
-                                //
-                                // 注意：这里绝对不能自己 canvas.save() 后 return null。
-                                // drawText 原生会做 save/restore 配对，跳过它就等于每次绘制
-                                // 都往 Canvas 栈里泄漏一层，残留的裁剪会把整个图标裁掉
-                                // （表现为图标消失、点一下桌面又恢复）。
-                                // 正确做法：只改写它自己那个 Path 的内容，裁剪仍由原生调用完成。
-                                android.graphics.Path target = (android.graphics.Path) args[0];
+                                // 先把尺寸/密度都算好，最后才动 Path：
+                                // 万一前面抛异常，Path 还保持原始状态，不会变成空裁剪。
                                 float pad = FeatureFlags.LAUNCHER_LABEL_SHADOW_RADIUS_DP
-                                        * densityOf(owner) + 2f;
+                                        * densityOf(owner) + PAD_EXTRA_PX;
+                                int w = owner.getWidth();
+                                int h = owner.getHeight();
                                 target.reset();
-                                target.addRect(-pad, -pad,
-                                        owner.getWidth() + pad, owner.getHeight() + pad,
+                                target.addRect(-pad, -pad, w + pad, h + pad,
                                         android.graphics.Path.Direction.CW);
-                                // 交给原始 clipPath（现在它裁的是一个更大的矩形）
-                                sClipReentry.set(Boolean.TRUE);
-                                try {
-                                    return chain.proceed(args);
-                                } finally {
-                                    sClipReentry.remove();
-                                }
                             } catch (Throwable t) {
+                                // 宁可退回原生裁剪行为，也绝不让绘制中断。
                                 ModuleLog.swallow("launcher.label.clippath", t);
-                                return chain.proceed();
                             }
+                            // 用无参 proceed()，沿用原参数，不构造数组。
+                            return chain.proceed();
                         }
                     });
             return 1;
@@ -379,33 +399,122 @@ final class LauncherLabelShadowHook {
         }
     }
 
-    /** 若给定 Path 正是某个桌面应用名 View 的 mTextClipPath，返回该 View。 */
-    private static TextView ownerOfTextClipPath(android.graphics.Path path) {
-        java.lang.ref.WeakReference<TextView> ref = sTextClipOwners.get(path);
-        return ref == null ? null : ref.get();
+    /**
+     * ⑦ 绘制入口：把「本次绘制的文字裁剪 Path」缓存起来，供 clipPath 拦截零成本命中。
+     *
+     * <p>为什么挂在 {@code drawText}：反编译确认它内部对 {@code clipPath} 只有唯一一处调用，
+     * 且 {@code OplusBubbleTextView} / {@code DoubleShadowBubbleTextView} 都没有覆写
+     * {@code drawText}，所以钩在基类上就能覆盖全部调用。
+     *
+     * <p>为什么用 {@code mShadowRadius > 0} 判定：只有确实带阴影的文字才需要放开
+     * 裁剪区域。若对所有文字都放开，会把「本该被裁掉的文字部分」也画到 View 边界外，
+     * 属于功能性错误。这个 getter 只是一次轻量同步读，代价远低于原来的每帧 Map 查找。
+     */
+    private static int hookDrawText(final BlurEnhanceModule mod) {
+        final Class<?> cls = sLabelCls;
+        if (cls == null) return 0;
+        try {
+            Method m = Reflect.method(cls, "drawText", 2);   // drawText(Canvas, boolean)
+            if (m == null) {
+                ModuleLog.d(TAG, "drawText not found (ok, clip fix inactive)");
+                return 0;
+            }
+            mod.hook(m)
+                    .setId("launcher.label.draw")
+                    .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                    .intercept(new XposedInterface.Hooker() {
+                        @Override
+                        public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                            android.graphics.Path prevPath = null;
+                            TextView prevOwner = null;
+                            boolean marked = false;
+                            try {
+                                Object self = chain.getThisObject();
+                                if (FeatureFlags.LAUNCHER_LABEL_SHADOW
+                                        && hasShadowLayer((TextView) self)) {
+                                    android.graphics.Path cp = textClipPathOf((TextView) self);
+                                    if (cp != null) {
+                                        prevPath = sDrawingPath;
+                                        prevOwner = sDrawingOwner;
+                                        sDrawingOwner = (TextView) self;
+                                        sDrawingPath = cp;
+                                        marked = true;
+                                    }
+                                }
+                                return chain.proceed();
+                            } finally {
+                                // 恢复现场：clipPath 命中后已自行清空，这里兜底还原，
+                                // 同时支持嵌套绘制（内层绘制完不应破坏外层状态）。
+                                if (marked) {
+                                    sDrawingOwner = prevOwner;
+                                    sDrawingPath = prevPath;
+                                }
+                            }
+                        }
+                    });
+            return 1;
+        } catch (Throwable t) {
+            ModuleLog.e(TAG, "hook drawText failed", t);
+            return 0;
+        }
+    }
+
+
+    /**
+     * {@code TextView.mShadowRadius} 的反射句柄（惰性获取一次）。
+     *
+     * <p>为什么不调 {@code getShadowLayerRadius()}：该 getter 属于 {@code @hide}，
+     * 在公开 SDK 上编译不过，只能运行时反射；而且它内部要进同步块。
+     * 直接读字段用 {@code Field.getFloat}，连装箱都省了，是这里最快的做法。
+     */
+    private static java.lang.reflect.Field shadowRadiusField() {
+        java.lang.reflect.Field f = sShadowRadiusField;
+        if (f == null && !sShadowRadiusTried) {
+            f = Reflect.field(TextView.class, FLD_SHADOW_RADIUS);
+            if (f != null) {
+                try { f.setAccessible(true); } catch (Throwable ignored) {}
+            }
+            sShadowRadiusField = f;
+            sShadowRadiusTried = true;
+        }
+        return f;
     }
 
     /**
-     * 登记某个应用名 View 的 mTextClipPath，供 clipPath 拦截时识别。
-     * 在每次 {@code refreshShadowLayer} / {@code applyLabel} 之后调用，
-     * 保证映射里始终有最新的 Path 实例。
+     * 这个 TextView 当前是否带阴影层。
+     *
+     * <p>只有确实带阴影的文字才需要「放开文字裁剪」；对没有阴影的文字也放开的话，
+     * 长名字换行时文字会被画到本该裁掉的图标区域上 —— 那是功能性错误。
+     *
+     * <p>读不到字段时返回 false（保守）：最多是阴影被裁一点，绝不会画错。
      */
-    private static void rememberTextClipPath(TextView tv) {
+    private static boolean hasShadowLayer(TextView tv) {
+        try {
+            java.lang.reflect.Field f = shadowRadiusField();
+            if (f != null) return f.getFloat(tv) > 0f;
+        } catch (Throwable ignored) {}
+        return false;
+    }
+    /**
+     * 读取某个 BubbleTextView 的 {@code mTextClipPath}。
+     *
+     * <p>反编译确认该字段是 {@code final}，仅在构造函数里初始化一次，
+     * {@code drawText} 每帧只是 {@code iget} 复用同一个实例（然后 {@code reset()}），
+     * 因此这里读到的 Path 与后续 {@code clipPath} 收到的必定是同一个对象。
+     */
+    private static android.graphics.Path textClipPathOf(TextView tv) {
         try {
             java.lang.reflect.Field f = sTextClipField;
             if (f == null) {
                 f = Reflect.field(tv.getClass(), FLD_TEXT_CLIP_PATH);
                 if (f == null && sLabelCls != null) f = Reflect.field(sLabelCls, FLD_TEXT_CLIP_PATH);
-                if (f == null) return;
+                if (f == null) return null;
                 sTextClipField = f;
             }
             Object o = f.get(tv);
-            if (o instanceof android.graphics.Path) {
-                sTextClipOwners.put((android.graphics.Path) o,
-                        new java.lang.ref.WeakReference<TextView>(tv));
-            }
+            return (o instanceof android.graphics.Path) ? (android.graphics.Path) o : null;
         } catch (Throwable t) {
-            ModuleLog.swallow("launcher.label.clippath.remember", t);
+            return null;
         }
     }
 
@@ -528,7 +637,6 @@ final class LauncherLabelShadowHook {
         try {
             float density = densityOf(tv);
             enableShadowOverflow(tv);
-            rememberTextClipPath(tv);
             tv.setShadowLayer(clampRadius(tv, FeatureFlags.LAUNCHER_LABEL_SHADOW_RADIUS_DP * density),
                     0f,
                     FeatureFlags.LAUNCHER_LABEL_SHADOW_DY_DP * density,
@@ -565,17 +673,16 @@ final class LauncherLabelShadowHook {
             // 若上层还有 ShortcutAndWidgetContainer / CellLayout 在 clipChildren，
             // 阴影照样会在格子边界被切。这里沿父链把若干层都解开，
             // 一直到 Workspace / Folder 这类「不会因为不裁剪而画错」的容器为止。
-            android.view.ViewParent vp = tv.getParent();
-            for (int i = 0; i < 6 && vp != null; i++) {
-                if (!(vp instanceof android.view.ViewGroup)) break;
-                android.view.ViewGroup vg = (android.view.ViewGroup) vp;
-                String cn = vg.getClass().getName();
-                if (cn.equals("com.android.launcher3.Workspace")
-                        || cn.startsWith("com.android.launcher3.folder.")) {
+            Class<?> ws = sWorkspaceCls;
+            View cur = parentOf(tv);
+            for (int i = 0; i < 6 && cur != null; i++) {
+                if (!(cur instanceof android.view.ViewGroup)) break;
+                Class<?> c = cur.getClass();
+                if (c == ws || c.getName().startsWith("com.android.launcher3.folder.")) {
                     break;                          // 到工作区/文件夹容器就停，不再往上
                 }
-                vg.setClipChildren(false);
-                vp = vg.getParent();
+                ((android.view.ViewGroup) cur).setClipChildren(false);
+                cur = parentOf(cur);
             }
         } catch (Throwable t) {
             ModuleLog.swallow("launcher.label.overflow", t);
@@ -612,109 +719,110 @@ final class LauncherLabelShadowHook {
     }
 
     /**
-     * 判断这个应用名 View 是不是「真正属于桌面」的那一个。
+     * 判断这个文字 View 是不是「不属于桌面应用文字」——应当<b>跳过</b>阴影。
      *
-     * <p>桌面网格 / 文件夹里的应用名用的是 {@code BubbleTextView}，但快捷菜单条目也是它
-     * （{@code DeepShortcutView.mBubbleText}）、任务栏用的是 {@code DoubleShadowBubbleTextView}。
-     * 给这些加阴影会污染快捷菜单（iOS 的快捷菜单本来就不带阴影）。所以沿父链排除：
+     * <p><b>性能</b>：本方法位于 {@code TextView#setShadowLayer} 热路径上。
+     * 原实现依次调用 {@code isInDeepShortcut} / {@code isDoubleShadow} /
+     * {@code isDesktopTitle}，而后者内部还会再走一遍父链，
+     * 合计最多 <b>4 遍父链遍历、约 40 层循环</b>，每层都要
+     * {@code getClass().getName()} + 字符串比较。
+     *
+     * <p>这里改为：<b>单次父链遍历</b>一次性收集四类容器信息，
+     * 再按「先便宜、后昂贵」的顺序判定 —— 类型判定 → mInfo 反射读 → 父链兜底。
+     * 绝大多数桌面图标在读 mInfo 时就能直接得出结果，根本走不到父链兜底。
      */
     private static boolean isNotDesktopLabel(View v) {
         if (v == null) return true;
-        // ① 快捷菜单条目（DeepShortcutView.mBubbleText）——快捷菜单不该有应用名阴影。
-        if (isInDeepShortcut(v)) return true;
-        // ② 任务栏 / 预测图标（DoubleShadowBubbleTextView）——它们自带双阴影逻辑。
-        if (isDoubleShadow(v)) return true;
-        // ③ 主判据：看这个应用名背后的 mInfo 是什么。
-        //      · WorkspaceItemInfo = 应用 / 快捷方式（含文件夹内的应用）→ 要阴影
-        //      · FolderInfo        = 文件夹图标的名字                  → 也要阴影
-        //    桌面上的应用名与文件夹名都属于「桌面应用的文字」，统一加；
-        //    其余类型（搜索项、全部应用列表项等）不加。
-        return !isDesktopTitle(v);
-    }
+        if (!isLabel(v)) return true;   // 最便宜：非 BubbleTextView 家族直接排除
 
-    /**
-     * 判定 v 是不是「桌面上的应用文字」——依据 {@code BubbleTextView.mInfo} 的类型。
-     *
-     * <p>反编译确认：{@code mInfo} 声明为 {@code ItemInfoWithIcon}。
-     * 桌面应用 / 快捷方式 / 文件夹内的应用放 {@code WorkspaceItemInfo}；
-     * 文件夹图标自身的名字放 {@code FolderInfo}。这两类都是「桌面上的应用文字」，都要加阴影。
-     *
-     * <p>原生代码自己也用 {@code instance-of WorkspaceItemInfo} 做这类区分，
-     * 这比靠包名前缀猜更可靠：不受类所在包、容器嵌套深度影响。
-     *
-     * <p>父链白名单（Workspace / Folder 容器）保留为兜底：万一 {@code mInfo} 取不到，
-     * 只要父链落在桌面工作区或文件夹里，仍按「桌面应用文字」处理。
-     */
-    private static boolean isDesktopTitle(View v) {
-        Class<?> wi = sWorkspaceItemCls;
-        Class<?> fi = sFolderInfoCls;
-        Class<?> ai = sAppWidgetInfoCls;
-        try {
-            java.lang.reflect.Field f = sInfoField;
-            if (f != null) {
-                Object info = f.get(v);
-                if (info != null) {
-                    if (wi != null && wi.isInstance(info)) return true;   // 应用 → 要
-                    if (fi != null && fi.isInstance(info)) return true;   // 文件夹名 → 也要
-                    if (ai != null && ai.isInstance(info)) return true;   // 小组件名 → 也要
-                    // mInfo 有值但不是桌面三类：可能是全部应用列表 / 搜索项等，排除。
-                    // 但要先放行「小组件宿主里的标题」，它的 mInfo 常常为 null，
-                    // 有值时也可能不是上面几类，所以父链兜底放在返回 false 之前。
-                    if (isWidgetTitle(v)) return true;
-                    return false;
-                }
-            }
-        } catch (Throwable ignored) {}
-        // 兜底：父链判定（工作区 / 文件夹 / 小组件宿主）
-        return isInWorkspaceOrFolder(v) || isWidgetTitle(v);
-    }
-
-    /**
-     * v 是不是「桌面小组件的标题」。
-     *
-     * <p>反编译确认 {@code BaseLauncherAppWidgetHostView.mWidgetTitleView} 是
-     * {@code OplusBubbleTextView}，并在构造时把它交给 {@code WidgetNameHelper}。
-     * 因此只需沿父链找小组件宿主 View 即可确认身份，不依赖 {@code mInfo}。
-     */
-    private static boolean isWidgetTitle(View v) {
-        try {
-            Class<?> host = sWidgetHostCls;
-            View p = v;
-            for (int i = 0; i < 6 && p != null; i++) {
-                String cn = p.getClass().getName();
-                if (host != null && host.isInstance(p)) return true;
-                if (cn.startsWith("com.android.launcher3.widget.")
+        // 单次父链遍历：同时识别「快捷菜单 / 工作区 / 文件夹 / 小组件宿主」。
+        boolean inShortcut = false;
+        boolean inWorkspace = false;
+        boolean widgetHost = false;
+        Class<?> ds = sDeepShortcutCls;
+        Class<?> ws = sWorkspaceCls;
+        Class<?> wh = sWidgetHostCls;
+        View p = v;
+        for (int i = 0; i < MAX_PARENT_WALK && p != null; i++) {
+            Class<?> c = p.getClass();
+            if (c == ds) {
+                inShortcut = true;
+            } else if (c == ws) {
+                inWorkspace = true;
+            } else if (wh != null && wh.isInstance(p)) {
+                widgetHost = true;
+            } else {
+                String cn = c.getName();
+                if (cn.startsWith("com.android.launcher3.folder.")) {
+                    inWorkspace = true;
+                } else if (cn.startsWith("com.android.launcher3.widget.")
                         && cn.endsWith("AppWidgetHostView")) {
-                    return true;
+                    widgetHost = true;
                 }
-                android.view.ViewParent vp = p.getParent();
-                p = (vp instanceof View) ? (View) vp : null;
             }
-        } catch (Throwable ignored) {}
-        return false;
+            if (inShortcut && inWorkspace) break;   // 已足够判定，无需继续向上
+            p = parentOf(p);
+        }
+
+        // ① 快捷菜单条目：原生语义就是不带应用名阴影，硬排除。
+        if (inShortcut) return true;
+        // ② 任务栏 / 预测图标：自带双阴影逻辑，不参与。
+        Class<?> dsc = sDoubleShadowCls;
+        if (dsc != null && dsc.isInstance(v)) return true;
+
+        // ③ 主判据：mInfo 的类型（一次反射读，命中即出结果，不走父链）。
+        Object info = null;
+        java.lang.reflect.Field f = sInfoField;
+        if (f != null) {
+            try {
+                info = f.get(v);
+            } catch (Throwable ignored) {}
+        }
+        if (info != null) {
+            if (sWorkspaceItemCls != null && sWorkspaceItemCls.isInstance(info)) return false;
+            if (sFolderInfoCls != null && sFolderInfoCls.isInstance(info)) return false;
+            if (sAppWidgetInfoCls != null && sAppWidgetInfoCls.isInstance(info)) return false;
+            // mInfo 有值但不是桌面三类：全部应用列表 / 搜索项等 → 排除；
+            // 唯一例外是小组件标题（它的 mInfo 语义与网格项不同）。
+            return !widgetHost;
+        }
+        // ④ mInfo 取不到：父链兜底（小组件标题的 mInfo 常常为 null）。
+        return !(inWorkspace || widgetHost);
+    }
+
+    /** 沿父链向上取一层（ViewParent → View）。 */
+    private static View parentOf(View v) {
+        android.view.ViewParent vp = v.getParent();
+        return (vp instanceof View) ? (View) vp : null;
     }
 
     /**
-     * {@code View.setTag(int, Object)} 在公开 SDK 上不可见（属于 @hide），
-     * 这里用反射调用，拿不到就退回无参 setTag（用固定对象做「已处理」标记）。
-     */
-    /**
-     * {@code View.setClipToPadding} 在公开 SDK 上不可见，只能反射。
-     * 作用：允许绘制进入 padding 区域，给阴影多腾出一点空间。
+     * {@code View#setClipToPadding} / {@code View#getTag(int)} / {@code View#setTag(int,Object)}
+     * 都属于 {@code @hide}，公开 SDK 上不可见，只能反射。
+     *
+     * <p><b>性能</b>：{@code getDeclaredMethod} 每次调用都要扫方法表 + 做访问检查，
+     * 原实现放在热路径里等于每加一个图标就查一次。这里把句柄缓存到静态字段，只查一次。
      */
     private static void setClipToPaddingCompat(View v, boolean clip) {
         try {
-            java.lang.reflect.Method m = View.class.getDeclaredMethod(
-                    "setClipToPadding", boolean.class);
-            m.setAccessible(true);
+            java.lang.reflect.Method m = sSetClipToPaddingM;
+            if (m == null) {
+                m = View.class.getDeclaredMethod("setClipToPadding", boolean.class);
+                m.setAccessible(true);
+                sSetClipToPaddingM = m;
+            }
             m.invoke(v, clip);
         } catch (Throwable ignored) {}
     }
 
     private static Object getTagCompat(View v, int key) {
         try {
-            java.lang.reflect.Method m = View.class.getDeclaredMethod("getTag", int.class);
-            m.setAccessible(true);
+            java.lang.reflect.Method m = sGetTagM;
+            if (m == null) {
+                m = View.class.getDeclaredMethod("getTag", int.class);
+                m.setAccessible(true);
+                sGetTagM = m;
+            }
             return m.invoke(v, key);
         } catch (Throwable t) {
             try { return v.getTag(); } catch (Throwable ignored) { return null; }
@@ -723,63 +831,16 @@ final class LauncherLabelShadowHook {
 
     private static void setTagCompat(View v, int key, Object value) {
         try {
-            java.lang.reflect.Method m = View.class.getDeclaredMethod(
-                    "setTag", int.class, Object.class);
-            m.setAccessible(true);
+            java.lang.reflect.Method m = sSetTagM;
+            if (m == null) {
+                m = View.class.getDeclaredMethod("setTag", int.class, Object.class);
+                m.setAccessible(true);
+                sSetTagM = m;
+            }
             m.invoke(v, key, value);
         } catch (Throwable t) {
             try { v.setTag(value); } catch (Throwable ignored) {}
         }
-    }
-
-    /** v 是否落在 DeepShortcutView 内部（快捷菜单条目）。 */
-    private static boolean isInDeepShortcut(View v) {
-        Class<?> ds = sDeepShortcutCls;
-        if (ds == null) return false;
-        try {
-            View p = v;
-            for (int i = 0; i < 8 && p != null; i++) {
-                if (ds.isInstance(p)) return true;
-                android.view.ViewParent vp = p.getParent();
-                p = (vp instanceof View) ? (View) vp : null;
-            }
-        } catch (Throwable ignored) {}
-        return false;
-    }
-
-    /** v 是否本身就是任务栏 / 预测图标的双阴影 View。 */
-    private static boolean isDoubleShadow(View v) {
-        try {
-            Class<?> c = Reflect.loadClass(CLS_DOUBLE_SHADOW_BTV, v.getClass().getClassLoader());
-            return c != null && c.isInstance(v);
-        } catch (Throwable ignored) {}
-        return false;
-    }
-
-    /**
-     * 正向判定：v 是否位于「桌面工作区（Workspace）」或「文件夹（Folder）」容器内。
-     *
-     * <p>这是把阴影<b>严格限定到桌面应用文字</b>的关键。桌面应用名的父链是：
-     * {@code BubbleTextView → ShortcutAndWidgetContainer → CellLayout → Workspace → ...}；
-     * 文件夹里则是 {@code BubbleTextView → ... → Folder}。其他位置（全部应用列表、搜索结果、
-     * 快捷菜单、任务栏、最近任务预览）都不会命中这两个容器类型。
-     */
-    private static boolean isInWorkspaceOrFolder(View v) {
-        try {
-            View p = v;
-            for (int i = 0; i < 10 && p != null; i++) {
-                String cn = p.getClass().getName();
-                // 实际是「桌面工作区 / 文件夹」的一切容器。folder 包下的 Folder（文件夹容器）
-                // 与 FolderIcon（文件夹图标自身，含它的名字）都属于「桌面上的应用文字」。
-                if (cn.equals("com.android.launcher3.Workspace")
-                        || cn.startsWith("com.android.launcher3.folder.")) {
-                    return true;
-                }
-                android.view.ViewParent vp = p.getParent();
-                p = (vp instanceof View) ? (View) vp : null;
-            }
-        } catch (Throwable ignored) {}
-        return false;
     }
 
     private static float densityOf(View v) {
