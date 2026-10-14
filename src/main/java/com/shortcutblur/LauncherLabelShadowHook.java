@@ -42,12 +42,16 @@ final class LauncherLabelShadowHook {
     private static final String CLS_DEEP_SHORTCUT_VIEW = "com.android.launcher3.shortcuts.DeepShortcutView";
     /** 任务栏 / 预测应用图标的双阴影 View，同样不属于桌面网格应用名。 */
     private static final String CLS_DOUBLE_SHADOW_BTV = "com.android.launcher3.views.DoubleShadowBubbleTextView";
+    /** 桌面应用名 View 的扩展接口，getTitleShadowFlag() 正是「这个名字该不该有阴影」的原生语义。 */
+    private static final String CLS_IBTV_EXT = "com.android.launcher3.IBubbleTextViewExt";
 
     /** 阴影色相的固定部分：阴影恒为纯黑，只有 alpha（浓度）可调。 */
     private static final int SHADOW_RGB_BLACK = 0x000000;
 
     private static volatile boolean sInstalled = false;
     private static volatile Class<?> sDeepShortcutCls = null;
+    /** 标记「已为该 View 开启过阴影越界」，避免重复设置。 */
+    private static final int SHADOW_OVERFLOW_TAG = 0x7f0e0462;
     private static volatile Class<?> sLabelCls = null;
 
     private LauncherLabelShadowHook() {}
@@ -107,7 +111,12 @@ final class LauncherLabelShadowHook {
                             if (args.length < 4) return chain.proceed(args);
                             TextView tv = (TextView) self;
                             float density = densityOf(tv);
-                            args[0] = FeatureFlags.LAUNCHER_LABEL_SHADOW_RADIUS_DP * density;
+                            // 阴影是 TextView 自己在自己的画布内画的，一旦半径超出
+                            // 「文字行高 + 上下 padding」，超出部分就被 View 边界硬裁掉，
+                            // 表现为半径越大越像被截断。enableShadowOverflow() 通过
+                            // 放宽 View 的裁剪范围给阴影腾出空间。
+                            enableShadowOverflow(tv);
+                            args[0] = clampRadius(tv, FeatureFlags.LAUNCHER_LABEL_SHADOW_RADIUS_DP * density);
                             args[1] = 0f;   // iOS 的阴影没有水平偏移
                             args[2] = FeatureFlags.LAUNCHER_LABEL_SHADOW_DY_DP * density;
                             args[3] = shadowColorFor(tv);
@@ -201,12 +210,59 @@ final class LauncherLabelShadowHook {
     private static void applyTo(TextView tv) {
         try {
             float density = densityOf(tv);
-            tv.setShadowLayer(FeatureFlags.LAUNCHER_LABEL_SHADOW_RADIUS_DP * density,
+            enableShadowOverflow(tv);
+            tv.setShadowLayer(clampRadius(tv, FeatureFlags.LAUNCHER_LABEL_SHADOW_RADIUS_DP * density),
                     0f,
                     FeatureFlags.LAUNCHER_LABEL_SHADOW_DY_DP * density,
                     shadowColorFor(tv));
         } catch (Throwable t) {
             ModuleLog.swallow("launcher.label.apply", t);
+        }
+    }
+
+    /**
+     * 让阴影「溢出」到 View 边界之外，避免被 View 自身的裁剪硬切。
+     *
+     * <p>TextView 的 shadowLayer 是在 {@code onDraw} 里用 View 自己的画布画的，
+     * 而画布会被 {@code clipBounds} 裁到 View 的矩形内。半径超出「行高 + padding」
+     * 的部分直接消失，表现为大半径时阴影被截断。
+     *
+     * <p>这里做两件事把空间腾出来：
+     * <ol>
+     *   <li>{@code setClipToPadding(false)}：允许绘制进入 padding 区（很多机型的
+     *       BubbleTextView 默认会裁掉 padding 部分）；</li>
+     *   <li>给父容器 {@code setClipChildren(false)}：允许 TextView 的绘制溢出到父容器，
+     *       这一步是关键——桌面图标的上下留白通常由 ShortcutAndWidgetContainer 分配。</li>
+     * </ol>
+     *
+     * <p>注意：只对判定为「桌面应用名」的 View 做，且幂等（重复设置无副作用）。
+     */
+    private static void enableShadowOverflow(TextView tv) {
+        try {
+            if (Boolean.TRUE.equals(getTagCompat(tv, SHADOW_OVERFLOW_TAG))) return;   // 已处理过
+            setTagCompat(tv, SHADOW_OVERFLOW_TAG, Boolean.TRUE);
+            setClipToPaddingCompat(tv, false);
+            android.view.ViewParent vp = tv.getParent();
+            if (vp instanceof android.view.ViewGroup) {
+                ((android.view.ViewGroup) vp).setClipChildren(false);
+            }
+        } catch (Throwable t) {
+            ModuleLog.swallow("launcher.label.overflow", t);
+        }
+    }
+
+    /**
+     * 半径上限：超过「行高的一半」时阴影必然大面积超出可绘制区，视觉上就是被切。
+     * 这里按文字行高做软上限，避免用户把滑块拉到底后出现难看的截断。
+     */
+    private static float clampRadius(TextView tv, float radiusPx) {
+        try {
+            int fh = tv.getLineHeight();
+            if (fh <= 0) return radiusPx;
+            float max = fh * 0.5f;      // 不超过半行高
+            return Math.min(radiusPx, max);
+        } catch (Throwable t) {
+            return radiusPx;
         }
     }
 
@@ -230,17 +286,94 @@ final class LauncherLabelShadowHook {
      */
     private static boolean isNotDesktopLabel(View v) {
         if (v == null) return true;
-        Class<?> ds = sDeepShortcutCls;
+        // ① 快捷菜单条目（DeepShortcutView.mBubbleText）——快捷菜单不该有应用名阴影。
+        if (isInDeepShortcut(v)) return true;
+        // ② 任务栏 / 预测图标（DoubleShadowBubbleTextView）——它们自带双阴影逻辑。
+        if (isDoubleShadow(v)) return true;
+        // ③ 正向白名单：只有「在桌面 / 文件夹容器里的应用名」才配阴影。
+        //    用父链判定容器类型，能同时排除全部应用列表、搜索结果、单应用弹窗等。
+        return !isInWorkspaceOrFolder(v);
+    }
+
+    /**
+     * {@code View.setTag(int, Object)} 在公开 SDK 上不可见（属于 @hide），
+     * 这里用反射调用，拿不到就退回无参 setTag（用固定对象做「已处理」标记）。
+     */
+    /**
+     * {@code View.setClipToPadding} 在公开 SDK 上不可见，只能反射。
+     * 作用：允许绘制进入 padding 区域，给阴影多腾出一点空间。
+     */
+    private static void setClipToPaddingCompat(View v, boolean clip) {
         try {
-            if (ds != null) {
-                Class<?> dsc = Reflect.loadClass(CLS_DOUBLE_SHADOW_BTV, v.getClass().getClassLoader());
-                if (dsc != null && dsc.isInstance(v)) return true;
-            }
+            java.lang.reflect.Method m = View.class.getDeclaredMethod(
+                    "setClipToPadding", boolean.class);
+            m.setAccessible(true);
+            m.invoke(v, clip);
         } catch (Throwable ignored) {}
+    }
+
+    private static Object getTagCompat(View v, int key) {
+        try {
+            java.lang.reflect.Method m = View.class.getDeclaredMethod("getTag", int.class);
+            m.setAccessible(true);
+            return m.invoke(v, key);
+        } catch (Throwable t) {
+            try { return v.getTag(); } catch (Throwable ignored) { return null; }
+        }
+    }
+
+    private static void setTagCompat(View v, int key, Object value) {
+        try {
+            java.lang.reflect.Method m = View.class.getDeclaredMethod(
+                    "setTag", int.class, Object.class);
+            m.setAccessible(true);
+            m.invoke(v, key, value);
+        } catch (Throwable t) {
+            try { v.setTag(value); } catch (Throwable ignored) {}
+        }
+    }
+
+    /** v 是否落在 DeepShortcutView 内部（快捷菜单条目）。 */
+    private static boolean isInDeepShortcut(View v) {
+        Class<?> ds = sDeepShortcutCls;
+        if (ds == null) return false;
         try {
             View p = v;
-            for (int i = 0; i < 6 && p != null; i++) {
-                if (ds != null && ds.isInstance(p)) return true;
+            for (int i = 0; i < 8 && p != null; i++) {
+                if (ds.isInstance(p)) return true;
+                android.view.ViewParent vp = p.getParent();
+                p = (vp instanceof View) ? (View) vp : null;
+            }
+        } catch (Throwable ignored) {}
+        return false;
+    }
+
+    /** v 是否本身就是任务栏 / 预测图标的双阴影 View。 */
+    private static boolean isDoubleShadow(View v) {
+        try {
+            Class<?> c = Reflect.loadClass(CLS_DOUBLE_SHADOW_BTV, v.getClass().getClassLoader());
+            return c != null && c.isInstance(v);
+        } catch (Throwable ignored) {}
+        return false;
+    }
+
+    /**
+     * 正向判定：v 是否位于「桌面工作区（Workspace）」或「文件夹（Folder）」容器内。
+     *
+     * <p>这是把阴影<b>严格限定到桌面应用文字</b>的关键。桌面应用名的父链是：
+     * {@code BubbleTextView → ShortcutAndWidgetContainer → CellLayout → Workspace → ...}；
+     * 文件夹里则是 {@code BubbleTextView → ... → Folder}。其他位置（全部应用列表、搜索结果、
+     * 快捷菜单、任务栏、最近任务预览）都不会命中这两个容器类型。
+     */
+    private static boolean isInWorkspaceOrFolder(View v) {
+        try {
+            View p = v;
+            for (int i = 0; i < 10 && p != null; i++) {
+                String cn = p.getClass().getName();
+                if (cn.equals("com.android.launcher3.Workspace")
+                        || cn.startsWith("com.android.launcher3.folder.")) {
+                    return true;
+                }
                 android.view.ViewParent vp = p.getParent();
                 p = (vp instanceof View) ? (View) vp : null;
             }
