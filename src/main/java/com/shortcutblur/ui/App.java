@@ -26,10 +26,10 @@ public class App extends Application {
         } catch (Throwable t) { return false; }
     }
     public static void lg(String s) {
-        // 统合日志开关：与功能日志一致，未初始化(sApp==null)或开关关闭时均静默。
+
         if (!logEnabled()) return;
         try { android.util.Log.i("BlurUI", s); } catch (Throwable ignored) {}
-        // 统一走 UiLog：持久 Writer + 2MB 轮转，避免每条日志 open/close 抖动与无限增长。
+
         UiLog.write(s);
     }
 }

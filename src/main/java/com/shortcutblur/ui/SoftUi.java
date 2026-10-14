@@ -36,10 +36,7 @@ public final class SoftUi {
     public static float RADIUS      = 22f;
     public static float ROW_H       = 48f;
     public static float PAD         = 16f;
-    /**
-     * 行标题 View 的 id。用 generateViewId() 生成，保证不与资源 ID 冲突；
-     * 仅初始化一次，供 findRowTitle 跨实例比对。
-     */
+
     public static final int ROW_TITLE_ID = View.generateViewId();
     public static float GAP         = 10f;
     public static float SIDE        = 16f;
@@ -68,18 +65,12 @@ public final class SoftUi {
     public static int   PRESS_FILL_STRONG = 0x1F000000;
     public static float PRESS_RADIUS      = 22f;
 
-    /**
-     * 全局按压色覆盖（复用性）：非 null 时，所有未显式指定按压色的行都用它，
-     * 且不再随深浅色主题自动切换。null = 使用主题默认 PRESS_FILL。
-     */
     public static Integer PRESS_FILL_OVERRIDE = null;
 
-    /** 设置全局按压色（影响所有未单独指定色的行与卡片）。传 null 恢复主题默认。 */
     public static void setGlobalPressFill(Integer color) {
         PRESS_FILL_OVERRIDE = color;
     }
 
-    /** 当前生效的默认按压色（主题色 / 全局覆盖）。 */
     static int defaultPressFill() {
         return PRESS_FILL_OVERRIDE != null ? PRESS_FILL_OVERRIDE : PRESS_FILL;
     }
@@ -181,21 +172,10 @@ public final class SoftUi {
                 TypedValue.COMPLEX_UNIT_DIP, v, c.getResources().getDisplayMetrics()));
     }
 
-    // ============ 按压反馈（统一系统） ============
-    // 设计：所有「可点击行」只调用 markPressable() 声明自己可按下，
-    //       由所在的按压组容器（Card）在内容稳定后统一 refreshPressGroup()，
-    //       保证同一张卡片内所有行的按压反馈样式、圆角、边界完全一致。
-    //       工厂函数不再各自 setBackground，避免各卡片表现不一。
-
-    /** 声明某行"可按下"。只打标记 + 绑定可点击性，样式留待组容器统一分配。 */
     public static void markPressable(View v) {
         markPressable(v, null);
     }
 
-    /**
-     * 声明某行"可按下"，并可选指定该行的按压色（null = 跟随所在按压组 / 全局默认）。
-     * 复用性：外部项目可传入自己的主题按压色，而无需改 SoftUi 全局常量。
-     */
     public static void markPressable(View v, Integer fillColor) {
         if (v == null) return;
         v.setClickable(true);
@@ -205,11 +185,9 @@ public final class SoftUi {
             if (fillColor != null) v.setTag(PRESS_FILL_TAG, fillColor);
         } catch (Throwable ignored) {}
 
-        // 未挂载时下一帧再请求（挂载后由 Card.addView 也会触发）。
         schedulePressGroupRefresh(v);
     }
 
-    /** 是否已声明为可按下行。 */
     static boolean isPressable(View v) {
         if (v == null) return false;
         Object t = v.getTag(PRESS_TAG);
@@ -218,28 +196,24 @@ public final class SoftUi {
 
     static final int PRESS_TAG = "softui_press".hashCode();
 
-    /** 行级按压色标签；未设置则回退到所在按压组 / 全局默认。 */
     static final int PRESS_FILL_TAG = "softui_press_fill".hashCode();
 
-    /** 读取行级自定义按压色；未设置返回 null。 */
     static Integer getPressFill(View v) {
         if (v == null) return null;
         Object t = v.getTag(PRESS_FILL_TAG);
         return (t instanceof Integer) ? (Integer) t : null;
     }
 
-    /** 标记某个容器为"行的容器"（其子项与相邻行同属一个按压组，应向下展开参与排序）。 */
     public static void markRowGroup(View v) {
         if (v == null) return;
         try { v.setTag(TAG_GROUP, Boolean.TRUE); } catch (Throwable ignored) {}
-        // 行容器本身不裁剪，避免负 inset 溢出被裁掉
+
         if (v instanceof ViewGroup) {
             try { ((ViewGroup) v).setClipChildren(false); ((ViewGroup) v).setClipToPadding(false); }
             catch (Throwable ignored) {}
         }
     }
 
-    /** 是否为"行的容器"（应向下展开参与按压组排序）。 */
     static boolean isRowGroup(View v) {
         if (v == null) return false;
         Object t = v.getTag(TAG_GROUP);
@@ -247,25 +221,13 @@ public final class SoftUi {
     }
 
     static final int TAG_GROUP = "softui_row_group".hashCode();
-    // P3：按压反馈幂等缓存 key。注意 setTag(int,Object) 强制 key 的高 8 位 >= 2
-    // （即 key >= 0x02000000），故用固定常量而非 generateViewId()。
+
     static final int TAG_PRESS_FEEDBACK = 0x7F00B1F0;
 
-    /**
-     * 应用按压反馈外观（组容器统一调用，不对外暴露）。
-     * 负 inset 向四周扩出 PAD，使高亮覆盖整行边界（含卡片内边距）。
-     */
     static void applyPressFeedback(View v, boolean roundTop, boolean roundBottom) {
         applyPressFeedback(v, roundTop, roundBottom, null);
     }
 
-    /**
-     * 应用按压反馈外观（组容器统一调用，不对外暴露）。
-     * 负 inset 向四周扩出 PAD，使高亮覆盖整行边界（含卡片内边距）。
-     *
-     * @param groupFill 所在按压组的按压色（卡片级），null = 用全局 PRESS_FILL；
-     *                  行的自定义色（setPressFill）优先级更高。
-     */
     static void applyPressFeedback(View v, boolean roundTop, boolean roundBottom,
                                    Integer groupFill) {
         if (v == null) return;
@@ -275,13 +237,10 @@ public final class SoftUi {
         final int botEx = roundBottom ? dp(c, PAD / 2f) : 0;
         final float rt = roundTop ? PRESS_RADIUS : 0f;
         final float rb = roundBottom ? PRESS_RADIUS : 0f;
-        // 颜色优先级：行级自定义 > 所在组（卡片级）> 全局覆盖 / 主题默认
+
         Integer rowFill = getPressFill(v);
         final int fill = rowFill != null ? rowFill : (groupFill != null ? groupFill : defaultPressFill());
-        // P3：幂等缓存。refreshPressGroup() 会遍历整卡所有行逐个调用本方法，
-        // 折叠动画 / 连续布局期间可能高频触发；而参数（fill, rt, rb）在绝大多数
-        // 刷新中并未变化。用 tag 记住上次参数，未变则直接复用已有背景，跳过重建
-        // （每次重建 = 1 StateListDrawable + 3 GradientDrawable + 3 InsetDrawable）。
+
         final int cacheKey = fill * 31 * 31 + (int) (rt * 7) * 31 + (int) (rb * 7);
         Object last = v.getTag(TAG_PRESS_FEEDBACK);
         if (last instanceof Integer && ((Integer) last) == cacheKey
@@ -299,31 +258,26 @@ public final class SoftUi {
         sl.addState(new int[]{},
                 inset(pressShape(c, 0x00000000, rt, rb), -ex, -topEx, -ex, -botEx));
         v.setBackground(sl);
-        v.setTag(TAG_PRESS_FEEDBACK, cacheKey); // P3：记录本次参数，供下次幂等比对
+        v.setTag(TAG_PRESS_FEEDBACK, cacheKey);
         v.setClickable(true);
         v.setFocusable(true);
     }
 
-    /** 兼容旧调用：等价于 aplicar 外观（默认全圆角）。 */
     public static void pressFeedback(View v) {
         markPressable(v);
         applyPressFeedback(v, true, true);
     }
 
-    /** 兼容旧签名：现在 fillColor 会真正生效（行级自定义按压色）。 */
     public static void pressFeedback(View v, int fillColor, float radiusDp,
                                      boolean roundTop, boolean roundBottom) {
         markPressable(v, fillColor);
         applyPressFeedback(v, roundTop, roundBottom, fillColor);
     }
 
-    /** 请求最近按压组容器重算圆角；未挂载时等下一帧再试。 */
     private static void schedulePressGroupRefresh(final View v) {
         schedulePressGroupRefresh(v, 0);
     }
-    // 最大重试次数：视图尚未挂载到父节点时允许延后重试，但必须有上限，
-    // 否则“始终无父节点”的视图会让 post 自旋任务塞满主线程消息队列，
-    // 导致首帧无法绘制（表现为 GUI 打不开 / 卡死）。
+
     private static final int PRESS_REFRESH_MAX_RETRY = 3;
     private static void schedulePressGroupRefresh(final View v, final int attempt) {
         if (v == null) return;
@@ -331,8 +285,7 @@ public final class SoftUi {
             final android.view.ViewParent p = v.getParent();
             if (p == null) {
                 if (attempt >= PRESS_REFRESH_MAX_RETRY) {
-                    // 超过重试上限仍未挂载：降级为对自身应用一次全圆角按压，
-                    // 保证有反馈的同时不再无限重投。
+
                     if (isPressable(v) && v.getBackground() == null) {
                         applyPressFeedback(v, true, true, null);
                     }
@@ -343,7 +296,7 @@ public final class SoftUi {
                 });
                 return;
             }
-            // 找到最近的 Card 容器，请求其刷新整组。
+
             android.view.ViewParent cur = p;
             while (cur instanceof View) {
                 if (cur instanceof Card) {
@@ -353,10 +306,6 @@ public final class SoftUi {
                 cur = ((View) cur).getParent();
             }
 
-            // 降级：整条祖先链没有 Card 宿主。
-            // 说明该行被直接放进了普通容器（LinearLayout / FrameLayout 等），
-            // 此时没有"组容器"来统一分配圆角 —— 退化为对自身应用一次全圆角按压，
-            // 保证"只要标了 markPressable 就一定有按压反馈"，避免静默失效。
             if (isPressable(v) && v.getBackground() == null) {
                 applyPressFeedback(v, true, true, null);
             }
@@ -602,7 +551,7 @@ public final class SoftUi {
         private float touchSlop = -1f;
         private final RectF track = new RectF();
         private float min, max, value;
-        private float step = 0f;   // 0 = 连续；>0 = 吸附到最近的 step 整数倍
+        private float step = 0f;
         private OnChange cb;
         private float pressScale = 0.82f;
         private ValueAnimator scaleAnimator;
@@ -612,17 +561,12 @@ public final class SoftUi {
             setClickable(true);
             touchSlop = android.view.ViewConfiguration.get(c).getScaledTouchSlop();
         }
-        /**
-         * 设置当前值（若已配置 step，会吸附到最近档位）。
-         */
+
         public void setValue(float v) {
             value = snapValue(v);
             invalidate();
         }
-        /**
-         * 设置离散档位：>0 时滑块吸附到 min + k*step（如 setStep(1f) 只取整数）。
-         * 便于“模糊强度 1x/2x/3x/4x”这类档位设置，避免“拖到 2.4 显示 2”的割裂。
-         */
+
         public Slider setStep(float step) {
             this.step = step > 0f ? step : 0f;
             snap();
@@ -632,7 +576,7 @@ public final class SoftUi {
         private float snapValue(float v) {
             float clamped = Math.max(min, Math.min(max, v));
             if (step <= 0f) return clamped;
-            // 吸附到 min + k*step（k 取整），再做浮点收敛
+
             float k = Math.round((clamped - min) / step);
             float snapped = min + k * step;
             snapped = Math.max(min, Math.min(max, snapped));
@@ -738,9 +682,9 @@ public final class SoftUi {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint border = new Paint(Paint.ANTI_ALIAS_FLAG);
         private android.graphics.LinearGradient rainbow;
-        // P2：记录 rainbow 生成时的左右端点，布局变化时失效重建（避免彩虹条错位）。
+
         private float rainbowLeft = Float.NaN, rainbowRight = Float.NaN;
-        // P1：复用 HSV 数组，避免 onDraw 每帧 new float[3]（拖动时 60fps → 60 个数组/秒）。
+
         private final float[] hsv = new float[3];
         private float downX, downY;
         private boolean dragging = false;
@@ -788,7 +732,7 @@ public final class SoftUi {
             float cy = h / 2f;
             float left = maxTh, right = w - maxTh;
             track.set(left, cy - trackH / 2f, right, cy + trackH / 2f);
-            // P2：缓存失效不只看 null，还要看左右端点是否变化（布局变化 / resize）。
+
             if (rainbow == null
                     || Math.abs(rainbowLeft - left) > 0.5f
                     || Math.abs(rainbowRight - right) > 0.5f) {
@@ -815,7 +759,7 @@ public final class SoftUi {
 
             float cx = left + (right - left) * frac;
             if (enabledColor) {
-                // P1：复用字段数组，避免拖动时每帧 new float[3]。
+
                 hsv[0] = frac * 360f; hsv[1] = 0.72f; hsv[2] = 0.88f;
                 paint.setColor(android.graphics.Color.HSVToColor(hsv));
             } else {
@@ -929,10 +873,7 @@ public final class SoftUi {
     public interface ColorInputCb { void onColor(int rgb, boolean valid); }
 
     public interface OnInput { void onInput(String text); }
-    /**
-     * 文本输入行：左侧标题 + 右侧输入框（无底框、右对齐）。
-     * 输入框样式由 {@link #buildInput} 统一（背景 / 描边 / 光标色）。
-     */
+
     public static Row input(Context c, String title, String hint, String value,
                             OnInput onInput) {
         return input(c, title, hint, value,
@@ -957,10 +898,7 @@ public final class SoftUi {
         Row row = new Row(c, title, et, false);
         return row;
     }
-    /**
-     * 构建统一样式的输入框（背景 / 描边 / 圆角 / 内边距 / 光标色）。
-     * 供 {@code input()} 与内部对话框复用，避免手搓样式不一致。
-     */
+
     static android.widget.EditText buildInput(Context ctx, float textSize) {
         android.widget.EditText et = new android.widget.EditText(ctx);
         et.setTextSize(textSize);
@@ -1149,20 +1087,13 @@ public final class SoftUi {
             inner.setClipToPadding(false);
         }
 
-/**
-         * 刷新本卡片的「按压组」：把内部所有可见行按视觉顺序统一分配首/中/尾圆角，
-         * 并对其中"可按下"的行应用统一的按压反馈外观，同时放开必要裁剪。
-         * 这是按压反馈的唯一收敛点 —— 保证同一卡片内各行表现完全一致。
-         */
         public void refreshPressGroup() {
             java.util.List<View> rows = new java.util.ArrayList<>();
             collectRows(inner, rows);
             final int m = rows.size();
             for (int k = 0; k < m; k++) {
                 View ch = rows.get(k);
-                // 位置判定基于「所有可见行」的视觉顺序：首行上圆、末行下圆、其余直角。
-                // 无 press 的行（slider / segmentRow 等）也参与判定，
-                // 这样开关行下方若接有其它行，就不会误判为"全圆角"。
+
                 boolean first = (k == 0), last = (k == m - 1);
                 if (SoftUi.isPressable(ch)) {
                     SoftUi.applyPressFeedback(ch, first, last, cardPressFill);
@@ -1171,34 +1102,20 @@ public final class SoftUi {
             inner.setClipChildren(false);
         }
 
-        /** 卡片级按压色（null = 跟随全局 PRESS_FILL）。 */
         private Integer cardPressFill = null;
 
-        /**
-         * 设置本卡片内所有可按下行的按压色（卡片级覆盖）。
-         * 复用性：外部项目可整卡换色；单独的行仍可用 markPressable(v, color) 覆盖。
-         */
         public Card setPressFill(int color) {
             cardPressFill = color;
             postRefreshPressGroup();
             return this;
         }
 
-        /** 清除卡片级按压色，恢复全局默认。 */
         public Card clearPressFill() {
             cardPressFill = null;
             postRefreshPressGroup();
             return this;
         }
-        /**
-         * 递归收集一组「可见行」（按视觉顺序，用于首/中/尾圆角判定）。
-         * - 带 press 标记的子项：视作一行，收下且不展开其子树。
-         * - 不带标记的子项：
-         *   - 若是"行容器"（如 toggleWithDependents 的 holder），向下展开，
-         *     其中每一行都纳入同一组的顺序，同时放开其裁剪；
-         *   - 否则视作独立一行（slider / segmentRow / divider 等），也纳入顺序。
-         * - GONE 的内容不参与（折叠收起时依赖项不占位）。
-         */
+
         private static void collectRows(ViewGroup parent, java.util.List<View> out) {
             if (parent == null) return;
             final int n = parent.getChildCount();
@@ -1212,7 +1129,7 @@ public final class SoftUi {
                     ((ViewGroup) ch).setClipToPadding(false);
                     collectRows((ViewGroup) ch, out);
                 } else {
-                    out.add(ch);   // 非 press 的独立行，参与首尾判定
+                    out.add(ch);
                 }
             }
         }
@@ -1234,11 +1151,6 @@ public final class SoftUi {
         }
         private boolean pressGroupScheduled = false;
 
-        /**
-         * 从任意子视图出发，请求其所属 Card 重算按压组。
-         * （折叠动画后 holder 的可见性变化会影响首/尾圆角，需重算。）
-         * 若祖先链中没有 Card，则什么都不做。
-         */
         public static void requestRefresh(View v) {
             try {
                 android.view.ViewParent p = v == null ? null : v.getParent();
@@ -1249,7 +1161,6 @@ public final class SoftUi {
             } catch (Throwable ignored) {}
         }
 
-        /** 合并同一帧内的多次请求，下一帧刷新按压组（圆角 + 裁剪）。 */
         public void postRefreshPressGroup() {
             if (pressGroupScheduled) return;
             pressGroupScheduled = true;
@@ -1304,10 +1215,8 @@ public final class SoftUi {
             return this;
         }
 
-        /** 行级自定义按压色（链式）；null = 跟随卡片/全局。 */
         private Integer rowPressFill = null;
 
-        /** 设置本行的按压色，便于在外部项目复用统一组件时自定义高亮色。 */
         public Row pressFill(int color) {
             rowPressFill = color;
             setTag(PRESS_FILL_TAG, (Integer) color);
@@ -1315,7 +1224,6 @@ public final class SoftUi {
             return this;
         }
 
-        /** 清除行级按压色，恢复卡片/全局默认。 */
         public Row clearPressFill() {
             rowPressFill = null;
             setTag(PRESS_FILL_TAG, (Integer) null);
@@ -1588,14 +1496,11 @@ public final class SoftUi {
             this.content = content;
         }
         @Override View scrollSource() { return content; }
-        // 发热优化：内容指纹缓存。
-        // 原实现每次 onDraw 都会把 target 整棵子树 draw() 到离屏位图（1/SCALE 缩放），
-        // 只要 GlassSync 因任意滚动/布局变化 tick 一次，就会重绘整棵树。
-        // 现在记录「上次绘制时的内容指纹」，指纹未变则直接复用上次的 buf，跳过整树重绘。
+
         private long lastFingerprint = Long.MIN_VALUE;
 
         private long contentFingerprint(int w, int h) {
-            long fp = 1125899906842597L; // 大素数起始
+            long fp = 1125899906842597L;
             fp = fp * 31 + w;
             fp = fp * 31 + h;
             fp = fp * 31 + relX;
@@ -1628,9 +1533,9 @@ public final class SoftUi {
                 if (buf != null) buf.recycle();
                 buf = android.graphics.Bitmap.createBitmap(
                         sw, sh, android.graphics.Bitmap.Config.ARGB_8888);
-                lastFingerprint = Long.MIN_VALUE; // 尺寸变化必须重绘
+                lastFingerprint = Long.MIN_VALUE;
             }
-            // 指纹未变 → 直接复用 buf，跳过 target.draw() 整树重绘
+
             long fp = contentFingerprint(w, h);
             if (fp != lastFingerprint) {
                 buf.eraseColor(CANVAS);
@@ -1742,9 +1647,7 @@ public final class SoftUi {
             for (int i = 0; i < VIEWS.size(); i++) {
                 GlassView v = VIEWS.get(i).get();
                 if (v == null || !v.isAttachedToWindow()) continue;
-                // 发热优化⑪：跳过不可见（被遮挡 / 滚出屏幕）的玻璃层，避免无谓重绘。
-                // getGlobalVisibleRect 比 isShown 更严格（能识别"滚出可视区域"），
-                // 对设置页长列表场景可显著减少滚动期 invalidate 数量。
+
                 if (!v.isShown()) continue;
                 v.onTick();
                 alive++;
@@ -1793,10 +1696,6 @@ public final class SoftUi {
         @Override public int getOpacity() { return android.graphics.PixelFormat.TRANSLUCENT; }
     }
 
-    /**
-     * 视觉特效（单一职责：只负责"怎么画"）。
-     * 诊断日志不再自建实现 —— 见 {@link #diag(String)}，直接复用 ui.UiLog。
-     */
     static final class Effects {
         static boolean selfBlur(View v, float r) {
             if (android.os.Build.VERSION.SDK_INT < 31) return false;
@@ -1811,19 +1710,10 @@ public final class SoftUi {
         }
     }
 
-    /**
-     * 诊断日志统一入口：只做 logcat + 委托给既有的 {@code com.shortcutblur.ui.UiLog}
-     * （持久 Writer + 2MB 轮转）。
-     *
-     * <p>开关统合：不再使用独立的 {@code DIAG} 字段，改为与功能日志共用
-     * {@link App#logEnabled()}（SharedPreferences {@code "log"}，默认关）。
-     * 这样 UI 日志与功能日志行为一致——用户开了才写，关了全静默。
-     */
     static void diag(String s) {
         if (s == null) return;
         if (!App.logEnabled()) return;
-        // 发热优化⑩：去掉 android.util.Log.i。滚动 tick 等路径会周期性调用本方法，
-        // Log.i 是跨进程 IPC；UiLog 已是文件日志，够排查用。二者取一，避免双份开销。
+
         UiLog.write("[fx] " + s);
     }
 
@@ -1867,7 +1757,7 @@ public final class SoftUi {
                                               Switch.OnToggle cb, final View... dependents) {
         final LinearLayout holder = new LinearLayout(c);
         holder.setOrientation(LinearLayout.VERTICAL);
-        SoftUi.markRowGroup(holder);   // 声明为"行容器"：其子项与开关行同属一个按压组
+        SoftUi.markRowGroup(holder);
         for (View d : dependents) {
             holder.addView(d, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -1943,7 +1833,7 @@ public final class SoftUi {
                     lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
                     holder.setLayoutParams(lp);
                     holder.setVisibility(View.GONE);
-                    // 折叠完成后重新计算：开关行恢复全圆角
+
                     Card.requestRefresh(holder);
                 }
             });
@@ -2564,10 +2454,7 @@ public final class SoftUi {
         t.setLayoutParams(lp);
         return t;
     }
-    /**
-     * 带右侧动作的分组标题（如“其他 · 全部重置”按钮）。
-     * 右侧 action 为 null 时退化为普通分组标题（但返回类型为 View，保持布局一致）。
-     */
+
     public static View group(Context c, String title, View action) {
         LinearLayout line = new LinearLayout(c);
         line.setOrientation(LinearLayout.HORIZONTAL);
@@ -2593,21 +2480,17 @@ public final class SoftUi {
         return r;
     }
 
-    /** 带自定义按压色的 link（复用性：外部项目可指定高亮色）。 */
     public static Row link(Context c, String title, int pressFillColor, final OnClick cb) {
         return link(c, title, cb).pressFill(pressFillColor);
     }
     public static TextView statusText(Context c, String s) {
         return text(c, s == null ? "" : s, SUB_SIZE, TEXT_SECONDARY);
     }
-    /** 统一的短 Toast。 */
+
     public static void toast(Context c, String msg) {
         toast(c, msg, false);
     }
-    /**
-     * 统一的 Toast 封装（默认 LENGTH_SHORT，longDuration=true 时为 LENGTH_LONG）。
-     * 所有提示走这里，便于后续统一换 Snackbar / 去重。
-     */
+
     public static void toast(Context c, String msg, boolean longDuration) {
         if (c == null || msg == null || msg.length() == 0) return;
         try {
@@ -2727,10 +2610,7 @@ public final class SoftUi {
         col.setOnClickListener(v -> { if (cb != null) cb.onClick(); });
         return col;
     }
-    /**
-     * 三栏信息行：左侧「标题 + 副标题」竖排，右侧可挂任意控件（开关/数值/按钮）。
-     * 相比 infoBlock 多了右侧控件位，相比 action 多了副标题。
-     */
+
     public static View infoSub(Context c, String title, String subtitle, View right) {
         LinearLayout texts = new LinearLayout(c);
         texts.setOrientation(LinearLayout.VERTICAL);
@@ -2759,9 +2639,7 @@ public final class SoftUi {
                               Slider.OnChange cb) {
         return slider(c, title, value, min, max, unit, 0f, cb);
     }
-    /**
-     * 带离散档位的 slider：step > 0 时吸附到档位（如 1f 表示只取整数档）。
-     */
+
     public static View slider(Context c, String title, float value,
                               float min, float max, final String unit,
                               final float step, Slider.OnChange cb) {

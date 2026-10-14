@@ -25,44 +25,24 @@ public final class FeatureFlags {
     public static volatile boolean IME_BLUR = false;
     public static volatile int IME_BLUR_RADIUS = 100;
 
-    // 键盘边缘「内发光描边」的强度（alpha，0x00~0xFF）。0 = 关闭描边。
-    // 深色模式用白色描边、浅色模式用暗色描边：同一种颜色不可能在两种背景上都清晰
-    // —— 白色描边放在浅色键盘上几乎看不见，放在深色键盘上又容易过于抢眼。
     public static volatile int IME_GLOW_ALPHA_DARK = 0x45;
     public static volatile int IME_GLOW_ALPHA_LIGHT = 0x38;
-    /** 内发光羽化宽度（dp）：由边缘向内渐隐的总宽度。 */
+
     public static volatile float IME_GLOW_FEATHER_DP = 8f;
 
-    // 快捷菜单（ShortcutBlur）模糊半径：图标模糊动画的目标半径。0=不模糊，上限 200。
     public static volatile float SHORTCUT_BLUR_RADIUS = 64.0f;
 
-    // 快捷菜单弹窗本体（popup 背景视图）模糊：用 Oplus 私有模糊 API 对弹窗背景视图挂背景渲染效果。
-    // 隶属于「Shortcut 实时模糊」(SHORTCUT_BLUR)：无独立开关，开了总开关即启用。
-    // 半径 = SHORTCUT_WINDOW_BLUR_RADIUS。
     public static volatile float SHORTCUT_WINDOW_BLUR_RADIUS = 64.0f;
 
-    // 快捷菜单卡片（一/二级）统一 Oplus 背景模糊（com.oplus.view.ViewRootManager）的混色。
-    // 与输入法模糊同源，用同一套私有 API；一级与二级共用同组参数以保证观感一致。
     public static volatile int CARD_BLUR_COLOR_LIGHT = 0x66FFFFFF;
     public static volatile int CARD_BLUR_COLOR_DARK = 0x99000000;
-    /** 卡片模糊圆角（dp）。直接决定模糊层圆角；<=0 时退回读取卡片面板自身圆角（COUI RoundFrameLayout）。 */
+
     public static volatile float CARD_BLUR_CORNER_DP = 16f;
 
-    /**
-     * 二级菜单（"更多功能"子菜单）背景模糊半径。独立于一级，可单独调大/调小。
-     * <=0 时回退用 SHORTCUT_BLUR_RADIUS（一级半径）。
-     */
     public static volatile float CARD_SECONDARY_BLUR_RADIUS = 96.0f;
 
-    // 一级（长按图标）卡片面板背景的不透明度（0x00~0xFF）。
-    // 面板背景本身多为浅色/白色，数值越高越"实"、越显白；降低可让模糊更透出来。
     public static volatile int CARD_PANEL_ALPHA = 0x99;
 
-    // 键盘圆角固定 25dp，不再允许用户自定义。
-    // 原因：系统 BackgroundBlurDrawable.setCornerRadius 在半径超过绘制区域
-    // 短边一半时会触发 native 路径构建越界崩溃（本机实测阈值 ≈25dp@560dpi），
-    // 且崩溃后必须 pm clear 输入法数据才能恢复（代价高）。
-    // 固定为 25dp 以远离临界值。
     public static final float IME_BLUR_CORNER_DP = 25f;
 
     public static volatile int IME_BLUR_COLOR_LIGHT = 0xC0DCDCDC;
@@ -248,7 +228,7 @@ public final class FeatureFlags {
                 } catch (Throwable ignored) {}
                 break;
             case "card_panel_alpha":
-                // 一级快捷菜单面板背景不透明度（0x00~0xFF）。数值越高越"实"、越显白。
+
                 try {
                     String s = v.trim();
                     int a = (s.startsWith("0x") || s.startsWith("0X"))
@@ -258,7 +238,7 @@ public final class FeatureFlags {
                 } catch (Throwable ignored) {}
                 break;
             case "card_secondary_blur_radius":
-                // 二级（"更多功能"）菜单模糊半径；<=0 时回退一级半径。
+
                 try {
                     float f = Float.parseFloat(v.trim());
                     CARD_SECONDARY_BLUR_RADIUS = f;
@@ -273,8 +253,7 @@ public final class FeatureFlags {
                 break;
             case "ime_blur_corner":
             case "ime_blur_corner_dp":
-                // 圆角已固定为 25dp（IME_BLUR_CORNER_DP 为 final 常量），
-                // 忽略外部传入值，防止越界崩溃。
+
                 break;
             case "ime_blur_color_light":
                 try { IME_BLUR_COLOR_LIGHT = (int) Long.parseLong(v.trim(), 16); } catch (Throwable ignored) {}

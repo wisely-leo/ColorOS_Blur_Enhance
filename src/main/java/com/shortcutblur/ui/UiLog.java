@@ -5,17 +5,6 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStreamWriter;
 
-/**
- * UI 侧（设置页进程）的日志输出。
- *
- * 背景：原先 App.lg / SettingsActivity.lg 各自实现了一份「每条日志都
- * 探测目录 → open FileOutputStream → write → flush → close」的逻辑。
- * 开启日志后，设置页大量交互（点击、滚动、滑块）会触发频繁文件 IO 抖动，
- * 且写入的 UiStartup.log 只增不减，长时间使用会持续膨胀。
- *
- * 这里统一为：持久 BufferedWriter（只开一次）+ 2MB 轮转截断重开，
- * 与模块内 ModuleLog 的策略保持一致。
- */
 final class UiLog {
 
     private static final long MAX_LOG_BYTES = 2L * 1024 * 1024;

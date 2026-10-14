@@ -263,14 +263,13 @@ public final class SettingsStore {
 
     public boolean isImeBlur()        { return sp.getBoolean(KEY_IME_BLUR, DEF_IME_BLUR); }
     public float   getImeBlurRadius() { return sp.getFloat(KEY_IME_BLUR_RADIUS, DEF_IME_BLUR_RADIUS); }
-    // 键盘圆角固定 25dp，不再由用户设置（见 FeatureFlags.IME_BLUR_CORNER_DP）。
+
     public float   getImeBlurCornerDp(){ return 25f; }
     public SettingsStore setImeBlur(boolean v)    { sp.edit().putBoolean(KEY_IME_BLUR, v).apply(); syncToHost(); return this; }
     public SettingsStore setImeBlurRadius(float v){ sp.edit().putFloat(KEY_IME_BLUR_RADIUS, v).apply(); syncToHost(); return this; }
     public float   getImeBlurMask()   { return sp.getFloat(KEY_IME_BLUR_MASK, DEF_IME_BLUR_MASK); }
     public SettingsStore setImeBlurMask(float v){ sp.edit().putFloat(KEY_IME_BLUR_MASK, v).apply(); syncToHost(); return this; }
-    // 模糊半径：接口保留，但当前不开放用户自定义（不读 sp 用户值，固定默认 64）。
-    // 如需重新开放，把下列 return 改回 sp.getFloat(KEY_..., DEF_...) 并在设置页加回滑块即可。
+
     public float   getShortcutBlurRadius(){ return DEF_SHORTCUT_BLUR_RADIUS; }
     public SettingsStore setShortcutBlurRadius(float v){ sp.edit().putFloat(KEY_SHORTCUT_BLUR_RADIUS, v).apply(); syncToHost(); return this; }
     public float   getRecentsBlurRadius(){ return DEF_RECENTS_BLUR_RADIUS; }

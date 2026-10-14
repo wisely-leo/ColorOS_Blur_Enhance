@@ -24,18 +24,7 @@ import io.github.libxposed.api.XposedModuleInterface;
 import static com.shortcutblur.BlurLib.*;
 import static com.shortcutblur.Symbols.*;
 public class BlurEnhanceModule extends XposedModule {
-    // ========================================================================
-    // 职责地图（本类 5 大块，按出现顺序）：
-    //   ① 入口 & 调度 .............. onModuleLoaded / onPackageReady / hookEx
-    //   ② 包名路由 & 安装 .......... installHooks / 屏幕·配置广播接收器
-    //   ③ 图标模糊动画 ............. ensureIconBlurLayer / armBlurForView / fadeOut…
-    //   ④ 后处理（PostEffect）..... installPostEffectHooks / hookBySignature / depth
-    //   ⑤ 组件合并（Merge）........ RemoteViews.apply / AppWidgetHostView / TextView
-    // 注：本类为 Xposed 模块入口，单文件承载多职责是 LSPosed 常见形态；
-    //     字段与 static 状态按“上述分块”集中声明，改动时请就近查找。
-    // ========================================================================
 
-    // ---- ① 入口 & 调度 ----
     private final RecentsBlur.HookApi recentsApi = new RecentsBlur.HookApi() {
         @Override public void hook(String id, Executable target, XposedInterface.Hooker hooker) {
             hookEx(id, target, hooker);
@@ -47,7 +36,7 @@ public class BlurEnhanceModule extends XposedModule {
     public void hookPublic(String id, Executable target, XposedInterface.Hooker hooker) {
         hookEx(id, target, hooker);
     }
-    /** ShortcutBlur 功能（③ 块）的宿主契约实现：提供类加载器与 hookEx。 */
+
     private final ShortcutBlurFeature.Host shortcutBlurHost = new ShortcutBlurFeature.Host() {
         @Override public ClassLoader classLoader() { return cl; }
         @Override public void hookEx(String id, Executable target, XposedInterface.Hooker hooker) {
@@ -55,40 +44,32 @@ public class BlurEnhanceModule extends XposedModule {
         }
     };
 
-    // ---- ② 常量：包名 ----
     private static final String PKG_POSTEFFECT = "com.oplus.blur";
     private static final String PKG_QUICKSEARCH = "com.heytap.quicksearchbox";
     private static final String PKG_CLOCK = "com.coloros.alarmclock";
     private static final String PKG_YUYAN = "com.yuyan.pinyin.offline.release";
 
-    // ---- ② 常量：动画 / 阈值 ----
     private static final float BLUR_RADIUS = 64.0f;
     private static final long BLUR_DURATION = 330L;
     private static final long DEPTH_FALLBACK_DELAY = 500L;
     private static final long SWALLOW_RESET_DELAY = 450L;
 
-    // ---- ③ 常量：模糊标志位（resolveBlurFlags 产出）----
     private static final int F_STATIC = 1 << 0;
     private static final int F_ICON = 1 << 1;
     private static final int F_WALL = 1 << 2;
     private static final int F_ICON_ANIM = 1 << 3;
 
-    // ---- ② 常量：广播 / 版本 ----
     private static final String ACTION_SETCONF = "com.wiselyleo.blurenhance.SETCONF";
     private static final String BUILD_TAG = "v46.1";
 
-    // ---- ② 安装状态 ----
     private volatile ClassLoader cl;
     private volatile boolean installed = false;
     private volatile boolean postEffectInstalled = false;
     private static volatile boolean sScreenReceiverInstalled = false;
     private static volatile boolean sConfReceiverInstalled = false;
 
-    // ---- ③ 图标模糊动画已迁出至 ShortcutBlurFeature（原 ShortcutBlur 本体）----
-
-    // ---- ④ 后处理：反射缓存与去重 ----
     private final Set<Method> peHooked = new HashSet<>();
-    /** SCALE 热路径去重：同 tag+old 只记一次，避免每帧刷屏。 */
+
     private final Set<String> peScaleLogged = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private static volatile boolean sOplusEffectResolved = false;
     private static volatile Class<?> sOplusEffectCls = null;
@@ -97,12 +78,8 @@ public class BlurEnhanceModule extends XposedModule {
     private static volatile boolean sOplusApiDumped = false;
     private final Set<String> dumpedCls = new HashSet<>();
 
-    // ---- ⑤ 组件合并：时钟文本去重 ----
     private final java.util.WeakHashMap<android.view.View, String> sLastClockText = new java.util.WeakHashMap<android.view.View, String>();
 
-    // ========================================================================
-    // ① 入口 & 调度
-    // ========================================================================
     @Override
     public void onModuleLoaded(XposedModuleInterface.ModuleLoadedParam param) {
     }
@@ -194,9 +171,7 @@ public class BlurEnhanceModule extends XposedModule {
             ModuleLog.e("READY", "onPackageReady failed", t);
         }
     }
-    // ========================================================================
-    // ② 包名路由 & 安装
-    // ========================================================================
+
     private void installScreenReceiverViaApp(XposedModuleInterface.PackageReadyParam param) {
         if (sScreenReceiverInstalled) return;
         synchronized (BlurEnhanceModule.class) {
@@ -328,8 +303,7 @@ public class BlurEnhanceModule extends XposedModule {
         }
         return r;
     }
-    // ④ 后处理（PostEffect）hook 安装与采样率修正
-    // ========================================================================
+
     private boolean installPostEffectHooks(ClassLoader loader) {
         Class<?> cls;
         try {
@@ -396,12 +370,12 @@ public class BlurEnhanceModule extends XposedModule {
                             float peTarget = FeatureFlags.SAMPLE_SCALE;
                             if (old != peTarget) {
                                 args[pos] = peTarget;
-                                // 热路径（每帧调用）：同 tag 的同一 old 值只记一次，避免刷屏。
+
                                 if (peScaleLogged.add(tag + ":" + old)) {
                                     ModuleLog.d("SCALE", tag + " " + old + " -> " + peTarget);
                                 }
                             } else if (ModuleLog.VERBOSE) {
-                                // keep：默认不打印（仅 VERBOSE 时记录）
+
                                 ModuleLog.dv("SCALE", tag + " keep " + old);
                             }
                         } else if (ModuleLog.VERBOSE) {
@@ -427,13 +401,10 @@ public class BlurEnhanceModule extends XposedModule {
         return idx;
     }
     private volatile boolean sRemoteViewsHooked = false;
-    // ========================================================================
-    // ⑤ 组件合并（Merge）：RemoteViews.apply / AppWidgetHostView / TextView.setText
-    // ========================================================================
+
     private void hookRemoteViewsApply(ClassLoader cl) {
-        if (sRemoteViewsHooked) return;   // 幂等：同进程多次 onPackageReady 不重复 hook
-        // ★ 注意：不要在此处提前置位。必须全部成功后再置 true，
-        //   否则首次 hook 抛异常会把标志污染成"已装"，导致后续 onPackageReady 永远不再重试。
+        if (sRemoteViewsHooked) return;
+
         boolean ok = true;
         try {
             Method m = RemoteViews.class.getDeclaredMethod("apply", android.content.Context.class, ViewGroup.class);
@@ -464,7 +435,7 @@ public class BlurEnhanceModule extends XposedModule {
     }
     private volatile boolean sAhvHooked = false;
     private void hookAppWidgetHostView(ClassLoader cl) {
-        if (sAhvHooked) return;   // 幂等：同进程多次 onPackageReady 不重复 hook
+        if (sAhvHooked) return;
         boolean ok = false;
         try {
             Class<?> ahv = Class.forName("android.appwidget.AppWidgetHostView", false, cl);
@@ -520,7 +491,7 @@ public class BlurEnhanceModule extends XposedModule {
     }
     private volatile boolean sTextHooked = false;
     private void hookTextViewSetText(ClassLoader cl) {
-        if (sTextHooked) return;   // 幂等：避免上游 critical==0 重试时重复 hook setText
+        if (sTextHooked) return;
         sTextHooked = true;
         try {
             Class<?> tv = Class.forName("android.widget.TextView", false, cl);
