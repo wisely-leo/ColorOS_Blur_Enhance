@@ -115,45 +115,60 @@ public final class ImeBlurHook {
         ModuleLog.d(TAG, "float probe ready=" + sFloatProbeReady);
     }
 
-    // 发热优化：结果缓存。
-    // isFloatKeyboard 每次调用要做 4 次反射（sFldH7k.get / sFldD7c.get / sFldD7*/get / sMtdJzGet.invoke），
-    // 而 doBlur 在每次键盘 attach / theme / configchange 时都会走到，连续触发时会重复做同样 4 次反射。
-    // 同一台设备同一时刻的“是否悬浮键盘”是稳定的，故缓存结果，仅在横竖屏切换时失效。
-    // 缓存条目随 View 存活（弱引用 key，View 回收即自动失效）。
-    private static final java.util.WeakHashMap<View, Boolean> sFloatCache =
-            new java.util.WeakHashMap<>();
-    private static volatile int sFloatCacheOrientation = -1;
-    private static volatile long sFloatCacheAt = 0L;
-    private static final long FLOAT_CACHE_TTL_MS = 3000L;
-
+    // === 重要：这里【故意不做结果缓存】 ===
+    // 「是否悬浮键盘」会随用户切换悬浮/停靠而改变，而该切换【不改变屏幕朝向】。
+    // 若按 View 缓存结果（哪怕带 TTL），切换后的 doBlur 仍会读到旧值，表现为
+    // 「切成悬浮后再切回，键盘圆角不恢复」；更糟的是切换本身可能不再触发任何
+    // attach / visibility / theme / configchange 事件，旧值会被一直沿用下去。
+    // 探测只有 4 次反射，且 doBlur 仅在键盘状态变化时调用，实时探测代价可忽略。
     private static boolean isFloatKeyboard(View v) {
         if (v == null) return false;
-        // 缓存命中：同一朝向 + 未过期
-        int ori = currentOrientation(v);
-        long now = android.os.SystemClock.uptimeMillis();
-        Boolean cached = sFloatCache.get(v);
-        if (cached != null && ori == sFloatCacheOrientation
-                && (now - sFloatCacheAt) < FLOAT_CACHE_TTL_MS) {
-            return cached;
-        }
-        boolean val = probeFloatKeyboard(v);
-        // 朝向变化会整体换一批 View，这里顺带清理陈旧条目
-        if (ori != sFloatCacheOrientation) {
-            sFloatCache.clear();
-            sFloatCacheOrientation = ori;
-        }
-        sFloatCacheAt = now;
-        sFloatCache.put(v, val);
-        return val;
+        return probeFloatKeyboard(v);
     }
 
-    private static int currentOrientation(View v) {
+    // === 悬浮 / 停靠切换感知 ===
+    // 切换悬浮键盘必然改变 IMV / skbRoot 的尺寸（浮窗 ↔ 全屏），但是否触发
+    // attach / visibility / theme / configchange 并不确定。因此把「布局尺寸变化」
+    // 作为键盘模式变化的可靠信号：尺寸一变就重新应用一次（内部会实时重新探测是否悬浮）。
+    private static final java.util.WeakHashMap<View, Boolean> sLayoutWatched =
+            new java.util.WeakHashMap<>();
+    private static volatile long sLayoutReapplyAt = 0L;
+    private static final long LAYOUT_REAPPLY_MIN_MS = 150L;
+    // 最近一次实际应用时的「悬浮」状态，用于判断尺寸变化后是否需要重做。
+    private static volatile boolean sLastAppliedFloating = false;
+    private static volatile boolean sHasAppliedFloating = false;
+
+    private static void watchImeLayout(final View v) {
+        if (v == null) return;
+        synchronized (sLayoutWatched) {
+            if (sLayoutWatched.put(v, Boolean.TRUE) != null) return;   // 已注册过
+        }
         try {
-            android.content.Context ctx = v.getContext();
-            if (ctx == null) return -1;
-            return ctx.getResources().getConfiguration().orientation;
+            v.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+                @Override
+                public void onLayoutChange(View vv, int l, int t, int r, int b,
+                                           int ol, int ot, int or, int ob) {
+                    boolean sizeChanged = (r - l) != (or - ol) || (b - t) != (ob - ot);
+                    if (!sizeChanged) return;   // 只关心尺寸变化（悬浮切换必然改变尺寸）
+                    long now = android.os.SystemClock.uptimeMillis();
+                    if (now - sLayoutReapplyAt < LAYOUT_REAPPLY_MIN_MS) return;
+                    sLayoutReapplyAt = now;
+                    try {
+                        View target = vv;
+                        View skb = tryGetSkbRoot(vv);
+                        if (skb != null) target = skb;
+                        boolean floating = probeFloatKeyboard(target);
+                        // 与应用过的一致 → 无需重做（避免 setBackground 引起的尺寸抖动形成循环）
+                        if (sHasAppliedFloating && floating == sLastAppliedFloating) return;
+                        ModuleLog.dv(TAG, "ime size changed " + (r - l) + "x" + (b - t)
+                                + " -> re-apply blur (floating " + sLastAppliedFloating
+                                + " -> " + floating + ")");
+                        applyBlur(vv);
+                    } catch (Throwable ignored) {}
+                }
+            });
         } catch (Throwable t) {
-            return -1;
+            synchronized (sLayoutWatched) { sLayoutWatched.remove(v); }
         }
     }
 
@@ -286,7 +301,7 @@ public final class ImeBlurHook {
                             try {
                                 Object self = chain.getThisObject();
                                 if (self instanceof View) {
-                                    ModuleLog.d(TAG, "onAttachedToWindow -> applyBlur");
+                                    ModuleLog.dv(TAG, "onAttachedToWindow -> applyBlur");
                                     applyBlur((View) self);
                                 }
                             } catch (Throwable t) {
@@ -315,7 +330,7 @@ public final class ImeBlurHook {
                                 try {
                                     Object self = chain.getThisObject();
                                     if (self instanceof View) {
-                                        ModuleLog.d(TAG, "onDetachedFromWindow -> clearBlur");
+                                        ModuleLog.dv(TAG, "onDetachedFromWindow -> clearBlur");
                                         clearBlur();
                                     }
                                 } catch (Throwable t) {
@@ -353,7 +368,7 @@ public final class ImeBlurHook {
 
                                     boolean selfChanged = (a0 == self);
                                     if (self instanceof View && vis == View.VISIBLE && selfChanged) {
-                                        ModuleLog.d(TAG, "onVisibilityChanged(VISIBLE) -> applyBlur");
+                                        ModuleLog.dv(TAG, "onVisibilityChanged(VISIBLE) -> applyBlur");
                                         applyBlur((View) self);
                                     }
                                 } catch (Throwable t) {
@@ -390,7 +405,7 @@ public final class ImeBlurHook {
                                     try {
                                         Object self = chain.getThisObject();
                                         if (self instanceof View) {
-                                            ModuleLog.d(TAG, sThemeBgName + ".u() -> re-applyBlur after theme bg");
+                                            ModuleLog.dv(TAG, sThemeBgName + ".u() -> re-applyBlur after theme bg");
                                             applyBlur((View) self);
                                         }
                                     } catch (Throwable t) {
@@ -554,7 +569,7 @@ public final class ImeBlurHook {
 
         synchronized (sPendingLock) {
             if (sPendingView.get() == v) {
-                ModuleLog.d(TAG, "applyBlur: coalesced (same view pending)");
+                ModuleLog.dv(TAG, "applyBlur: coalesced (same view pending)");
                 return;
             }
             sPendingView = new java.lang.ref.WeakReference<>(v);
@@ -583,7 +598,7 @@ public final class ImeBlurHook {
             ModuleLog.d(TAG, "reapply: no cached view (input method not shown yet)");
             return;
         }
-        ModuleLog.d(TAG, "reapply: re-applying blur to cached view");
+        ModuleLog.dv(TAG, "reapply: re-applying blur to cached view");
         applyBlur(v);
     }
 
@@ -673,7 +688,7 @@ public final class ImeBlurHook {
                 if (d == null) {
                     // 发热优化：重试上限 5 → 3（每次重试都会重建 glow + LayerDrawable + setBackground）。
                     if (retry < 3) {
-                        ModuleLog.d(TAG, "doBlur: drawable null, retry#" + (retry + 1));
+                        ModuleLog.dv(TAG, "doBlur: drawable null, retry#" + (retry + 1));
                         v.postDelayed(new Runnable() {
                             @Override
                             public void run() {
@@ -681,7 +696,7 @@ public final class ImeBlurHook {
                             }
                         }, 300);
                     } else {
-                        ModuleLog.d(TAG, "doBlur: drawable still null after retries, give up");
+                        ModuleLog.dv(TAG, "doBlur: drawable still null after retries, give up");
                     }
                     return;
                 }
@@ -717,12 +732,12 @@ public final class ImeBlurHook {
                         float maxSafe = Math.min(w, h) / 2f - 2f;
                         if (maxSafe < 0f) maxSafe = 0f;
                         if (cornerPx > maxSafe) {
-                            ModuleLog.d(TAG, "corner clamped " + cornerPx + " -> " + maxSafe
+                            ModuleLog.dv(TAG, "corner clamped " + cornerPx + " -> " + maxSafe
                                     + " (view " + w + "x" + h + ")");
                             cornerPx = maxSafe;
                         }
                     } else {
-                        ModuleLog.d(TAG, "corner fallback 0 (view not measured)");
+                        ModuleLog.dv(TAG, "corner fallback 0 (view not measured)");
                         cornerPx = 0f;
                     }
                 }
@@ -741,7 +756,12 @@ public final class ImeBlurHook {
 
             v.setBackground(layer);
             v.invalidate();
-            ModuleLog.d(TAG, "blur applied r=" + radius
+            // 记录本次应用到的「悬浮」状态，并监听尺寸变化，以便感知悬浮/停靠切换
+            // （切回停靠时圆角必须随之恢复）。
+            sLastAppliedFloating = floating;
+            sHasAppliedFloating = true;
+            watchImeLayout(v);
+            ModuleLog.dv(TAG, "blur applied r=" + radius
                     + " color=0x" + Integer.toHexString(color)
                     + " corner=" + cornerDp + "dp"
                     + " float=" + floating);

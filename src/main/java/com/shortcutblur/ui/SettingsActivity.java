@@ -421,6 +421,7 @@ private SettingsStore store;
 
     private static final String CHANGELOG =
             "v46.1\n"
+            + "· 修复切换悬浮键盘后再切回，键盘圆角未恢复的问题（切换后自动重新应用）\n"
             + "· 发热与耗电优化（重点修复长稳使用下的发热）\n"
             + "  · 日志输出不再逐条同步刷盘，改为批量写入，大幅降低存储 IO\n"
             + "  · 日志不再逐条写入系统日志，减少跨进程通信开销\n"
