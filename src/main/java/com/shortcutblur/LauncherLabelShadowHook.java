@@ -79,12 +79,18 @@ final class LauncherLabelShadowHook {
     private static volatile java.lang.reflect.Field sWidgetNameField = null;
     /** BubbleTextView.mTextClipPath 反射句柄。 */
     private static volatile java.lang.reflect.Field sTextClipField = null;
+    /**
+     * clipPath 重入保护：
+     * 我们把 Path 改写后要交回原始 clipPath 去执行，而那会再次进入本 hook
+     * （登记表按对象同一性识别，Path 还是同一个），因此必须挡住第二次。
+     * 裁剪只发生在绘制线程，用 ThreadLocal 最轻量。
+     */
+    private static final ThreadLocal<Boolean> sClipReentry =
+            new ThreadLocal<Boolean>();
     /** mTextClipPath 对象 -> 所属应用名 View；用于按「对象同一性」识别是谁在裁画布。 */
     private static final java.util.Map<android.graphics.Path, java.lang.ref.WeakReference<TextView>>
             sTextClipOwners = java.util.Collections.synchronizedMap(
                     new java.util.WeakHashMap<android.graphics.Path, java.lang.ref.WeakReference<TextView>>());
-    /** 最近一次「替桌面应用名外扩裁剪」时的 Canvas save 深度；仅用于日志/自检。 */
-    private static volatile int sClipExpandedDepth = 0;
 
     private static volatile Class<?> sWorkspaceItemCls = null;
     private static volatile Class<?> sFolderInfoCls = null;
@@ -332,19 +338,34 @@ final class LauncherLabelShadowHook {
                                 if (args.length < 1 || !(args[0] instanceof android.graphics.Path)) {
                                     return chain.proceed(args);
                                 }
+                                // 防重入：本次改写后交回原生 clipPath 时不要再处理一遍
+                                if (Boolean.TRUE.equals(sClipReentry.get())) {
+                                    return chain.proceed(args);
+                                }
                                 TextView owner = ownerOfTextClipPath((android.graphics.Path) args[0]);
                                 if (owner == null) return chain.proceed(args);
 
-                                // 是桌面应用名的文字区域裁剪：换成裁一个外扩矩形，给阴影留地方。
-                                android.graphics.Canvas c =
-                                        (android.graphics.Canvas) chain.getThisObject();
+                                // 是桌面应用名的文字区域裁剪：把这块矩形「外扩」后再让原生裁。
+                                //
+                                // 注意：这里绝对不能自己 canvas.save() 后 return null。
+                                // drawText 原生会做 save/restore 配对，跳过它就等于每次绘制
+                                // 都往 Canvas 栈里泄漏一层，残留的裁剪会把整个图标裁掉
+                                // （表现为图标消失、点一下桌面又恢复）。
+                                // 正确做法：只改写它自己那个 Path 的内容，裁剪仍由原生调用完成。
+                                android.graphics.Path target = (android.graphics.Path) args[0];
                                 float pad = FeatureFlags.LAUNCHER_LABEL_SHADOW_RADIUS_DP
                                         * densityOf(owner) + 2f;
-                                c.save();
-                                c.clipRect(-pad, -pad,
-                                        owner.getWidth() + pad, owner.getHeight() + pad);
-                                sClipExpandedDepth = c.getSaveCount();
-                                return null;   // 已自行完成裁剪，跳过原始 clipPath
+                                target.reset();
+                                target.addRect(-pad, -pad,
+                                        owner.getWidth() + pad, owner.getHeight() + pad,
+                                        android.graphics.Path.Direction.CW);
+                                // 交给原始 clipPath（现在它裁的是一个更大的矩形）
+                                sClipReentry.set(Boolean.TRUE);
+                                try {
+                                    return chain.proceed(args);
+                                } finally {
+                                    sClipReentry.remove();
+                                }
                             } catch (Throwable t) {
                                 ModuleLog.swallow("launcher.label.clippath", t);
                                 return chain.proceed();
