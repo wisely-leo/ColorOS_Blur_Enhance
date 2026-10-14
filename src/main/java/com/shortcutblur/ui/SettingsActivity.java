@@ -426,7 +426,7 @@ private SettingsStore store;
             + "  · 原生亮壁纸会直接清空阴影；现改为常驻，主题 / 壁纸 / 透明度动画都清不掉\n"
             + "  · 亮色文字配暗色阴影（iOS 观感），暗色文字配亮色阴影保证可读\n"
             + "  · 新增热更参数 launcher_label_shadow / _radius_dp / _dy_dp / _dark / _light\n"
-            + "  · 设置界面新增独立开关，并附带可折叠参数：阴影模糊 / 向下偏移 / 阴影颜色\n"
+            + "  · 设置界面新增独立开关，并附带可折叠参数：阴影模糊 / 向下偏移 / 阴影浓度\n"
             + "· 修复键盘内发光观感（按「到圆角矩形边界的距离」重做）\n"
             + "  · 不再发粗：发光带宽度由 8dp 收窄到 3dp，贴边最亮、向内快速渐隐\n"
             + "  · 圆角不再熄灭：圆角改用径向渐变，与直边亮度连续（此前圆角整段没光）\n"
@@ -885,21 +885,16 @@ private SettingsStore store;
             View lsDyRow = SoftUi.slider(this, "向下偏移",
                     lsDyRef[0], -3f, 3f, "dp", 0.5f,
                     v -> { lsDyRef[0] = v; store.setLabelShadowDy(v); });
-            final View[] lsDarkTextRef = new View[1];
-            final float[] lsDarkFracRef = { lsDarkRef[0] / 255f };
-            View lsDarkRow = SoftUi.colorSlider(this, "阴影颜色",
-                    lsDarkFracRef[0],
-                    (color, frac) -> {
-                        lsDarkFracRef[0] = frac;
-                        int argb = (color & 0x00FFFFFF) | 0x70000000;
+            final float[] lsDarkPctRef = { (lsDarkRef[0] >>> 24) / 255f * 100f };
+            View lsDarkRow = SoftUi.slider(this, "阴影浓度",
+                    lsDarkPctRef[0], 0, 100, "%",
+                    v -> {
+                        lsDarkPctRef[0] = v;
+                        int alpha = Math.round(v / 100f * 255f);
+                        int argb = (lsDarkRef[0] & 0x00FFFFFF) | (alpha << 24);
                         lsDarkRef[0] = argb;
                         store.setLabelShadowDark(argb);
-                        if (lsDarkTextRef[0] instanceof android.widget.TextView) {
-                            ((android.widget.TextView) lsDarkTextRef[0]).setText(
-                                    "#" + Integer.toHexString(argb).toUpperCase());
-                        }
                     });
-            lsDarkTextRef[0] = lsDarkRow.findViewById(SoftUi.ROW_TITLE_ID);
             View[] lsRows = SoftUi.toggleWithDependents(this, "桌面应用名阴影（iOS 风）",
                     store.isLabelShadow(), null, lsRadiusRow, lsDyRow, lsDarkRow);
             final SoftUi.Row lsToggleRow = (SoftUi.Row) lsRows[0];
