@@ -302,24 +302,28 @@ final class LauncherLabelShadowHook {
         if (isInDeepShortcut(v)) return true;
         // ② 任务栏 / 预测图标（DoubleShadowBubbleTextView）——它们自带双阴影逻辑。
         if (isDoubleShadow(v)) return true;
-        // ③ 主判据：看这个应用名背后的 mInfo 是什么类型。
+        // ③ 主判据：看这个应用名背后的 mInfo 是什么。
         //      · WorkspaceItemInfo = 应用 / 快捷方式（含文件夹内的应用）→ 要阴影
-        //      · FolderInfo        = 文件夹图标的名字           → 不要阴影
-        //    这比父链类名可靠得多：不依赖包的层级、不受容器嵌套深度影响。
-        return !isAppInfo(v);
+        //      · FolderInfo        = 文件夹图标的名字                  → 也要阴影
+        //    桌面上的应用名与文件夹名都属于「桌面应用的文字」，统一加；
+        //    其余类型（搜索项、全部应用列表项等）不加。
+        return !isDesktopTitle(v);
     }
 
     /**
-     * 判定 v 是不是「应用名」——依据 {@code BubbleTextView.mInfo} 的类型。
+     * 判定 v 是不是「桌面上的应用文字」——依据 {@code BubbleTextView.mInfo} 的类型。
      *
-     * <p>反编译确认：{@code mInfo} 声明为 {@code ItemInfoWithIcon}，
-     * 应用 / 快捷方式放的是 {@code WorkspaceItemInfo}，而文件夹图标的名字放的是别的类型。
-     * 原生代码自己也用 {@code instance-of WorkspaceItemInfo} 做这类区分。
+     * <p>反编译确认：{@code mInfo} 声明为 {@code ItemInfoWithIcon}。
+     * 桌面应用 / 快捷方式 / 文件夹内的应用放 {@code WorkspaceItemInfo}；
+     * 文件夹图标自身的名字放 {@code FolderInfo}。这两类都是「桌面上的应用文字」，都要加阴影。
      *
-     * <p>父链白名单（Workspace / folder.*）保留为兜底：万一某机型 {@code mInfo} 取不到，
-     * 只要父链落在桌面工作区或文件夹内，仍按「应用名」处理。
+     * <p>原生代码自己也用 {@code instance-of WorkspaceItemInfo} 做这类区分，
+     * 这比靠包名前缀猜更可靠：不受类所在包、容器嵌套深度影响。
+     *
+     * <p>父链白名单（Workspace / Folder 容器）保留为兜底：万一 {@code mInfo} 取不到，
+     * 只要父链落在桌面工作区或文件夹里，仍按「桌面应用文字」处理。
      */
-    private static boolean isAppInfo(View v) {
+    private static boolean isDesktopTitle(View v) {
         Class<?> wi = sWorkspaceItemCls;
         Class<?> fi = sFolderInfoCls;
         try {
@@ -327,9 +331,9 @@ final class LauncherLabelShadowHook {
             if (f != null) {
                 Object info = f.get(v);
                 if (info != null) {
-                    if (wi != null && wi.isInstance(info)) return true;    // 应用 → 要
-                    if (fi != null && fi.isInstance(info)) return false;   // 文件夹 → 不要
-                    return false;                                          // 其他类型 → 不要
+                    if (wi != null && wi.isInstance(info)) return true;   // 应用 → 要
+                    if (fi != null && fi.isInstance(info)) return true;   // 文件夹名 → 也要
+                    return false;                                         // 其他类型 → 不要
                 }
             }
         } catch (Throwable ignored) {}
@@ -412,10 +416,10 @@ final class LauncherLabelShadowHook {
             View p = v;
             for (int i = 0; i < 10 && p != null; i++) {
                 String cn = p.getClass().getName();
-                // 只认这两个「容器」类；不能用 folder. 前缀，
-                // 那会把 FolderIcon（文件夹图标自身）也放进来，导致文件夹名被加上阴影。
+                // 实际是「桌面工作区 / 文件夹」的一切容器。folder 包下的 Folder（文件夹容器）
+                // 与 FolderIcon（文件夹图标自身，含它的名字）都属于「桌面上的应用文字」。
                 if (cn.equals("com.android.launcher3.Workspace")
-                        || cn.equals("com.android.launcher3.folder.Folder")) {
+                        || cn.startsWith("com.android.launcher3.folder.")) {
                     return true;
                 }
                 android.view.ViewParent vp = p.getParent();
