@@ -46,6 +46,8 @@ final class LauncherLabelShadowHook {
     private static final String CLS_IBTV_EXT = "com.android.launcher3.IBubbleTextViewExt";
     /** BubbleTextView.mInfo：描述「这个应用名背后是什么」。 */
     private static final String FLD_MINFO = "mInfo";
+    /** BubbleTextView 用来裁剪文字画布的 Path；阴影被切成矩形就是它在作怪。 */
+    private static final String FLD_TEXT_CLIP_PATH = "mTextClipPath";
     /** 应用 / 快捷方式（含文件夹里的应用）——这些才是要加阴影的。 */
     private static final String CLS_WORKSPACE_ITEM_INFO = "com.android.launcher3.model.data.WorkspaceItemInfo";
     /** 文件夹图标自身——文件夹名不该有应用名阴影。 */
@@ -57,6 +59,15 @@ final class LauncherLabelShadowHook {
     private static volatile boolean sInstalled = false;
     private static volatile Class<?> sDeepShortcutCls = null;
     private static volatile java.lang.reflect.Field sInfoField = null;
+    /** BubbleTextView.mTextClipPath 反射句柄。 */
+    private static volatile java.lang.reflect.Field sTextClipField = null;
+    /** mTextClipPath 对象 -> 所属应用名 View；用于按「对象同一性」识别是谁在裁画布。 */
+    private static final java.util.Map<android.graphics.Path, java.lang.ref.WeakReference<TextView>>
+            sTextClipOwners = java.util.Collections.synchronizedMap(
+                    new java.util.WeakHashMap<android.graphics.Path, java.lang.ref.WeakReference<TextView>>());
+    /** 最近一次「替桌面应用名外扩裁剪」时的 Canvas save 深度；仅用于日志/自检。 */
+    private static volatile int sClipExpandedDepth = 0;
+
     private static volatile Class<?> sWorkspaceItemCls = null;
     private static volatile Class<?> sFolderInfoCls = null;
     /** 标记「已为该 View 开启过阴影越界」，避免重复设置。 */
@@ -92,6 +103,7 @@ final class LauncherLabelShadowHook {
         n += hookSetShadowLayer(mod, cl);
         n += hookRefreshShadowLayer(mod);
         n += hookApplyLabel(mod);
+        n += hookClipPath(mod, cl);
         ModuleLog.d(TAG, "installed hooks=" + n + " label=" + sLabelCls.getName());
         return n;
     }
@@ -161,6 +173,7 @@ final class LauncherLabelShadowHook {
                             Object r = chain.proceed();
                             try {
                                 Object self = chain.getThisObject();
+                                if (self instanceof TextView) rememberTextClipPath((TextView) self);
                                 if (self instanceof TextView && FeatureFlags.LAUNCHER_LABEL_SHADOW
                                         && !isNotDesktopLabel((View) self)) {
                                     applyTo((TextView) self);
@@ -254,10 +267,108 @@ final class LauncherLabelShadowHook {
         }
     }
 
+    /**
+     * ④ 去掉 BubbleTextView 对文字画布的「矩形裁剪」——阴影被裁成矩形的真正原因。
+     *
+     * <p>反编译得到的 {@code BubbleTextView#drawText(Canvas, boolean)} 里有两件事：
+     * <pre>
+     *   Rect frame = getResizeFrameBounds();
+     *   mTextClipRectF.set(0, frame.bottom, getWidth(), getHeight());  // 文字区域矩形
+     *   mTextClipPath.reset();
+     *   mTextClipPath.addRect(mTextClipRectF, Path.Direction.CW);      // ★ 矩形在这里固化
+     *   canvas.clipPath(mTextClipPath);                                // ★ 把画布裁成矩形
+     * </pre>
+     * 阴影一旦越出这个矩形就被硬切，所以看起来「阴影是个矩形」。
+     *
+     * <p>这是 View 内部直接对 Canvas 做的裁剪，{@code setClipChildren(false)} 完全无效。
+     * 而且行 2 的 {@code set(...)} 发生在 clipPath 之前，hook drawText 后置扩张只能影响
+     * <b>下一帧</b>、下一帧又被覆盖，永远差一拍。所以只能在 clipPath 处拦：
+     * 认出「这是某个桌面应用名的 mTextClipPath」，就替它裁一个<b>外扩后的矩形</b>
+     * （用 clipRect 而不是 clipPath，避免再撞上同一个 Path 造成递归）。
+     *
+     * <p>判定用「对象同一性」而非形状，避免误伤别处的裁剪。
+     */
+    private static int hookClipPath(final BlurEnhanceModule mod, final ClassLoader cl) {
+        try {
+            Method m = Reflect.method(android.graphics.Canvas.class, "clipPath",
+                    android.graphics.Path.class);
+            if (m == null) {
+                ModuleLog.d(TAG, "Canvas.clipPath not found");
+                return 0;
+            }
+            mod.hook(m)
+                    .setId("launcher.label.clippath")
+                    .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                    .intercept(new XposedInterface.Hooker() {
+                        @Override
+                        public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                            try {
+                                if (!FeatureFlags.LAUNCHER_LABEL_SHADOW) return chain.proceed();
+                                Object[] args = chain.getArgs().toArray();
+                                if (args.length < 1 || !(args[0] instanceof android.graphics.Path)) {
+                                    return chain.proceed(args);
+                                }
+                                TextView owner = ownerOfTextClipPath((android.graphics.Path) args[0]);
+                                if (owner == null) return chain.proceed(args);
+
+                                // 是桌面应用名的文字区域裁剪：换成裁一个外扩矩形，给阴影留地方。
+                                android.graphics.Canvas c =
+                                        (android.graphics.Canvas) chain.getThisObject();
+                                float pad = FeatureFlags.LAUNCHER_LABEL_SHADOW_RADIUS_DP
+                                        * densityOf(owner) + 2f;
+                                c.save();
+                                c.clipRect(-pad, -pad,
+                                        owner.getWidth() + pad, owner.getHeight() + pad);
+                                sClipExpandedDepth = c.getSaveCount();
+                                return null;   // 已自行完成裁剪，跳过原始 clipPath
+                            } catch (Throwable t) {
+                                ModuleLog.swallow("launcher.label.clippath", t);
+                                return chain.proceed();
+                            }
+                        }
+                    });
+            return 1;
+        } catch (Throwable t) {
+            ModuleLog.e(TAG, "hook clipPath failed", t);
+            return 0;
+        }
+    }
+
+    /** 若给定 Path 正是某个桌面应用名 View 的 mTextClipPath，返回该 View。 */
+    private static TextView ownerOfTextClipPath(android.graphics.Path path) {
+        java.lang.ref.WeakReference<TextView> ref = sTextClipOwners.get(path);
+        return ref == null ? null : ref.get();
+    }
+
+    /**
+     * 登记某个应用名 View 的 mTextClipPath，供 clipPath 拦截时识别。
+     * 在每次 {@code refreshShadowLayer} / {@code applyLabel} 之后调用，
+     * 保证映射里始终有最新的 Path 实例。
+     */
+    private static void rememberTextClipPath(TextView tv) {
+        try {
+            java.lang.reflect.Field f = sTextClipField;
+            if (f == null) {
+                f = Reflect.field(tv.getClass(), FLD_TEXT_CLIP_PATH);
+                if (f == null && sLabelCls != null) f = Reflect.field(sLabelCls, FLD_TEXT_CLIP_PATH);
+                if (f == null) return;
+                sTextClipField = f;
+            }
+            Object o = f.get(tv);
+            if (o instanceof android.graphics.Path) {
+                sTextClipOwners.put((android.graphics.Path) o,
+                        new java.lang.ref.WeakReference<TextView>(tv));
+            }
+        } catch (Throwable t) {
+            ModuleLog.swallow("launcher.label.clippath.remember", t);
+        }
+    }
+
     private static void applyTo(TextView tv) {
         try {
             float density = densityOf(tv);
             enableShadowOverflow(tv);
+            rememberTextClipPath(tv);
             tv.setShadowLayer(clampRadius(tv, FeatureFlags.LAUNCHER_LABEL_SHADOW_RADIUS_DP * density),
                     0f,
                     FeatureFlags.LAUNCHER_LABEL_SHADOW_DY_DP * density,
