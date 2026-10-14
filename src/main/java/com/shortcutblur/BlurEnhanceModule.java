@@ -311,11 +311,12 @@ public class BlurEnhanceModule extends XposedModule {
         try {
 
             GlassColorHook.install(this, loader);
-            if (FeatureFlags.LAUNCHER_LABEL_SHADOW) {
-                // 桌面应用名阴影（iOS 风）：与下面的模糊链路无关，独立安装。
-                r.total += LauncherLabelShadowHook.install(this, loader);
-            } else {
-                ModuleLog.d("INSTALL", "launcher label shadow disabled by flag, skip");
+            // 桌面应用名阴影（iOS 风）：与下面的模糊链路无关，独立安装。
+            // 注意：这里不受 Flag 限制 —— 开关在运行期判定，这样 GUI 里刚打开的开关
+            // 也能在桌面下一次重绑应用名时立刻生效，而不必等模块重新加载才挂得上 hook。
+            r.total += LauncherLabelShadowHook.install(this, loader);
+            if (!FeatureFlags.LAUNCHER_LABEL_SHADOW) {
+                ModuleLog.d("INSTALL", "launcher label shadow currently OFF (hook installed, idle)");
             }
             if (FeatureFlags.SHORTCUT_BLUR) {
                 r.total += ShortcutBlurFeature.install(loader, shortcutBlurHost);

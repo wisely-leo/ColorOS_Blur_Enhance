@@ -426,6 +426,7 @@ private SettingsStore store;
             + "  · 原生亮壁纸会直接清空阴影；现改为常驻，主题 / 壁纸 / 透明度动画都清不掉\n"
             + "  · 亮色文字配暗色阴影（iOS 观感），暗色文字配亮色阴影保证可读\n"
             + "  · 新增热更参数 launcher_label_shadow / _radius_dp / _dy_dp / _dark / _light\n"
+            + "  · 设置界面「功能」卡片新增同名开关（运行期即时生效，重启桌面可全局刷新）\n"
             + "· 修复键盘内发光观感（按「到圆角矩形边界的距离」重做）\n"
             + "  · 不再发粗：发光带宽度由 8dp 收窄到 3dp，贴边最亮、向内快速渐隐\n"
             + "  · 圆角不再熄灭：圆角改用径向渐变，与直边亮度连续（此前圆角整段没光）\n"
@@ -865,6 +866,28 @@ private SettingsStore store;
                         });
             });
 
+            final SoftUi.Row labelShadowRow = SoftUi.toggle(this, "桌面应用名阴影（iOS 风）",
+                    store.isLabelShadow(), null, 0f, false);
+            labelShadowRow.setOnToggle(v -> {
+                final SoftUi.Switch sw = labelShadowRow.switchView();
+                if (!v) {
+                    store.setLabelShadow(false);
+                    return;
+                }
+                SoftUi.confirm(shell,
+                        "启用桌面应用名阴影",
+                        "把桌面应用名换成 iOS 风的常驻柔和阴影：\n"
+                                + "· 亮 / 暗壁纸下都有阴影（原生只在暗壁纸下才有）\n"
+                                + "· 亮色文字配暗色阴影，暗色文字配亮色阴影\n"
+                                + "· 原生只为默认主题文字色生效，这里统一接管\n\n"
+                                + "开关在运行期即时生效：新绑定的应用名立刻带上阴影，已经画在屏上的图标"
+                                + "下次重绑（切页 / 换壁纸 / 密码解锁）或重启桌面后生效。\n\n确定启用吗？",
+                        "确定启用", "取消",
+                        () -> store.setLabelShadow(true),
+                        () -> {
+                            if (sw != null) sw.setCheckedImmediate(false);
+                        });
+            });
             SoftUi.Card cardFunc = SoftUi.card(this,
                     SoftUi.toggle(this, "Shortcut 实时模糊", store.isShortcut(),
                             v -> store.setShortcut(v)),
@@ -872,6 +895,7 @@ private SettingsStore store;
                             v -> store.setQsProbe(v)),
                     SoftUi.toggle(this, "相册强制白色主题", store.isGalleryLight(),
                             v -> store.setGalleryLight(v)),
+                    labelShadowRow,
                     recentsRow);
 
             View clockAlphaRow = SoftUi.slider(this, "时钟透明度",

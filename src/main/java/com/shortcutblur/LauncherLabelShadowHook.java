@@ -25,7 +25,9 @@ import java.lang.reflect.Method;
  *   <li>拦截 {@code TextView#setShadowLayer}：宿主是桌面应用名 View 时换成我们的参数。
  *       连「清除阴影」的调用也会被换成阴影 → 阴影不会被主题 / 壁纸 / 透明度动画清掉；</li>
  *   <li>在 {@code BubbleTextView#refreshShadowLayer()} 之后补一次，
- *       覆盖「从不调用 setShadowLayer」的机型 / 分支。</li>
+ *       覆盖「从不调用 setShadowLayer」的机型 / 分支；</li>
+ *   <li>在 {@code BubbleTextView#applyLabel(...)} 之后补一次，
+ *       让 GUI（{@code launcher_label_shadow} 开关）刚打开时能尽快铺到已有图标上。</li>
  * </ol>
  * 颜色按文字明暗自适应：亮色文字 → 暗色阴影（iOS 观感）；暗色文字（亮壁纸）→ 亮色阴影（保证可读）。
  * 全部参数走 FeatureFlags，可热更（LAUNCHER_LABEL_SHADOW*）。
@@ -67,6 +69,7 @@ final class LauncherLabelShadowHook {
         int n = 0;
         n += hookSetShadowLayer(mod, cl);
         n += hookRefreshShadowLayer(mod);
+        n += hookApplyLabel(mod);
         ModuleLog.d(TAG, "installed hooks=" + n + " label=" + sLabelCls.getName());
         return n;
     }
@@ -142,6 +145,45 @@ final class LauncherLabelShadowHook {
             return 1;
         } catch (Throwable t) {
             ModuleLog.e(TAG, "hook refreshShadowLayer failed", t);
+            return 0;
+        }
+    }
+
+    /**
+     * ③ 应用名绑定之后补一次。{@code applyLabel} 在每次给图标绑应用名时都会走
+     * （含全部应用列表滚动、换壁纸 / 换主题后的重绑），用来把「开关从关到开」
+     * 的新状态尽快铺到已经存在的图标上。
+     */
+    private static int hookApplyLabel(final BlurEnhanceModule mod) {
+        final Class<?> cls = sLabelCls;
+        if (cls == null) return 0;
+        try {
+            Method m = Reflect.method(cls, "applyLabel", 1);   // applyLabel(ItemInfoWithIcon)
+            if (m == null) {
+                ModuleLog.d(TAG, "applyLabel not found (ok)");
+                return 0;
+            }
+            mod.hook(m)
+                    .setId("launcher.label.bind")
+                    .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                    .intercept(new XposedInterface.Hooker() {
+                        @Override
+                        public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                            Object r = chain.proceed();
+                            try {
+                                Object self = chain.getThisObject();
+                                if (self instanceof TextView && FeatureFlags.LAUNCHER_LABEL_SHADOW) {
+                                    applyTo((TextView) self);
+                                }
+                            } catch (Throwable t) {
+                                ModuleLog.swallow("launcher.label.bind", t);
+                            }
+                            return r;
+                        }
+                    });
+            return 1;
+        } catch (Throwable t) {
+            ModuleLog.e(TAG, "hook applyLabel failed", t);
             return 0;
         }
     }

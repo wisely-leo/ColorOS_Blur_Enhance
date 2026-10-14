@@ -20,6 +20,7 @@ public final class SettingsStore {
     private static final String KEY_LOG         = "log";
     private static final String KEY_QS_PROBE    = "quicksearch_blur";
     private static final String KEY_GALLERY_LIGHT = "gallery_light";
+    private static final String KEY_LABEL_SHADOW  = "launcher_label_shadow";
 
     private static final String KEY_CLOCK_ICON_ALPHA = "clock_icon_alpha";
     private static final String KEY_CLOCK_TEXT_ALPHA = "clock_text_alpha";
@@ -82,6 +83,7 @@ public final class SettingsStore {
     public static final boolean DEF_LOG        = false;
     public static final boolean DEF_QS_PROBE   = true;
     public static final boolean DEF_GALLERY_LIGHT = true;
+    public static final boolean DEF_LABEL_SHADOW  = true;
     public static final float   DEF_CLOCK_ICON_ALPHA = 0.30f;
     public static final float   DEF_CLOCK_TEXT_ALPHA = 0.30f;
     public static final float   DEF_CLOCK_BRIGHTEN   = 1.25f;
@@ -192,6 +194,7 @@ public final class SettingsStore {
         sb.append("log_enabled=").append(isLog() ? 1 : 0).append("\n");
         sb.append("quicksearch_blur=").append(isQsProbe() ? 1 : 0).append("\n");
         sb.append("gallery_light=").append(isGalleryLight() ? 1 : 0).append("\n");
+        sb.append("launcher_label_shadow=").append(isLabelShadow() ? 1 : 0).append("\n");
         sb.append("clock_icon_alpha=").append(getClockIconAlpha()).append("\n");
         sb.append("clock_text_alpha=").append(getClockTextAlpha()).append("\n");
         sb.append("clock_brighten=").append(getClockBrighten()).append("\n");
@@ -218,6 +221,7 @@ public final class SettingsStore {
                 i.putExtra("log_enabled",   isLog() ? "1" : "0");
                 i.putExtra("quicksearch_blur", isQsProbe() ? "1" : "0");
                 i.putExtra("gallery_light", isGalleryLight() ? "1" : "0");
+                i.putExtra("launcher_label_shadow", isLabelShadow() ? "1" : "0");
                 i.putExtra("clock_icon_alpha", String.valueOf(getClockIconAlpha()));
                 i.putExtra("clock_text_alpha", String.valueOf(getClockTextAlpha()));
                 i.putExtra("clock_brighten", String.valueOf(getClockBrighten()));
@@ -245,6 +249,8 @@ public final class SettingsStore {
     public boolean isLog()         { return sp.getBoolean(KEY_LOG, DEF_LOG); }
     public boolean isQsProbe()     { return sp.getBoolean(KEY_QS_PROBE, DEF_QS_PROBE); }
     public boolean isGalleryLight(){ return sp.getBoolean(KEY_GALLERY_LIGHT, DEF_GALLERY_LIGHT); }
+    /** 桌面应用名阴影（iOS 风）。 */
+    public boolean isLabelShadow() { return sp.getBoolean(KEY_LABEL_SHADOW, DEF_LABEL_SHADOW); }
     public float   getClockIconAlpha(){ return sp.getFloat(KEY_CLOCK_ICON_ALPHA, DEF_CLOCK_ICON_ALPHA); }
     public float   getClockTextAlpha(){ return sp.getFloat(KEY_CLOCK_TEXT_ALPHA, DEF_CLOCK_TEXT_ALPHA); }
     public float   getClockBrighten(){ return sp.getFloat(KEY_CLOCK_BRIGHTEN, DEF_CLOCK_BRIGHTEN); }
@@ -278,6 +284,7 @@ public final class SettingsStore {
     public SettingsStore setLog(boolean v)        { sp.edit().putBoolean(KEY_LOG, v).apply(); syncToHost(); return this; }
     public SettingsStore setQsProbe(boolean v)    { sp.edit().putBoolean(KEY_QS_PROBE, v).apply(); syncToHost(); return this; }
     public SettingsStore setGalleryLight(boolean v) { sp.edit().putBoolean(KEY_GALLERY_LIGHT, v).apply(); syncToHost(); return this; }
+    public SettingsStore setLabelShadow(boolean v) { sp.edit().putBoolean(KEY_LABEL_SHADOW, v).apply(); syncToHost(); return this; }
     public SettingsStore setClockIconAlpha(float v){ sp.edit().putFloat(KEY_CLOCK_ICON_ALPHA, v).apply(); syncToHost(); return this; }
     public SettingsStore setClockTextAlpha(float v){ sp.edit().putFloat(KEY_CLOCK_TEXT_ALPHA, v).apply(); syncToHost(); return this; }
     public SettingsStore setClockBrighten(float v){ sp.edit().putFloat(KEY_CLOCK_BRIGHTEN, v).apply(); syncToHost(); return this; }
