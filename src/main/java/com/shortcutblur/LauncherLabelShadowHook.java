@@ -44,12 +44,21 @@ final class LauncherLabelShadowHook {
     private static final String CLS_DOUBLE_SHADOW_BTV = "com.android.launcher3.views.DoubleShadowBubbleTextView";
     /** 桌面应用名 View 的扩展接口，getTitleShadowFlag() 正是「这个名字该不该有阴影」的原生语义。 */
     private static final String CLS_IBTV_EXT = "com.android.launcher3.IBubbleTextViewExt";
+    /** BubbleTextView.mInfo：描述「这个应用名背后是什么」。 */
+    private static final String FLD_MINFO = "mInfo";
+    /** 应用 / 快捷方式（含文件夹里的应用）——这些才是要加阴影的。 */
+    private static final String CLS_WORKSPACE_ITEM_INFO = "com.android.launcher3.model.data.WorkspaceItemInfo";
+    /** 文件夹图标自身——文件夹名不该有应用名阴影。 */
+    private static final String CLS_FOLDER_INFO = "com.android.launcher3.model.data.FolderInfo";
 
     /** 阴影色相的固定部分：阴影恒为纯黑，只有 alpha（浓度）可调。 */
     private static final int SHADOW_RGB_BLACK = 0x000000;
 
     private static volatile boolean sInstalled = false;
     private static volatile Class<?> sDeepShortcutCls = null;
+    private static volatile java.lang.reflect.Field sInfoField = null;
+    private static volatile Class<?> sWorkspaceItemCls = null;
+    private static volatile Class<?> sFolderInfoCls = null;
     /** 标记「已为该 View 开启过阴影越界」，避免重复设置。 */
     private static final int SHADOW_OVERFLOW_TAG = 0x7f0e0462;
     private static volatile Class<?> sLabelCls = null;
@@ -72,6 +81,9 @@ final class LauncherLabelShadowHook {
             }
             sLabelCls = label;
             sDeepShortcutCls = Reflect.loadClass(CLS_DEEP_SHORTCUT_VIEW, cl);
+            sWorkspaceItemCls = Reflect.loadClass(CLS_WORKSPACE_ITEM_INFO, cl);
+            sFolderInfoCls = Reflect.loadClass(CLS_FOLDER_INFO, cl);
+            sInfoField = Reflect.field(label, FLD_MINFO);
         } catch (Throwable t) {
             ModuleLog.e(TAG, "resolve label class failed", t);
             return 0;
@@ -290,9 +302,39 @@ final class LauncherLabelShadowHook {
         if (isInDeepShortcut(v)) return true;
         // ② 任务栏 / 预测图标（DoubleShadowBubbleTextView）——它们自带双阴影逻辑。
         if (isDoubleShadow(v)) return true;
-        // ③ 正向白名单：只有「在桌面 / 文件夹容器里的应用名」才配阴影。
-        //    用父链判定容器类型，能同时排除全部应用列表、搜索结果、单应用弹窗等。
-        return !isInWorkspaceOrFolder(v);
+        // ③ 主判据：看这个应用名背后的 mInfo 是什么类型。
+        //      · WorkspaceItemInfo = 应用 / 快捷方式（含文件夹内的应用）→ 要阴影
+        //      · FolderInfo        = 文件夹图标的名字           → 不要阴影
+        //    这比父链类名可靠得多：不依赖包的层级、不受容器嵌套深度影响。
+        return !isAppInfo(v);
+    }
+
+    /**
+     * 判定 v 是不是「应用名」——依据 {@code BubbleTextView.mInfo} 的类型。
+     *
+     * <p>反编译确认：{@code mInfo} 声明为 {@code ItemInfoWithIcon}，
+     * 应用 / 快捷方式放的是 {@code WorkspaceItemInfo}，而文件夹图标的名字放的是别的类型。
+     * 原生代码自己也用 {@code instance-of WorkspaceItemInfo} 做这类区分。
+     *
+     * <p>父链白名单（Workspace / folder.*）保留为兜底：万一某机型 {@code mInfo} 取不到，
+     * 只要父链落在桌面工作区或文件夹内，仍按「应用名」处理。
+     */
+    private static boolean isAppInfo(View v) {
+        Class<?> wi = sWorkspaceItemCls;
+        Class<?> fi = sFolderInfoCls;
+        try {
+            java.lang.reflect.Field f = sInfoField;
+            if (f != null) {
+                Object info = f.get(v);
+                if (info != null) {
+                    if (wi != null && wi.isInstance(info)) return true;    // 应用 → 要
+                    if (fi != null && fi.isInstance(info)) return false;   // 文件夹 → 不要
+                    return false;                                          // 其他类型 → 不要
+                }
+            }
+        } catch (Throwable ignored) {}
+        // 兜底：父链判定
+        return isInWorkspaceOrFolder(v);
     }
 
     /**
@@ -370,8 +412,10 @@ final class LauncherLabelShadowHook {
             View p = v;
             for (int i = 0; i < 10 && p != null; i++) {
                 String cn = p.getClass().getName();
+                // 只认这两个「容器」类；不能用 folder. 前缀，
+                // 那会把 FolderIcon（文件夹图标自身）也放进来，导致文件夹名被加上阴影。
                 if (cn.equals("com.android.launcher3.Workspace")
-                        || cn.startsWith("com.android.launcher3.folder.")) {
+                        || cn.equals("com.android.launcher3.folder.Folder")) {
                     return true;
                 }
                 android.view.ViewParent vp = p.getParent();
