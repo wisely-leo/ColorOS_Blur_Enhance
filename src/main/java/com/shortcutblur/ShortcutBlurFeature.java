@@ -1018,16 +1018,22 @@ try {
                 ModuleLog.dv("ICONBLUR", "icon blur layer reused (already attached)");
                 return existing;
             }
-            View layer = new View(pbv.getContext());
+            final IconBlurOverlayView layer = new IconBlurOverlayView(pbv.getContext());
             layer.setClickable(false);
             layer.setFocusable(false);
             layer.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            ViewGroup.LayoutParams lp = new ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            // 关键：覆盖层只画「图标自己的矩形」，而不是铺满父容器。
+            // 以前用 MATCH_PARENT，等于把图标所在容器的整个矩形（含延伸到状态栏那一段）
+            // 一起送进 RenderEffect，导致状态栏区域的桌面被硬截断。
+            layer.bindTarget(pbv);
             int pvIndex = vg.indexOfChild(pbv);
+            int w = pbv.getWidth() > 0 ? pbv.getWidth() : ViewGroup.LayoutParams.WRAP_CONTENT;
+            int h = pbv.getHeight() > 0 ? pbv.getHeight() : ViewGroup.LayoutParams.WRAP_CONTENT;
+            ViewGroup.LayoutParams lp = new ViewGroup.LayoutParams(w, h);
             vg.addView(layer, pvIndex >= 0 ? pvIndex : vg.getChildCount(), lp);
             sIconBlurLayer = layer;
-            ModuleLog.dv("ICONBLUR", "icon blur layer added to " + vg.getClass().getSimpleName()
+            ModuleLog.dv("ICONBLUR", "icon blur overlay bound to icon "
+                    + pbv.getWidth() + "x" + pbv.getHeight()
                     + " idx=" + (pvIndex >= 0 ? pvIndex : vg.getChildCount()) + " children=" + vg.getChildCount());
             return layer;
         } catch (Throwable t) {
@@ -1251,7 +1257,7 @@ try {
             RenderEffect hit = sEffectCache.get(key);
             if (hit != null) return hit;
         }
-        RenderEffect e = RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.MIRROR);
+        RenderEffect e = RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP);
         synchronized (sEffectCache) {
             if (sEffectCache.size() >= 32) sEffectCache.clear();
             sEffectCache.put(key, e);

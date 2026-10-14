@@ -13,7 +13,7 @@ public final class BlurLib {
         if (v == null) return;
         try {
             RenderEffect fx = (radius > 0.5f)
-                    ? RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.MIRROR)
+                    ? RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP)
                     : null;
             v.setRenderEffect(fx);
         } catch (Throwable ignore) {}

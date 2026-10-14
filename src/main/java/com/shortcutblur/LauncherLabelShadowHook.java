@@ -38,11 +38,16 @@ final class LauncherLabelShadowHook {
     private static final String CLS_BUBBLE_TV = "com.android.launcher3.BubbleTextView";
     private static final String CLS_OPLUS_BTV = "com.android.launcher3.OplusBubbleTextView";
     private static final String CLS_TEXTVIEW = "android.widget.TextView";
+    /** 快捷菜单（长按图标弹出的快捷方式列表）的条目容器；它内部的应用名不是「桌面应用名」。 */
+    private static final String CLS_DEEP_SHORTCUT_VIEW = "com.android.launcher3.shortcuts.DeepShortcutView";
+    /** 任务栏 / 预测应用图标的双阴影 View，同样不属于桌面网格应用名。 */
+    private static final String CLS_DOUBLE_SHADOW_BTV = "com.android.launcher3.views.DoubleShadowBubbleTextView";
 
     /** 阴影色相的固定部分：阴影恒为纯黑，只有 alpha（浓度）可调。 */
     private static final int SHADOW_RGB_BLACK = 0x000000;
 
     private static volatile boolean sInstalled = false;
+    private static volatile Class<?> sDeepShortcutCls = null;
     private static volatile Class<?> sLabelCls = null;
 
     private LauncherLabelShadowHook() {}
@@ -62,6 +67,7 @@ final class LauncherLabelShadowHook {
                 return 0;
             }
             sLabelCls = label;
+            sDeepShortcutCls = Reflect.loadClass(CLS_DEEP_SHORTCUT_VIEW, cl);
         } catch (Throwable t) {
             ModuleLog.e(TAG, "resolve label class failed", t);
             return 0;
@@ -93,7 +99,8 @@ final class LauncherLabelShadowHook {
                             Object self = chain.getThisObject();
                             // 热路径过滤：非桌面应用名 View / 开关关闭时原样放行，零额外分配。
                             if (!(self instanceof TextView) || !isLabel(self)
-                                    || !FeatureFlags.LAUNCHER_LABEL_SHADOW) {
+                                    || !FeatureFlags.LAUNCHER_LABEL_SHADOW
+                                    || isNotDesktopLabel((View) self)) {
                                 return chain.proceed();
                             }
                             Object[] args = chain.getArgs().toArray();
@@ -133,7 +140,8 @@ final class LauncherLabelShadowHook {
                             Object r = chain.proceed();
                             try {
                                 Object self = chain.getThisObject();
-                                if (self instanceof TextView && FeatureFlags.LAUNCHER_LABEL_SHADOW) {
+                                if (self instanceof TextView && FeatureFlags.LAUNCHER_LABEL_SHADOW
+                                        && !isNotDesktopLabel((View) self)) {
                                     applyTo((TextView) self);
                                 }
                             } catch (Throwable t) {
@@ -172,7 +180,8 @@ final class LauncherLabelShadowHook {
                             Object r = chain.proceed();
                             try {
                                 Object self = chain.getThisObject();
-                                if (self instanceof TextView && FeatureFlags.LAUNCHER_LABEL_SHADOW) {
+                                if (self instanceof TextView && FeatureFlags.LAUNCHER_LABEL_SHADOW
+                                        && !isNotDesktopLabel((View) self)) {
                                     applyTo((TextView) self);
                                 }
                             } catch (Throwable t) {
@@ -210,6 +219,33 @@ final class LauncherLabelShadowHook {
      */
     private static int shadowColorFor(TextView tv) {
         return (FeatureFlags.LAUNCHER_LABEL_SHADOW_DARK & 0xFF000000) | SHADOW_RGB_BLACK;
+    }
+
+    /**
+     * 判断这个应用名 View 是不是「真正属于桌面」的那一个。
+     *
+     * <p>桌面网格 / 文件夹里的应用名用的是 {@code BubbleTextView}，但快捷菜单条目也是它
+     * （{@code DeepShortcutView.mBubbleText}）、任务栏用的是 {@code DoubleShadowBubbleTextView}。
+     * 给这些加阴影会污染快捷菜单（iOS 的快捷菜单本来就不带阴影）。所以沿父链排除：
+     */
+    private static boolean isNotDesktopLabel(View v) {
+        if (v == null) return true;
+        Class<?> ds = sDeepShortcutCls;
+        try {
+            if (ds != null) {
+                Class<?> dsc = Reflect.loadClass(CLS_DOUBLE_SHADOW_BTV, v.getClass().getClassLoader());
+                if (dsc != null && dsc.isInstance(v)) return true;
+            }
+        } catch (Throwable ignored) {}
+        try {
+            View p = v;
+            for (int i = 0; i < 6 && p != null; i++) {
+                if (ds != null && ds.isInstance(p)) return true;
+                android.view.ViewParent vp = p.getParent();
+                p = (vp instanceof View) ? (View) vp : null;
+            }
+        } catch (Throwable ignored) {}
+        return false;
     }
 
     private static float densityOf(View v) {
