@@ -1198,6 +1198,8 @@ private SettingsStore store;
                 cardImeBlur,
                 SoftUi.group(this, "时钟组件模糊"),
                 cardClock,
+                SoftUi.group(this, "桌面应用名阴影"),
+                cardLabelShadow,
                 SoftUi.group(this, "posteffect 模糊采样率"),
                 cardPost,
                 SoftUi.group(this, "其他"),
