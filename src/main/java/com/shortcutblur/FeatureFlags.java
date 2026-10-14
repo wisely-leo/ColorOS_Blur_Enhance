@@ -44,9 +44,11 @@ public final class FeatureFlags {
     // 这里改成常驻：亮色文字配暗色阴影（iOS 观感），暗色文字配亮色阴影（保证可读）。
     public static volatile boolean LAUNCHER_LABEL_SHADOW = true;
     /** 阴影模糊半径（dp）。iOS 约 2~3dp。0 = 硬阴影。 */
-    public static volatile float LAUNCHER_LABEL_SHADOW_RADIUS_DP = 2.5f;
+    /** 阴影半径（dp）。已固定，不再开放调节。 */
+    public static volatile float LAUNCHER_LABEL_SHADOW_RADIUS_DP = 4.0f;
     /** 阴影垂直偏移（dp，正值向下）。iOS 的阴影比原生多这一点点下坠感。 */
-    public static volatile float LAUNCHER_LABEL_SHADOW_DY_DP = 0.5f;
+    /** 阴影向下偏移（dp）。已固定，不再开放调节。 */
+    public static volatile float LAUNCHER_LABEL_SHADOW_DY_DP = 1.0f;
     /** 亮色文字时使用的阴影色（ARGB）。默认暗色，即 iOS 观感。 */
     public static volatile int LAUNCHER_LABEL_SHADOW_DARK = 0x70000000;
     /** 暗色文字（亮壁纸）时使用的阴影色（ARGB）。 */
@@ -354,17 +356,10 @@ public final class FeatureFlags {
                 break;
             case "launcher_label_shadow_radius":
             case "launcher_label_shadow_radius_dp":
-                try {
-                    float f = Float.parseFloat(v.trim());
-                    if (f >= 0f && f <= 40f) LAUNCHER_LABEL_SHADOW_RADIUS_DP = f;
-                } catch (Throwable ignored) {}
-                break;
             case "launcher_label_shadow_dy":
             case "launcher_label_shadow_dy_dp":
-                try {
-                    float f = Float.parseFloat(v.trim());
-                    if (f >= -20f && f <= 20f) LAUNCHER_LABEL_SHADOW_DY_DP = f;
-                } catch (Throwable ignored) {}
+                // 半径与向下偏移已固定为 4dp / 1dp，热更 key 保留但不再生效。
+                ModuleLog.d(TAG, "launcher_label_shadow radius/dy is fixed, ignore: " + k + "=" + v);
                 break;
             case "launcher_label_shadow_dark":
                 try { LAUNCHER_LABEL_SHADOW_DARK = (int) Long.parseLong(v.trim(), 16); } catch (Throwable ignored) {}
@@ -432,12 +427,7 @@ public final class FeatureFlags {
             if (v != null) { float old = IME_GLOW_CORNER_DP; applyKey("ime_glow_corner_dp", v); changed |= (old != IME_GLOW_CORNER_DP); }
             v = i.getStringExtra("launcher_label_shadow");
             if (v != null) { boolean old = LAUNCHER_LABEL_SHADOW; applyKey("launcher_label_shadow", v); changed |= (old != LAUNCHER_LABEL_SHADOW); }
-            v = i.getStringExtra("launcher_label_shadow_radius_dp");
-            if (v == null) v = i.getStringExtra("launcher_label_shadow_radius");
-            if (v != null) { float old = LAUNCHER_LABEL_SHADOW_RADIUS_DP; applyKey("launcher_label_shadow_radius_dp", v); changed |= (old != LAUNCHER_LABEL_SHADOW_RADIUS_DP); }
-            v = i.getStringExtra("launcher_label_shadow_dy_dp");
-            if (v == null) v = i.getStringExtra("launcher_label_shadow_dy");
-            if (v != null) { float old = LAUNCHER_LABEL_SHADOW_DY_DP; applyKey("launcher_label_shadow_dy_dp", v); changed |= (old != LAUNCHER_LABEL_SHADOW_DY_DP); }
+            // launcher_label_shadow_radius_dp / _dy_dp 已固定为 4dp / 1dp，不再从广播接收。
             v = i.getStringExtra("launcher_label_shadow_dark");
             if (v != null) { int old = LAUNCHER_LABEL_SHADOW_DARK; applyKey("launcher_label_shadow_dark", v); changed |= (old != LAUNCHER_LABEL_SHADOW_DARK); }
             v = i.getStringExtra("shortcut_blur_radius");

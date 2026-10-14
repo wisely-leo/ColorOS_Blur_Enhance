@@ -87,8 +87,8 @@ public final class SettingsStore {
     public static final boolean DEF_QS_PROBE   = true;
     public static final boolean DEF_GALLERY_LIGHT = true;
     public static final boolean DEF_LABEL_SHADOW  = true;
-    public static final float   DEF_LS_RADIUS = 2.5f;
-    public static final float   DEF_LS_DY     = 0.5f;
+    public static final float   DEF_LS_RADIUS = 4.0f;
+    public static final float   DEF_LS_DY     = 1.0f;
     public static final int     DEF_LS_DARK   = 0x70000000;
     public static final float   DEF_CLOCK_ICON_ALPHA = 0.30f;
     public static final float   DEF_CLOCK_TEXT_ALPHA = 0.30f;
@@ -263,8 +263,10 @@ public final class SettingsStore {
     public boolean isGalleryLight(){ return sp.getBoolean(KEY_GALLERY_LIGHT, DEF_GALLERY_LIGHT); }
     /** 桌面应用名阴影（iOS 风）。 */
     public boolean isLabelShadow() { return sp.getBoolean(KEY_LABEL_SHADOW, DEF_LABEL_SHADOW); }
-    public float   getLabelShadowRadius() { return sp.getFloat(KEY_LS_RADIUS, DEF_LS_RADIUS); }
-    public float   getLabelShadowDy()     { return sp.getFloat(KEY_LS_DY, DEF_LS_DY); }
+    /** 半径已固定为 DEF_LS_RADIUS（4dp），忽略历史偏好。 */
+    public float   getLabelShadowRadius() { return DEF_LS_RADIUS; }
+    /** 向下偏移已固定为 DEF_LS_DY（1dp），忽略历史偏好。 */
+    public float   getLabelShadowDy()     { return DEF_LS_DY; }
     public int     getLabelShadowDark()   { return sp.getInt(KEY_LS_DARK, DEF_LS_DARK); }
     public float   getClockIconAlpha(){ return sp.getFloat(KEY_CLOCK_ICON_ALPHA, DEF_CLOCK_ICON_ALPHA); }
     public float   getClockTextAlpha(){ return sp.getFloat(KEY_CLOCK_TEXT_ALPHA, DEF_CLOCK_TEXT_ALPHA); }
