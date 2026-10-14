@@ -46,12 +46,29 @@ final class LauncherLabelShadowHook {
     private static final String CLS_IBTV_EXT = "com.android.launcher3.IBubbleTextViewExt";
     /** BubbleTextView.mInfo：描述「这个应用名背后是什么」。 */
     private static final String FLD_MINFO = "mInfo";
+    /** WidgetNameHelper.widgetName：小组件名的 OplusBubbleTextView。 */
+    private static final String FLD_WIDGET_NAME = "widgetName";
     /** BubbleTextView 用来裁剪文字画布的 Path；阴影被切成矩形就是它在作怪。 */
     private static final String FLD_TEXT_CLIP_PATH = "mTextClipPath";
     /** 应用 / 快捷方式（含文件夹里的应用）——这些才是要加阴影的。 */
     private static final String CLS_WORKSPACE_ITEM_INFO = "com.android.launcher3.model.data.WorkspaceItemInfo";
     /** 文件夹图标自身——文件夹名不该有应用名阴影。 */
     private static final String CLS_FOLDER_INFO = "com.android.launcher3.model.data.FolderInfo";
+    /**
+     * 桌面小组件的标题。
+     *
+     * <p>反编译确认：{@code com.android.launcher3.widget.utils.WidgetNameHelper} 持有的
+     * {@code widgetName} 字段类型就是 {@code OplusBubbleTextView}，而
+     * {@code BaseLauncherAppWidgetHostView.mWidgetTitleView} 也是同一个类 ——
+     * 也就是说小组件名同样是 BubbleTextView 家族，只是它的 {@code mInfo} 装的是
+     * {@code LauncherAppWidgetInfo}（父类 {@code ItemInfo}，接不进 TextView 的
+     * {@code mInfo:ItemInfoWithIcon} 字段，所以通常为 null）→ 之前被判成「不要阴影」。
+     */
+    private static final String CLS_APPWIDGET_INFO = "com.android.launcher3.model.data.LauncherAppWidgetInfo";
+    /** 小组件标题 View 所在的宿主类，用于父链识别。 */
+    private static final String CLS_WIDGET_HOST_VIEW = "com.android.launcher3.widget.BaseLauncherAppWidgetHostView";
+    /** 小组件标题 View 的资源 id 名（布局里是 widget_name）。 */
+    private static final String CLS_WIDGET_HOST_VIEW_IMPL = "com.android.launcher3.widget.CustomLauncherAppWidgetHostView";
 
     /** 阴影色相的固定部分：阴影恒为纯黑，只有 alpha（浓度）可调。 */
     private static final int SHADOW_RGB_BLACK = 0x000000;
@@ -59,6 +76,7 @@ final class LauncherLabelShadowHook {
     private static volatile boolean sInstalled = false;
     private static volatile Class<?> sDeepShortcutCls = null;
     private static volatile java.lang.reflect.Field sInfoField = null;
+    private static volatile java.lang.reflect.Field sWidgetNameField = null;
     /** BubbleTextView.mTextClipPath 反射句柄。 */
     private static volatile java.lang.reflect.Field sTextClipField = null;
     /** mTextClipPath 对象 -> 所属应用名 View；用于按「对象同一性」识别是谁在裁画布。 */
@@ -70,6 +88,8 @@ final class LauncherLabelShadowHook {
 
     private static volatile Class<?> sWorkspaceItemCls = null;
     private static volatile Class<?> sFolderInfoCls = null;
+    private static volatile Class<?> sAppWidgetInfoCls = null;
+    private static volatile Class<?> sWidgetHostCls = null;
     /** 标记「已为该 View 开启过阴影越界」，避免重复设置。 */
     private static final int SHADOW_OVERFLOW_TAG = 0x7f0e0462;
     private static volatile Class<?> sLabelCls = null;
@@ -94,6 +114,8 @@ final class LauncherLabelShadowHook {
             sDeepShortcutCls = Reflect.loadClass(CLS_DEEP_SHORTCUT_VIEW, cl);
             sWorkspaceItemCls = Reflect.loadClass(CLS_WORKSPACE_ITEM_INFO, cl);
             sFolderInfoCls = Reflect.loadClass(CLS_FOLDER_INFO, cl);
+            sAppWidgetInfoCls = Reflect.loadClass(CLS_APPWIDGET_INFO, cl);
+            sWidgetHostCls = Reflect.loadClass(CLS_WIDGET_HOST_VIEW, cl);
             sInfoField = Reflect.field(label, FLD_MINFO);
         } catch (Throwable t) {
             ModuleLog.e(TAG, "resolve label class failed", t);
@@ -104,6 +126,8 @@ final class LauncherLabelShadowHook {
         n += hookRefreshShadowLayer(mod);
         n += hookApplyLabel(mod);
         n += hookClipPath(mod, cl);
+        n += hookOnSizeChanged(mod);
+        n += hookWidgetTitleBind(mod);
         ModuleLog.d(TAG, "installed hooks=" + n + " label=" + sLabelCls.getName());
         return n;
     }
@@ -364,6 +388,121 @@ final class LauncherLabelShadowHook {
         }
     }
 
+    /**
+     * ⑤ 切图标形态（大 / 中 / 正常）之后把阴影补回来。
+     *
+     * <p>反编译取证：{@code BubbleTextView#onSizeChanged(int,int,int,int)} 里依次做了
+     * {@code checkForEllipsis()} → {@code OperatorFontCustomization.checkAndSetMaxLines(...)}
+     * → 读 {@code mInfo} → {@code getIcon()}。也就是说「换图标尺寸」必然经过这里，
+     * 而尺寸变化后文字会被重新测量 / 重设，阴影（shadowLayer 是随字号与测量结果走的）
+     * 就丢了，且原生不会再补。
+     *
+     * <p>这里挂 {@code onSizeChanged}：执行完原生逻辑后，只要这个 View 还是
+     * 「桌面应用的文字」（应用名 / 文件夹名 / 小组件名），就重新 apply 一次。
+     * 这比继续追「谁改了布局」更可靠 —— 无论切尺寸走的是哪条链路，View 尺寸变了就一定会到这里。
+     */
+    private static int hookOnSizeChanged(final BlurEnhanceModule mod) {
+        final Class<?> cls = sLabelCls;
+        if (cls == null) return 0;
+        try {
+            Method m = Reflect.method(cls, "onSizeChanged", 4);
+            if (m == null) {
+                ModuleLog.d(TAG, "onSizeChanged not found");
+                return 0;
+            }
+            mod.hook(m)
+                    .setId("launcher.label.size")
+                    .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                    .intercept(new XposedInterface.Hooker() {
+                        @Override
+                        public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                            Object r = chain.proceed();
+                            try {
+                                Object self = chain.getThisObject();
+                                if (self instanceof TextView && FeatureFlags.LAUNCHER_LABEL_SHADOW
+                                        && !isNotDesktopLabel((View) self)) {
+                                    applyTo((TextView) self);
+                                }
+                            } catch (Throwable t) {
+                                ModuleLog.swallow("launcher.label.size", t);
+                            }
+                            return r;
+                        }
+                    });
+            return 1;
+        } catch (Throwable t) {
+            ModuleLog.e(TAG, "hook onSizeChanged failed", t);
+            return 0;
+        }
+    }
+
+    /**
+     * ⑥ 小组件标题绑定后补阴影。
+     *
+     * <p>{@code WidgetNameHelper#updateTitle(...)} / {@code #title(String, ItemInfo)}
+     * 是设置小组件名的入口，它走的是自己的一套（不经过 {@code applyLabel}），
+     * 所以之前在「桌面应用名」上生效的三个 hook 都覆盖不到小组件名。
+     * 这里直接挂 {@code WidgetNameHelper} 的 {@code updateTitle}，执行完补一次。
+     *
+     * <p>类被混淆或方法签名变化时安静跳过，不影响其它 hook。
+     */
+    private static int hookWidgetTitleBind(final BlurEnhanceModule mod) {
+        try {
+            Class<?> helper = Reflect.loadClass(
+                    "com.android.launcher3.widget.utils.WidgetNameHelper",
+                    LauncherLabelShadowHook.class.getClassLoader());
+            if (helper == null) {
+                ModuleLog.d(TAG, "WidgetNameHelper not found (ok)");
+                return 0;
+            }
+            Method m = Reflect.method(helper, "title", 2);   // title(String, ItemInfo)
+            if (m == null) m = Reflect.method(helper, "updateTitle", 2);
+            if (m == null) {
+                ModuleLog.d(TAG, "WidgetNameHelper.title not found (ok)");
+                return 0;
+            }
+            mod.hook(m)
+                    .setId("launcher.label.widget")
+                    .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                    .intercept(new XposedInterface.Hooker() {
+                        @Override
+                        public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                            Object r = chain.proceed();
+                            try {
+                                if (FeatureFlags.LAUNCHER_LABEL_SHADOW) {
+                                    TextView tv = widgetNameOf(chain.getThisObject());
+                                    if (tv != null) applyTo(tv);
+                                }
+                            } catch (Throwable t) {
+                                ModuleLog.swallow("launcher.label.widget", t);
+                            }
+                            return r;
+                        }
+                    });
+            return 1;
+        } catch (Throwable t) {
+            ModuleLog.e(TAG, "hook WidgetNameHelper failed", t);
+            return 0;
+        }
+    }
+
+    /** 从 {@code WidgetNameHelper} 实例上取出它的 {@code widgetName}（OplusBubbleTextView）。 */
+    private static TextView widgetNameOf(Object helper) {
+        try {
+            if (helper == null) return null;
+            java.lang.reflect.Field f = sWidgetNameField;
+            if (f == null) {
+                f = Reflect.field(helper.getClass(), FLD_WIDGET_NAME);
+                if (f == null) return null;
+                sWidgetNameField = f;
+            }
+            Object o = f.get(helper);
+            return (o instanceof TextView) ? (TextView) o : null;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
     private static void applyTo(TextView tv) {
         try {
             float density = densityOf(tv);
@@ -488,6 +627,7 @@ final class LauncherLabelShadowHook {
     private static boolean isDesktopTitle(View v) {
         Class<?> wi = sWorkspaceItemCls;
         Class<?> fi = sFolderInfoCls;
+        Class<?> ai = sAppWidgetInfoCls;
         try {
             java.lang.reflect.Field f = sInfoField;
             if (f != null) {
@@ -495,12 +635,42 @@ final class LauncherLabelShadowHook {
                 if (info != null) {
                     if (wi != null && wi.isInstance(info)) return true;   // 应用 → 要
                     if (fi != null && fi.isInstance(info)) return true;   // 文件夹名 → 也要
-                    return false;                                         // 其他类型 → 不要
+                    if (ai != null && ai.isInstance(info)) return true;   // 小组件名 → 也要
+                    // mInfo 有值但不是桌面三类：可能是全部应用列表 / 搜索项等，排除。
+                    // 但要先放行「小组件宿主里的标题」，它的 mInfo 常常为 null，
+                    // 有值时也可能不是上面几类，所以父链兜底放在返回 false 之前。
+                    if (isWidgetTitle(v)) return true;
+                    return false;
                 }
             }
         } catch (Throwable ignored) {}
-        // 兜底：父链判定
-        return isInWorkspaceOrFolder(v);
+        // 兜底：父链判定（工作区 / 文件夹 / 小组件宿主）
+        return isInWorkspaceOrFolder(v) || isWidgetTitle(v);
+    }
+
+    /**
+     * v 是不是「桌面小组件的标题」。
+     *
+     * <p>反编译确认 {@code BaseLauncherAppWidgetHostView.mWidgetTitleView} 是
+     * {@code OplusBubbleTextView}，并在构造时把它交给 {@code WidgetNameHelper}。
+     * 因此只需沿父链找小组件宿主 View 即可确认身份，不依赖 {@code mInfo}。
+     */
+    private static boolean isWidgetTitle(View v) {
+        try {
+            Class<?> host = sWidgetHostCls;
+            View p = v;
+            for (int i = 0; i < 6 && p != null; i++) {
+                String cn = p.getClass().getName();
+                if (host != null && host.isInstance(p)) return true;
+                if (cn.startsWith("com.android.launcher3.widget.")
+                        && cn.endsWith("AppWidgetHostView")) {
+                    return true;
+                }
+                android.view.ViewParent vp = p.getParent();
+                p = (vp instanceof View) ? (View) vp : null;
+            }
+        } catch (Throwable ignored) {}
+        return false;
     }
 
     /**
