@@ -30,7 +30,7 @@ public class SettingsActivity extends Activity {
     private static final int MAX_BG_MB = 15;
     private static final long MAX_BG_BYTES = MAX_BG_MB * 1024L * 1024L;
 
-    private static final String LOG_TAG_VER = "v46.1";
+    private static final String LOG_TAG_VER = "v46.2";
     static void lg(String s) {
         if (s == null) return;
         if (!App.logEnabled()) return;
@@ -420,14 +420,22 @@ private SettingsStore store;
     }
 
     private static final String CHANGELOG =
-            "v46.1\n"
-            + "· 修复切换悬浮键盘后再切回，键盘圆角未恢复的问题（切换后自动重新应用）\n"
-            + "· 修复键盘内发光描边的观感问题\n"
+            "v46.2\n"
+            + "· 新增「桌面应用名阴影（iOS 风）」\n"
+            + "  · 应用名常驻一层柔和阴影，亮 / 暗壁纸下都清晰（原生只在暗壁纸下才有）\n"
+            + "  · 原生亮壁纸会直接清空阴影；现改为常驻，主题 / 壁纸 / 透明度动画都清不掉\n"
+            + "  · 亮色文字配暗色阴影（iOS 观感），暗色文字配亮色阴影保证可读\n"
+            + "  · 新增热更参数 launcher_label_shadow / _radius_dp / _dy_dp / _dark / _light\n"
+            + "· 修复键盘内发光观感（按「到圆角矩形边界的距离」重做）\n"
             + "  · 不再发粗：发光带宽度由 8dp 收窄到 3dp，贴边最亮、向内快速渐隐\n"
-            + "  · 圆角不再熄灭：改为按「到圆角矩形边界的距离」计算亮度，圆角同样发光\n"
-            + "  · 恢复为「内发光」语义：始终是亮色发光，不再出现暗色内阴影\n"
+            + "  · 圆角不再熄灭：圆角改用径向渐变，与直边亮度连续（此前圆角整段没光）\n"
+            + "  · 恢复「内发光」语义：始终是亮色发光，不再出现暗色内阴影\n"
             + "  · 新增热更参数 ime_glow_alpha_dark / ime_glow_alpha_light / ime_glow_feather_dp\n"
             + "    / ime_glow_color_dark / ime_glow_color_light / ime_glow_corner_dp\n"
+            + "· 内部版本号同步至 v46.2\n"
+            + "\n"
+            + "v46.1\n"
+            + "· 修复切换悬浮键盘后再切回，键盘圆角未恢复的问题（切换后自动重新应用）\n"
             + "· 发热与耗电优化（重点修复长稳使用下的发热）\n"
             + "  · 日志输出不再逐条同步刷盘，改为批量写入，大幅降低存储 IO\n"
             + "  · 日志不再逐条写入系统日志，减少跨进程通信开销\n"
@@ -438,7 +446,7 @@ private SettingsStore store;
             + "  · 设置界面滚动时不再重绘屏幕外的玻璃层\n"
             + "  · 弹窗等热路径日志降级，仅在调试档输出\n"
             + "  · 补充若干缓存上限保护，避免长时间运行后缓慢膨胀\n"
-            + "  · 键盘发光描边改用渐变绘制，绘制次数从十余次降到 1～2 次\n"
+            + "  · 键盘发光描边按「边界距离」分块绘制，绘制次数由 12 层降为 6 次以内\n"
             + "  · 键盘模糊、卡片模糊的重试次数下调，避免反复重建造成的短时功耗尖峰\n"
             + "  · 设置界面玻璃层增加内容指纹复用，内容未变时不再重复整树重绘\n"
             + "  · 关闭菜单的模糊渐隐加入节流，不再逐帧重复创建模糊效果\n"

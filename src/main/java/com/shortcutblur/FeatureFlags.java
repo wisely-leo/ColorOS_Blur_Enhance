@@ -39,6 +39,19 @@ public final class FeatureFlags {
     /** 内发光跟随的圆角半径（dp）；< 0 表示与键盘自身的圆角保持一致。 */
     public static volatile float IME_GLOW_CORNER_DP = -1f;
 
+    // ---- 桌面应用名阴影（iOS 风常驻柔和阴影）----
+    // 原生只在「暗壁纸 + 默认主题色」时给应用名挂 8px / 0x4d000000 的阴影，亮壁纸直接清空；
+    // 这里改成常驻：亮色文字配暗色阴影（iOS 观感），暗色文字配亮色阴影（保证可读）。
+    public static volatile boolean LAUNCHER_LABEL_SHADOW = true;
+    /** 阴影模糊半径（dp）。iOS 约 2~3dp。0 = 硬阴影。 */
+    public static volatile float LAUNCHER_LABEL_SHADOW_RADIUS_DP = 2.5f;
+    /** 阴影垂直偏移（dp，正值向下）。iOS 的阴影比原生多这一点点下坠感。 */
+    public static volatile float LAUNCHER_LABEL_SHADOW_DY_DP = 0.5f;
+    /** 亮色文字时使用的阴影色（ARGB）。默认暗色，即 iOS 观感。 */
+    public static volatile int LAUNCHER_LABEL_SHADOW_DARK = 0x70000000;
+    /** 暗色文字（亮壁纸）时使用的阴影色（ARGB）。 */
+    public static volatile int LAUNCHER_LABEL_SHADOW_LIGHT = 0x40FFFFFF;
+
     // 快捷菜单（ShortcutBlur）模糊半径：图标模糊动画的目标半径。0=不模糊，上限 200。
     public static volatile float SHORTCUT_BLUR_RADIUS = 64.0f;
 
@@ -337,6 +350,29 @@ public final class FeatureFlags {
                     if (f >= -1f && f <= 100f) IME_GLOW_CORNER_DP = f;
                 } catch (Throwable ignored) {}
                 break;
+            case "launcher_label_shadow":
+                LAUNCHER_LABEL_SHADOW = parseBool(v, LAUNCHER_LABEL_SHADOW);
+                break;
+            case "launcher_label_shadow_radius":
+            case "launcher_label_shadow_radius_dp":
+                try {
+                    float f = Float.parseFloat(v.trim());
+                    if (f >= 0f && f <= 40f) LAUNCHER_LABEL_SHADOW_RADIUS_DP = f;
+                } catch (Throwable ignored) {}
+                break;
+            case "launcher_label_shadow_dy":
+            case "launcher_label_shadow_dy_dp":
+                try {
+                    float f = Float.parseFloat(v.trim());
+                    if (f >= -20f && f <= 20f) LAUNCHER_LABEL_SHADOW_DY_DP = f;
+                } catch (Throwable ignored) {}
+                break;
+            case "launcher_label_shadow_dark":
+                try { LAUNCHER_LABEL_SHADOW_DARK = (int) Long.parseLong(v.trim(), 16); } catch (Throwable ignored) {}
+                break;
+            case "launcher_label_shadow_light":
+                try { LAUNCHER_LABEL_SHADOW_LIGHT = (int) Long.parseLong(v.trim(), 16); } catch (Throwable ignored) {}
+                break;
             default:
                 ModuleLog.d(TAG, "unknown key: " + k);
                 break;
@@ -398,6 +434,18 @@ public final class FeatureFlags {
             v = i.getStringExtra("ime_glow_corner_dp");
             if (v == null) v = i.getStringExtra("ime_glow_corner");
             if (v != null) { float old = IME_GLOW_CORNER_DP; applyKey("ime_glow_corner_dp", v); changed |= (old != IME_GLOW_CORNER_DP); }
+            v = i.getStringExtra("launcher_label_shadow");
+            if (v != null) { boolean old = LAUNCHER_LABEL_SHADOW; applyKey("launcher_label_shadow", v); changed |= (old != LAUNCHER_LABEL_SHADOW); }
+            v = i.getStringExtra("launcher_label_shadow_radius_dp");
+            if (v == null) v = i.getStringExtra("launcher_label_shadow_radius");
+            if (v != null) { float old = LAUNCHER_LABEL_SHADOW_RADIUS_DP; applyKey("launcher_label_shadow_radius_dp", v); changed |= (old != LAUNCHER_LABEL_SHADOW_RADIUS_DP); }
+            v = i.getStringExtra("launcher_label_shadow_dy_dp");
+            if (v == null) v = i.getStringExtra("launcher_label_shadow_dy");
+            if (v != null) { float old = LAUNCHER_LABEL_SHADOW_DY_DP; applyKey("launcher_label_shadow_dy_dp", v); changed |= (old != LAUNCHER_LABEL_SHADOW_DY_DP); }
+            v = i.getStringExtra("launcher_label_shadow_dark");
+            if (v != null) { int old = LAUNCHER_LABEL_SHADOW_DARK; applyKey("launcher_label_shadow_dark", v); changed |= (old != LAUNCHER_LABEL_SHADOW_DARK); }
+            v = i.getStringExtra("launcher_label_shadow_light");
+            if (v != null) { int old = LAUNCHER_LABEL_SHADOW_LIGHT; applyKey("launcher_label_shadow_light", v); changed |= (old != LAUNCHER_LABEL_SHADOW_LIGHT); }
             v = i.getStringExtra("shortcut_blur_radius");
             if (v != null) { float old = SHORTCUT_BLUR_RADIUS; applyKey("shortcut_blur_radius", v); changed |= (old != SHORTCUT_BLUR_RADIUS); }
             v = i.getStringExtra("shortcut_window_blur_radius");

@@ -75,7 +75,7 @@ public class BlurEnhanceModule extends XposedModule {
 
     // ---- ② 常量：广播 / 版本 ----
     private static final String ACTION_SETCONF = "com.wiselyleo.blurenhance.SETCONF";
-    private static final String BUILD_TAG = "v46.1";
+    private static final String BUILD_TAG = "v46.2";
 
     // ---- ② 安装状态 ----
     private volatile ClassLoader cl;
@@ -311,6 +311,12 @@ public class BlurEnhanceModule extends XposedModule {
         try {
 
             GlassColorHook.install(this, loader);
+            if (FeatureFlags.LAUNCHER_LABEL_SHADOW) {
+                // 桌面应用名阴影（iOS 风）：与下面的模糊链路无关，独立安装。
+                r.total += LauncherLabelShadowHook.install(this, loader);
+            } else {
+                ModuleLog.d("INSTALL", "launcher label shadow disabled by flag, skip");
+            }
             if (FeatureFlags.SHORTCUT_BLUR) {
                 r.total += ShortcutBlurFeature.install(loader, shortcutBlurHost);
             } else {
