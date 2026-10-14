@@ -21,10 +21,7 @@ public final class GalleryLightHook {
         FORCE_TRUE.add("is_product_light_high");
     }
     private static volatile boolean installed = false;
-    // 目标类是否已 hook 的分项幂等位。
-    // 原先 installed 只在整体成功时置 true，若 hookTarget 中途抛异常导致 installed
-    // 保持 false，下一次 install 会再次进入 hookTarget，对已成功 hook 的方法重复挂载
-    // （重复回调 / 语义错乱）。这里单独标记「目标类已处理」，确保只 hook 一次。
+
     private static volatile boolean sTargetHooked = false;
     private GalleryLightHook() {}
 

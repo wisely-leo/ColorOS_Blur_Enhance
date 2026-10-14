@@ -35,7 +35,7 @@ public class SettingsActivity extends Activity {
         if (s == null) return;
         if (!App.logEnabled()) return;
         try { android.util.Log.i("SoftUi", s); } catch (Throwable ignored) {}
-        // 统一走 UiLog：持久 Writer + 2MB 轮转，避免每条日志 open/close 抖动与无限增长。
+
         UiLog.write(s);
     }
 private SettingsStore store;
@@ -43,16 +43,15 @@ private SettingsStore store;
 
     private android.view.ViewGroup uiRoot;
 
-    // 生命周期兜底：在途后台线程完成后回主线程时，若 Activity 已销毁则不再操作 UI。
     private volatile boolean destroyed = false;
 
     @Override
     protected void onDestroy() {
         destroyed = true;
-        // 断开静态/长生命周期引用，帮助 GC 回收 Activity 与其 View 树。
+
         try { SoftUi.clearBackdrop(); } catch (Throwable ignored) {}
         try { SoftUi.GlassSyncUnhook(); } catch (Throwable ignored) {}
-        // 移除可能残留的 Shizuku 权限回调监听器（它静态持有本 Activity）。
+
         try { Adb.removePending(); } catch (Throwable ignored) {}
         adbGateShowing = false;
         shell = null;
@@ -61,31 +60,21 @@ private SettingsStore store;
         super.onDestroy();
     }
 
-    // ===================== ADB(Shizuku) 权限门禁 =====================
-    // 每次打开 GUI 检测一次 ADB 权限；无权限则弹窗要求获取，
-    // 用户拒绝 / 获取失败 / 点了退出 -> finish() 关闭界面。
-    //
-    // 线程安全约定：
-    //  - Shizuku 权限回调在【非主线程】触发，且可能在 Activity 进入 onDestroy 之后到达；
-    //  - onDestroy 会把 uiRoot 置 null，因此在回调里【绝不能】直接 uiRoot.post(...)，
-    //    必须先经 safePost() 判空，避免空指针崩溃与对已销毁视图的无意义操作。
     private android.view.ViewGroup curRoot() {
         return destroyed ? null : uiRoot;
     }
 
-    /** 安全 post：Activity 已销毁或 uiRoot 已置 null 时静默丢弃。 */
     private void safePost(final Runnable r) {
         final android.view.ViewGroup root = curRoot();
         if (root == null || r == null) return;
         try {
             root.post(() -> {
-                if (destroyed || uiRoot == null) return;   // 执行前再判一次（post 是异步的）
+                if (destroyed || uiRoot == null) return;
                 try { r.run(); } catch (Throwable t) { lg("[safePost] 任务异常: " + t); }
             });
         } catch (Throwable ignored) {}
     }
 
-    // 门禁弹窗同一时刻只允许一个（防止用户连点导致 overlay 叠层）。
     private boolean adbGateShowing = false;
 
     private void checkAdbGate() {
@@ -105,7 +94,7 @@ private SettingsStore store;
         if (st == Adb.OK) return;
         adbGateShowing = true;
 
-        final boolean connected = (st == Adb.NO_PERM); // Shizuku 已运行，仅缺授权
+        final boolean connected = (st == Adb.NO_PERM);
         String title = "需要 ADB 权限";
         String msg;
         if (connected) {
@@ -119,7 +108,7 @@ private SettingsStore store;
                     + "若不获取权限，将退出设置界面。";
         }
         try {
-            // 统一在弹窗消失后清标记，保证同一时刻只有一个门禁弹窗。
+
             Runnable clearFlag = () -> adbGateShowing = false;
             SoftUi.confirm(uiRoot, title, msg,
                     connected ? "立即获取" : "重试",
@@ -128,7 +117,7 @@ private SettingsStore store;
                         clearFlag.run();
                         lg("[ADB门禁] 用户选择获取/重试");
                         if (!connected) {
-                            // Shizuku 未连接：重试一次检测；仍无则再次弹窗
+
                             safePost(() -> {
                                 if (Adb.status() == Adb.OK) {
                                     lg("[ADB门禁] 重试成功，放行");
@@ -139,9 +128,7 @@ private SettingsStore store;
                             });
                             return;
                         }
-                        // 已连接但未授权：走 Shizuku 授权流程
-                        // 注意：done 回调可能在 Activity 销毁后到达（见 Adb.request），
-                        // 这里不直接碰 uiRoot，统一交给 safePost 判空。
+
                         Adb.request(SettingsActivity.this, () -> safePost(() -> {
                             if (Adb.status() == Adb.OK) {
                                 lg("[ADB门禁] 授权成功，放行: " + Adb.label());
@@ -231,8 +218,7 @@ private SettingsStore store;
                 lg("shell inset ok: shellTop=" + shell.getTop() + " shellH=" + shell.getHeight());
             } catch (Throwable t) { lg("shell inset 失败: " + t); }
             lg("setContentView OK —— onCreate 完成");
-            // ADB(Shizuku) 权限门禁：无权限则弹窗要求获取，拒绝/获取失败则退出 GUI。
-            // 用 safePost：Activity 若在此刻已销毁则静默丢弃，避免校验已销毁视图。
+
             safePost(() -> checkAdbGate());
         } catch (Throwable t) {
             lg("!!! 异常: " + t);
@@ -550,7 +536,7 @@ private SettingsStore store;
         }
     }
     private void checkUpdate(final android.widget.TextView status) {
-        final SettingsStore st = store;   // 捕获局部引用，避免 onDestroy 置 null 后 NPE
+        final SettingsStore st = store;
         new Thread(() -> {
             String msg;
             HttpURLConnection conn = null;
@@ -576,7 +562,7 @@ private SettingsStore store;
                         while ((line = br.readLine()) != null) sb.append(line);
                         body = sb.toString();
                     } finally {
-                        // finally 关闭：中途抛异常时也要释放连接流。
+
                         if (br != null) { try { br.close(); } catch (Throwable ignored) {} }
                     }
                     String tag = jsonStr(body, "tag_name");
@@ -602,7 +588,7 @@ private SettingsStore store;
                 lg("checkUpdate fail: " + t);
                 msg = "!网络错误";
             } finally {
-                // 无论成功/异常都断开连接，避免 socket 滞留。
+
                 if (conn != null) { try { conn.disconnect(); } catch (Throwable ignored) {} }
             }
             final String m = msg;
@@ -744,8 +730,7 @@ private SettingsStore store;
 
             View imeRadiusRow = SoftUi.slider(this, "模糊程度", store.getImeBlurRadius(), 0f, 350f, "",
                     v -> store.setImeBlurRadius(v));
-            // 键盘圆角固定 25dp（见 FeatureFlags.IME_BLUR_CORNER_DP 注释）：
-            // 系统模糊圆角 >25dp 会触发 native 崩溃，故不再提供自定义滑块。
+
             View imeMaskRow = SoftUi.slider(this, "白灰蒙版强度", store.getImeBlurMask() * 100f, 0f, 100f, "%",
                     v -> store.setImeBlurMask(v / 100f));
 
@@ -811,10 +796,8 @@ private SettingsStore store;
                             v -> store.setGalleryLight(v)),
                     recentsRow);
 
-            // 桌面应用名阴影：独立卡片 + 可折叠参数（开启后才展开）
             final int[] lsDarkRef = { store.getLabelShadowDark() };
-            // 阴影的半径与向下偏移已固定（4dp / 1dp），不再开放给用户调节；
-            // 只保留「阴影浓度」，范围 0~100%（100% 即纯黑完全不透明）。
+
             final float[] lsDarkPctRef = { (lsDarkRef[0] >>> 24) / 255f * 100f };
             View lsDarkRow = SoftUi.slider(this, "阴影浓度",
                     lsDarkPctRef[0], 0, 100, "%",

@@ -27,14 +27,6 @@ public final class ImeBlurHook {
     private static volatile boolean sInstalled = false;
     private static volatile boolean sReflReady = false;
 
-    // 内发光（键盘边缘）的基色 / 强度 / 带宽 / 圆角全部由 FeatureFlags 提供，可热更调参：
-    //   IME_GLOW_COLOR_{DARK,LIGHT} / IME_GLOW_ALPHA_{DARK,LIGHT}
-    //   IME_GLOW_FEATHER_DP / IME_GLOW_CORNER_DP
-    // 语义是「内发光」——贴边最亮、向内渐隐（亮色），不是暗色内阴影。
-
-    // 注意：value 必须弱引用！sMgrOf 的 value（ViewRootManager）由 View 构造、强引用该 View，
-    // 若 value 为强引用会导致 WeakHashMap 的 key 永远不可达，entry 永久滞留（典型泄漏）。
-    // 弱引用后若被 GC，doBlur 会按需重建（见 doBlur 里 mgr==null 分支）。
     private static final java.util.WeakHashMap<View, java.lang.ref.WeakReference<Drawable>> sBlurOf =
             new java.util.WeakHashMap<>();
     private static final java.util.WeakHashMap<View, java.lang.ref.WeakReference<Object>> sMgrOf =
@@ -47,9 +39,7 @@ public final class ImeBlurHook {
     private static volatile int sLastUiMode = -1;
     private static volatile boolean sLastDark = false;
 
-    // IME 应用 Context，用于判断系统深浅色（按键覆盖色跟随深/浅色）。
     private static volatile android.content.Context sImeContext = null;
-
 
     private static volatile boolean sFloatProbeReady = false;
     private static volatile ClassLoader sHostCl = null;
@@ -117,33 +107,23 @@ public final class ImeBlurHook {
         ModuleLog.d(TAG, "float probe ready=" + sFloatProbeReady);
     }
 
-    // === 重要：这里【故意不做结果缓存】 ===
-    // 「是否悬浮键盘」会随用户切换悬浮/停靠而改变，而该切换【不改变屏幕朝向】。
-    // 若按 View 缓存结果（哪怕带 TTL），切换后的 doBlur 仍会读到旧值，表现为
-    // 「切成悬浮后再切回，键盘圆角不恢复」；更糟的是切换本身可能不再触发任何
-    // attach / visibility / theme / configchange 事件，旧值会被一直沿用下去。
-    // 探测只有 4 次反射，且 doBlur 仅在键盘状态变化时调用，实时探测代价可忽略。
     private static boolean isFloatKeyboard(View v) {
         if (v == null) return false;
         return probeFloatKeyboard(v);
     }
 
-    // === 悬浮 / 停靠切换感知 ===
-    // 切换悬浮键盘必然改变 IMV / skbRoot 的尺寸（浮窗 ↔ 全屏），但是否触发
-    // attach / visibility / theme / configchange 并不确定。因此把「布局尺寸变化」
-    // 作为键盘模式变化的可靠信号：尺寸一变就重新应用一次（内部会实时重新探测是否悬浮）。
     private static final java.util.WeakHashMap<View, Boolean> sLayoutWatched =
             new java.util.WeakHashMap<>();
     private static volatile long sLayoutReapplyAt = 0L;
     private static final long LAYOUT_REAPPLY_MIN_MS = 150L;
-    // 最近一次实际应用时的「悬浮」状态，用于判断尺寸变化后是否需要重做。
+
     private static volatile boolean sLastAppliedFloating = false;
     private static volatile boolean sHasAppliedFloating = false;
 
     private static void watchImeLayout(final View v) {
         if (v == null) return;
         synchronized (sLayoutWatched) {
-            if (sLayoutWatched.put(v, Boolean.TRUE) != null) return;   // 已注册过
+            if (sLayoutWatched.put(v, Boolean.TRUE) != null) return;
         }
         try {
             v.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
@@ -151,7 +131,7 @@ public final class ImeBlurHook {
                 public void onLayoutChange(View vv, int l, int t, int r, int b,
                                            int ol, int ot, int or, int ob) {
                     boolean sizeChanged = (r - l) != (or - ol) || (b - t) != (ob - ot);
-                    if (!sizeChanged) return;   // 只关心尺寸变化（悬浮切换必然改变尺寸）
+                    if (!sizeChanged) return;
                     long now = android.os.SystemClock.uptimeMillis();
                     if (now - sLayoutReapplyAt < LAYOUT_REAPPLY_MIN_MS) return;
                     sLayoutReapplyAt = now;
@@ -160,7 +140,7 @@ public final class ImeBlurHook {
                         View skb = tryGetSkbRoot(vv);
                         if (skb != null) target = skb;
                         boolean floating = probeFloatKeyboard(target);
-                        // 与应用过的一致 → 无需重做（避免 setBackground 引起的尺寸抖动形成循环）
+
                         if (sHasAppliedFloating && floating == sLastAppliedFloating) return;
                         ModuleLog.dv(TAG, "ime size changed " + (r - l) + "x" + (b - t)
                                 + " -> re-apply blur (floating " + sLastAppliedFloating
@@ -261,8 +241,7 @@ public final class ImeBlurHook {
                                XposedModuleInterface.PackageReadyParam param) {
         final ClassLoader cl = param.getClassLoader();
         if (cl == null) return;
-        // 幂等：避免 onPackageReady(PKG_YUYAN) 被框架重试/多进程多次调用时重复 hook
-        // （重复 hook 会让 onAttachedToWindow 每次触发多次 applyBlur）。
+
         if (sInstalled) return;
         synchronized (ImeBlurHook.class) {
             if (sInstalled) return;
@@ -433,9 +412,6 @@ public final class ImeBlurHook {
         }
     }
 
-    // 监听系统深浅色（uiMode）切换：切换后让键盘重新应用按键配色与背景。
-    // 键盘按键颜色由被 hook 的 Theme.e/d/k 返回，只有重新绘制才会生效，
-    // 因此在 InputMethodService 收到 configuration 变化时主动触发一次重绘。
     private static void installConfigChangeWatch(final BlurEnhanceModule mod, final ClassLoader cl) {
         try {
             Class<?> ims;
@@ -467,7 +443,7 @@ public final class ImeBlurHook {
                         public Object intercept(XposedInterface.Chain chain) throws Throwable {
                             Object r = chain.proceed();
                             try {
-                                // uiMode 可能变化，清掉缓存以便重新判定深浅色
+
                                 sLastUiMode = -1;
                                 reapply();
                                 View v = sLastView == null ? null : sLastView.get();
@@ -492,19 +468,15 @@ public final class ImeBlurHook {
         }
     }
 
-    // 键盘按键覆盖色：浅色模式=半透明白玻璃；深色模式=半透明黑玻璃。
-    // 之前写死为白色，导致切到深色模式后按键仍保持白色、与暗色背景割裂。
     private static final int KEY_OVERLAY_COLOR_LIGHT = 0xCCffffff;
     private static final int KEY_OVERLAY_COLOR_DARK = 0xCC1C1C1E;
 
     private static final String[] KEY_OVERLAY_METHODS = { "e", "d", "k" };
 
-    // 判断按键覆盖色时应使用的颜色（跟随系统深浅色）。
     private static int keyOverlayColor() {
         return isDarkCached() ? KEY_OVERLAY_COLOR_DARK : KEY_OVERLAY_COLOR_LIGHT;
     }
 
-    // 读取系统 uiMode 判断当前是否深色模式（带缓存，见 isDark(View)）。
     private static boolean isDarkCached() {
         try {
             android.content.Context ctx = sImeContext;
@@ -562,7 +534,6 @@ public final class ImeBlurHook {
 
         sLastView = new java.lang.ref.WeakReference<>(v);
 
-        // 保存 IME Context（用于判断系统深浅色 → 按键覆盖色跟随明暗）。
         try {
             android.content.Context ctx = v.getContext();
             if (ctx != null) sImeContext = ctx.getApplicationContext() != null
@@ -688,7 +659,7 @@ public final class ImeBlurHook {
                 mgr = sCtorViewRootManager.newInstance(v);
                 d = (Drawable) sGetBlurDrawable.invoke(mgr);
                 if (d == null) {
-                    // 发热优化：重试上限 5 → 3（每次重试都会重建 glow + LayerDrawable + setBackground）。
+
                     if (retry < 3) {
                         ModuleLog.dv(TAG, "doBlur: drawable null, retry#" + (retry + 1));
                         v.postDelayed(new Runnable() {
@@ -750,9 +721,7 @@ public final class ImeBlurHook {
             }
 
             float density = v.getResources().getDisplayMetrics().density;
-            // 内发光：亮度 =「到键盘圆角矩形边界的距离」的函数（贴边最亮、向内渐隐）。
-            // 基色为亮色（默认纯白），深浅色只调强度与带宽；圆角由相邻的径向渐变覆盖。
-            // 全部参数可热更（IME_GLOW_*）。
+
             int glowRgb = dark ? FeatureFlags.IME_GLOW_COLOR_DARK
                                : FeatureFlags.IME_GLOW_COLOR_LIGHT;
             int glowAlpha = dark ? FeatureFlags.IME_GLOW_ALPHA_DARK
@@ -771,8 +740,7 @@ public final class ImeBlurHook {
 
             v.setBackground(layer);
             v.invalidate();
-            // 记录本次应用到的「悬浮」状态，并监听尺寸变化，以便感知悬浮/停靠切换
-            // （切回停靠时圆角必须随之恢复）。
+
             sLastAppliedFloating = floating;
             sHasAppliedFloating = true;
             watchImeLayout(v);
