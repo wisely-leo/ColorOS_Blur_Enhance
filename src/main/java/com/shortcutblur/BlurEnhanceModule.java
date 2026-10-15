@@ -75,7 +75,7 @@ public class BlurEnhanceModule extends XposedModule {
 
     // ---- ② 常量：广播 / 版本 ----
     private static final String ACTION_SETCONF = "com.wiselyleo.blurenhance.SETCONF";
-    private static final String BUILD_TAG = "v46.2";
+    private static final String BUILD_TAG = "v46.3";
 
     // ---- ② 安装状态 ----
     private volatile ClassLoader cl;
@@ -329,6 +329,9 @@ public class BlurEnhanceModule extends XposedModule {
             } else {
                 ModuleLog.d("INSTALL", "recents blur disabled by flag, skip");
             }
+            // 卡片自动模糊：hook 卡片生命周期（onAttachedToWindow / initCardAfterInflate），
+            // 让卡片「出现即带模糊」，消除模糊延迟。不依赖 Flag 才能挂上（开关在运行期判定）。
+            r.total += CardBlurHook.install(this, loader);
             ModuleLog.d("INSTALL", "critical=" + r.critical + " total=" + r.total);
         } catch (Throwable t) {
             ModuleLog.e("INSTALL", "installHooks failed", t);

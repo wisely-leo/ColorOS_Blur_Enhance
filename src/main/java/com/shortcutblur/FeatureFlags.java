@@ -4,6 +4,9 @@ public final class FeatureFlags {
 
     public static volatile boolean RECENTS_BLUR = false;
     public static volatile boolean WIDGET_BLUR = true;
+    /** 桌面卡片模糊（附属「时钟组件模糊」）：桌面 OPPO 卡片（耗电看板等）高斯模糊背景。
+     *  注意：区别于 CARD_BLUR_*（那套是「快捷菜单卡片」弹窗模糊）。 */
+    public static volatile boolean LAUNCHER_CARD_BLUR = true;
     public static volatile boolean QUICKSEARCH_BLUR = true;
     public static volatile boolean GALLERY_LIGHT = true;
     public static volatile boolean POSTEFFECT = true;
@@ -152,6 +155,8 @@ public final class FeatureFlags {
         if (b != null) RECENTS_BLUR = b;
         b = readSettingBool(cr, "coloros_blur_feature_widget");
         if (b != null) WIDGET_BLUR = b;
+        b = readSettingBool(cr, "coloros_blur_feature_launcher_card");
+        if (b != null) LAUNCHER_CARD_BLUR = b;
         b = readSettingBool(cr, "coloros_blur_feature_posteffect");
         if (b != null) POSTEFFECT = b;
         b = readSettingBool(cr, "coloros_blur_feature_quicksearch");
@@ -203,6 +208,10 @@ public final class FeatureFlags {
             case "widget_blur":
             case "widget":
                 WIDGET_BLUR = parseBool(v, WIDGET_BLUR);
+                break;
+            case "launcher_card_blur":
+            case "launcher_card":
+                LAUNCHER_CARD_BLUR = parseBool(v, LAUNCHER_CARD_BLUR);
                 break;
             case "posteffect":
             case "post_effect":
@@ -450,6 +459,7 @@ public final class FeatureFlags {
         return "shortcut=" + SHORTCUT_BLUR
                 + " recents=" + RECENTS_BLUR
                 + " widget=" + WIDGET_BLUR
+                + " card=" + LAUNCHER_CARD_BLUR
                 + " posteffect=" + POSTEFFECT
                 + " qsBlur=" + QUICKSEARCH_BLUR
                 + " sampleScale=" + SAMPLE_SCALE

@@ -30,7 +30,7 @@ public class SettingsActivity extends Activity {
     private static final int MAX_BG_MB = 15;
     private static final long MAX_BG_BYTES = MAX_BG_MB * 1024L * 1024L;
 
-    private static final String LOG_TAG_VER = "v46.2";
+    private static final String LOG_TAG_VER = "v46.3";
     static void lg(String s) {
         if (s == null) return;
         if (!App.logEnabled()) return;
@@ -420,7 +420,19 @@ private SettingsStore store;
     }
 
     private static final String CHANGELOG =
-            "v46.2\n"
+            "v46.3\n"
+            + "· 新增「桌面卡片模糊」（耗电看板等）\n"
+            + "  · 卡片出现在桌面即自动挂上高斯模糊，无需手动触发\n"
+            + "  · 只处理已知卡片类并校验网格跨度，非卡片视图不受影响\n"
+            + "  · 内容变化时自动重新处理；内容未就绪则按指数退避重试（窗口约 18 秒）\n"
+            + "  · 已有结果的卡片不再重复扫描（切页 / 布局变化零开销），放弃后也不会反复重试\n"
+            + "  · 新增热更参数 launcher_card_blur；开关位于「时钟组件模糊」卡片内\n"
+            + "· 「桌面应用名阴影」适配卡片内标题（看板卡 / 集合卡标题同样常驻阴影）\n"
+            + "  · 卡片基类改为按需解析，避免解析时机过早导致该项永久失效\n"
+            + "· 日志：桌面卡片拆出独立标签，便于与快捷菜单卡片的日志区分\n"
+            + "· 内部版本号同步至 v46.3\n"
+            + "\n"
+            + "v46.2\n"
             + "· 新增「桌面应用名阴影」\n"
             + "  · 应用名常驻一层柔和阴影，亮 / 暗壁纸下都清晰（原生只在暗壁纸下才有）\n"
             + "  · 原生亮壁纸会直接清空阴影；现改为常驻，主题 / 壁纸 / 透明度动画都清不掉\n"
@@ -938,6 +950,14 @@ private SettingsStore store;
 
             sGlassToggleRowRef[0] = glassRows[0];
 
+            // 卡片模糊（附属「时钟组件模糊」）：给桌面 OPPO 卡片（耗电看板等）加高斯模糊背景。
+            // 依赖父开关：父关闭时本行置灰、卡片模糊随之停用。
+            final View cardBlurRow = SoftUi.toggle(this, "卡片模糊（耗电看板等）",
+                    store.isCardBlur(), v -> store.setCardBlur(v));
+            final Runnable syncCardEnable = () -> {
+                SoftUi.setRowEnabled(cardBlurRow, store.isWidget());
+            };
+
             View[] clockRows = SoftUi.toggleWithDependents(this, "时钟组件模糊",
                     store.isWidget(), v -> {
                         store.setWidget(v);
@@ -946,11 +966,15 @@ private SettingsStore store;
                             SoftUi.setToggleChecked(glassRows[0], false, true);
                         }
                         syncGlassEnable.run();
+                        syncCardEnable.run();
                     },
                     clockAlphaRow, clockBrightRow, glassRows[0]);
-            SoftUi.Card cardClock = SoftUi.card(this, clockRows[0], clockRows[1], glassRows[1]);
+            // 卡片模糊作为本卡片最后一行：必须排在「自定义混色」的展开区（glassRows[1]）之后，
+            // 否则展开混色时会被夹在「自定义混色」开关与它的子项之间（位置错乱）。
+            SoftUi.Card cardClock = SoftUi.card(this, clockRows[0], clockRows[1], glassRows[1], cardBlurRow);
 
             syncGlassEnable.run();
+            syncCardEnable.run();
             if (store.isWidget()) {
                 applyGlassLock.run();
             } else {

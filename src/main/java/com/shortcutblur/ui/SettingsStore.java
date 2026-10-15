@@ -31,6 +31,8 @@ public final class SettingsStore {
     private static final String KEY_CLOCK_GLASS      = "clock_glass";
     private static final String KEY_CLOCK_GLASS_BLEND= "clock_glass_blend";
     private static final String KEY_CLOCK_GLASS_MIX  = "clock_glass_mix";
+    /** 卡片模糊（附属「时钟组件模糊」）：给桌面 OPPO 卡片（耗电看板等）加高斯模糊背景。 */
+    private static final String KEY_CARD_BLUR        = "card_blur";
     private static final String KEY_THEME_MODE  = "theme_mode";
 
     private static final String KEY_LAST_VERCODE = "last_version_code";
@@ -94,6 +96,8 @@ public final class SettingsStore {
     public static final float   DEF_CLOCK_TEXT_ALPHA = 0.30f;
     public static final float   DEF_CLOCK_BRIGHTEN   = 1.25f;
     public static final boolean DEF_CLOCK_GLASS      = false;
+    /** 卡片模糊默认开（附属「时钟组件模糊」）。 */
+    public static final boolean DEF_CARD_BLUR        = true;
     private static final String[] HOST_PKGS_FALLBACK = {
             "com.coloros.alarmclock",
             "com.android.launcher",
@@ -195,6 +199,7 @@ public final class SettingsStore {
         sb.append("shortcut_blur=").append(isShortcut() ? 1 : 0).append("\n");
         sb.append("recents_blur=").append(isRecents() ? 1 : 0).append("\n");
         sb.append("widget_blur=").append(isWidget() ? 1 : 0).append("\n");
+        sb.append("launcher_card_blur=").append(isCardBlur() ? 1 : 0).append("\n");
         sb.append("posteffect=").append(isPostEffect() ? 1 : 0).append("\n");
         sb.append("sample_scale=").append(getSampleScale()).append("\n");
         sb.append("log_enabled=").append(isLog() ? 1 : 0).append("\n");
@@ -225,6 +230,7 @@ public final class SettingsStore {
                 i.putExtra("shortcut_blur", isShortcut()   ? "1" : "0");
                 i.putExtra("recents_blur",  isRecents()    ? "1" : "0");
                 i.putExtra("widget_blur",   isWidget()     ? "1" : "0");
+                i.putExtra("launcher_card_blur", isCardBlur() ? "1" : "0");
                 i.putExtra("posteffect",    isPostEffect() ? "1" : "0");
                 i.putExtra("sample_scale",  String.valueOf(getSampleScale()));
                 i.putExtra("log_enabled",   isLog() ? "1" : "0");
@@ -256,6 +262,8 @@ public final class SettingsStore {
     public boolean isShortcut()    { return sp.getBoolean(KEY_SHORTCUT, DEF_SHORTCUT); }
     public boolean isRecents()     { return sp.getBoolean(KEY_RECENTS, DEF_RECENTS); }
     public boolean isWidget()      { return sp.getBoolean(KEY_WIDGET, DEF_WIDGET); }
+    /** 卡片模糊（附属「时钟组件模糊」）。 */
+    public boolean isCardBlur()    { return sp.getBoolean(KEY_CARD_BLUR, DEF_CARD_BLUR); }
     public boolean isPostEffect()  { return sp.getBoolean(KEY_POSTEFFECT, DEF_POSTEFFECT); }
     public float   getSampleScale(){ return sp.getFloat(KEY_SAMPLE_SCALE, DEF_SAMPLE_SCALE); }
     public boolean isLog()         { return sp.getBoolean(KEY_LOG, DEF_LOG); }
@@ -281,6 +289,7 @@ public final class SettingsStore {
     public SettingsStore setShortcut(boolean v)   { sp.edit().putBoolean(KEY_SHORTCUT, v).apply(); syncToHost(); return this; }
     public SettingsStore setRecents(boolean v)    { sp.edit().putBoolean(KEY_RECENTS, v).apply(); syncToHost(); return this; }
     public SettingsStore setWidget(boolean v)     { sp.edit().putBoolean(KEY_WIDGET, v).apply(); syncToHost(); return this; }
+    public SettingsStore setCardBlur(boolean v)   { sp.edit().putBoolean(KEY_CARD_BLUR, v).apply(); syncToHost(); return this; }
     public SettingsStore setPostEffect(boolean v) { sp.edit().putBoolean(KEY_POSTEFFECT, v).apply(); syncToHost(); return this; }
     public SettingsStore setSampleScale(float v)  { sp.edit().putFloat(KEY_SAMPLE_SCALE, v).apply(); syncToHost(); return this; }
 

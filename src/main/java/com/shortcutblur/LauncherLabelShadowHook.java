@@ -81,6 +81,12 @@ final class LauncherLabelShadowHook {
 
     private static volatile boolean sInstalled = false;
     private static volatile Class<?> sDeepShortcutCls = null;
+    /** 桌面 OPPO 卡片基类（TitleCardView / GroupCardView 共同祖先）：
+     *  卡片标题也是 BubbleTextView 家族，但其 mInfo 为空、父链不含 Workspace，
+     *  会被原来的「非桌面项」逻辑误排除，故显式识别为桌面项。 */
+    private static volatile Class<?> sLauncherCardViewCls = null;
+    /** 卡片基类解析用的 ClassLoader（install 时记录，供首次未命中时的懒解析）。 */
+    private static volatile ClassLoader sLabelLoader = null;
     private static volatile java.lang.reflect.Field sInfoField = null;
     private static volatile java.lang.reflect.Field sWidgetNameField = null;
     /** BubbleTextView.mTextClipPath 反射句柄。 */
@@ -143,6 +149,8 @@ final class LauncherLabelShadowHook {
             sWidgetHostCls = Reflect.loadClass(CLS_WIDGET_HOST_VIEW, cl);
             sDoubleShadowCls = Reflect.loadClass(CLS_DOUBLE_SHADOW_BTV, cl);
             sWorkspaceCls = Reflect.loadClass("com.android.launcher3.Workspace", cl);
+            sLabelLoader = cl;
+            sLauncherCardViewCls = Reflect.loadClass("com.android.launcher3.card.LauncherCardView", cl);
             sInfoField = Reflect.field(label, FLD_MINFO);
         } catch (Throwable t) {
             ModuleLog.e(TAG, "resolve label class failed", t);
@@ -155,7 +163,7 @@ final class LauncherLabelShadowHook {
         n += hookClipPath(mod, cl);
         n += hookDrawText(mod);
         n += hookOnSizeChanged(mod);
-        n += hookWidgetTitleBind(mod);
+        n += hookWidgetTitleBind(mod, cl);
         ModuleLog.d(TAG, "installed hooks=" + n + " label=" + sLabelCls.getName());
         return n;
     }
@@ -576,11 +584,10 @@ final class LauncherLabelShadowHook {
      *
      * <p>类被混淆或方法签名变化时安静跳过，不影响其它 hook。
      */
-    private static int hookWidgetTitleBind(final BlurEnhanceModule mod) {
+    private static int hookWidgetTitleBind(final BlurEnhanceModule mod, final ClassLoader cl) {
         try {
             Class<?> helper = Reflect.loadClass(
-                    "com.android.launcher3.widget.utils.WidgetNameHelper",
-                    LauncherLabelShadowHook.class.getClassLoader());
+                    "com.android.launcher3.widget.utils.WidgetNameHelper", cl);
             if (helper == null) {
                 ModuleLog.d(TAG, "WidgetNameHelper not found (ok)");
                 return 0;
@@ -643,6 +650,48 @@ final class LauncherLabelShadowHook {
                     shadowColorFor(tv));
         } catch (Throwable t) {
             ModuleLog.swallow("launcher.label.apply", t);
+        }
+    }
+
+    /**
+     * 对外入口：给一棵视图子树里的所有「桌面应用名」TextView 补挂阴影。
+     *
+     * <p>用途：桌面 OPPO 卡片（耗电看板等）的标题由快应用自行设置文本，
+     * <b>不走</b> launcher 的 {@code applyLabel} / {@code refreshShadowLayer}，
+     * 因此既有 hook 覆盖不到，卡片标题没有阴影。卡片内容就绪
+     * （{@code initCardAfterInflate}）后调用本方法主动补挂。
+     *
+     * <p>幂等：内部 {@code applyTo} 只是重设 shadowLayer，重复调用无害；
+     * 判定用与其它路径一致的 {@code isNotDesktopLabel}（已含卡片白名单）。
+     */
+    static void applyToLabelTree(final View root) {
+        if (root == null || !FeatureFlags.LAUNCHER_LABEL_SHADOW) return;
+        try {
+            applyToLabelTreeRec(root, 0);
+        } catch (Throwable t) {
+            ModuleLog.swallow("launcher.label.tree", t);
+        }
+    }
+
+    private static void applyToLabelTreeRec(final View v, final int depth) {
+        if (v == null || depth > 16) return;
+        try {
+            if (v instanceof TextView && isLabel(v) && !isNotDesktopLabel(v)) {
+                final TextView tv = (TextView) v;
+                applyTo(tv);
+                // 卡片内容/setText 可能晚于本回调一帧，再补几次（幂等）。
+                scheduleReapply(tv);
+            }
+            if (v instanceof android.view.ViewGroup) {
+                android.view.ViewGroup g = (android.view.ViewGroup) v;
+                int n;
+                try { n = g.getChildCount(); } catch (Throwable t) { return; }
+                for (int i = 0; i < n; i++) {
+                    applyToLabelTreeRec(g.getChildAt(i), depth + 1);
+                }
+            }
+        } catch (Throwable t) {
+            ModuleLog.swallow("launcher.label.treeRec", t);
         }
     }
 
@@ -731,6 +780,23 @@ final class LauncherLabelShadowHook {
      * 再按「先便宜、后昂贵」的顺序判定 —— 类型判定 → mInfo 反射读 → 父链兜底。
      * 绝大多数桌面图标在读 mInfo 时就能直接得出结果，根本走不到父链兜底。
      */
+    /**
+     * 取「桌面卡片基类」（{@code com.android.launcher3.card.LauncherCardView}）。
+     *
+     * <p>首次未命中（install 时该类尚未进入 ClassLoader）时不放弃：下次判定时
+     * 再试一次 —— 否则一次失败会让卡片标题阴影<b>永久失效</b>（静默）。
+     */
+    private static Class<?> launcherCardViewCls() {
+        Class<?> c = sLauncherCardViewCls;
+        if (c != null) return c;
+        try {
+            c = Reflect.loadClass("com.android.launcher3.card.LauncherCardView", sLabelLoader);
+            if (c != null) sLauncherCardViewCls = c;
+        } catch (Throwable ignored) {
+        }
+        return c;
+    }
+
     private static boolean isNotDesktopLabel(View v) {
         if (v == null) return true;
         if (!isLabel(v)) return true;   // 最便宜：非 BubbleTextView 家族直接排除
@@ -739,9 +805,11 @@ final class LauncherLabelShadowHook {
         boolean inShortcut = false;
         boolean inWorkspace = false;
         boolean widgetHost = false;
+        boolean inCard = false;
         Class<?> ds = sDeepShortcutCls;
         Class<?> ws = sWorkspaceCls;
         Class<?> wh = sWidgetHostCls;
+        Class<?> lc = launcherCardViewCls();
         View p = v;
         for (int i = 0; i < MAX_PARENT_WALK && p != null; i++) {
             Class<?> c = p.getClass();
@@ -751,6 +819,11 @@ final class LauncherLabelShadowHook {
                 inWorkspace = true;
             } else if (wh != null && wh.isInstance(p)) {
                 widgetHost = true;
+            } else if (lc != null && lc.isInstance(p)) {
+                // ★ 桌面 OPPO 卡片（TitleCardView / GroupCardView 等）：
+                //   卡片标题挂载在 LauncherCardView 子树内，但其 mInfo 为空、
+                //   父链不含 Workspace，原逻辑会误判为「非桌面项」而排除阴影。
+                inCard = true;
             } else {
                 String cn = c.getName();
                 if (cn.startsWith("com.android.launcher3.folder.")) {
@@ -761,6 +834,7 @@ final class LauncherLabelShadowHook {
                 }
             }
             if (inShortcut && inWorkspace) break;   // 已足够判定，无需继续向上
+            if (inCard) break;                      // 卡片已判定，无需继续向上
             p = parentOf(p);
         }
 
@@ -769,6 +843,8 @@ final class LauncherLabelShadowHook {
         // ② 任务栏 / 预测图标：自带双阴影逻辑，不参与。
         Class<?> dsc = sDoubleShadowCls;
         if (dsc != null && dsc.isInstance(v)) return true;
+        // ②.5 桌面卡片标题：是桌面项，要挂阴影（否则卡片文字无阴影）。
+        if (inCard) return false;
 
         // ③ 主判据：mInfo 的类型（一次反射读，命中即出结果，不走父链）。
         Object info = null;
