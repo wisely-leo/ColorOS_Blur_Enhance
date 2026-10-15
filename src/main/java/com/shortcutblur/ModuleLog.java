@@ -51,28 +51,22 @@ public final class ModuleLog {
         d("INFO", detail);
     }
 
-    // ===== 异常收口（A2）=====
-    // 语义：替代遍布全模块的 catch (Throwable) {} —— 仍"静默"（不刷屏），
-    // 但**每个 tag 首次吞并时写一行日志**（方案 B），事后可查"哪里出过异常"。
-    // 与日志开关绑定：LOG_ENABLED=false 时直接返回，零开销（连 map 都不碰）。
-    // 发热优化③：上限保护。tag 集合理论有限，但长稳运行 + 动态 tag（含类名/数值拼接）
-    // 可能缓慢膨胀；超过 MAX_TAGS 后不再新增（已有的继续计数），防止无界增长。
     private static final int MAX_SWALLOW_TAGS = 512;
     private static final java.util.concurrent.ConcurrentHashMap<String,
             java.util.concurrent.atomic.AtomicInteger> SWALLOWED =
             new java.util.concurrent.ConcurrentHashMap<>();
-    /** 静默吞异常 + 计数；每个 tag 首次吞并写一行日志（首个即记录，之后仅计数）。 */
+
     public static void swallow(String tag, Throwable t) {
         if (!enabled()) return;
         try {
             java.util.concurrent.atomic.AtomicInteger c = SWALLOWED.get(tag);
             if (c == null) {
-                // 上限保护：达到 MAX_SWALLOW_TAGS 后不再新增 tag（直接返回，不写日志不计数）
+
                 if (SWALLOWED.size() >= MAX_SWALLOW_TAGS) return;
                 c = new java.util.concurrent.atomic.AtomicInteger();
                 java.util.concurrent.atomic.AtomicInteger prev = SWALLOWED.putIfAbsent(tag, c);
                 if (prev != null) c = prev;
-                // 首次：写一行（含异常类型与首帧位置），之后仅计数不刷屏。
+
                 if (prev == null) {
                     String detail = "swallow[" + tag + "] first";
                     if (t != null) {
@@ -93,12 +87,10 @@ public final class ModuleLog {
         }
     }
 
-    /** 丢弃计数（例如切前台时重置窗口）。 */
     public static void resetSwallowStats() {
         try { SWALLOWED.clear(); } catch (Throwable ignored) {}
     }
 
-    /** dump 计数快照（按 tag 降序），日志关闭时返回空串。 */
     public static String swallowStats() {
         if (!enabled()) return "";
         try {
@@ -117,16 +109,13 @@ public final class ModuleLog {
         }
     }
 
-    // 持久输出流：避免每条日志都 open/write/close（高频日志时是严重 IO 抖动）。
-    // 用 BufferedWriter 聚合，按行 flush；超过 MAX_LOG_BYTES 后截断重开，防无限增长。
     private static final long MAX_LOG_BYTES = 2L * 1024 * 1024;
     private static Writer logWriter = null;
     private static long logBytes = 0L;
 
     private static synchronized void write(String s) {
         if (!enabled()) return;
-        // 发热优化①：不再每条都进 logcat（Log.i 是跨进程 IPC + 内核 ring buffer 写入，
-        // 历史实测高频日志时占相当比例的 CPU）。只在 VERBOSE 调试档才同步打 logcat。
+
         if (VERBOSE) {
             try {
                 android.util.Log.i(TAG, s.trim());
@@ -138,7 +127,7 @@ public final class ModuleLog {
                 if (logFile == null) { broken = true; return; }
                 logBytes = logFile.length();
             }
-            // 超限轮转：截断重开（单文件封顶，避免累积占满空间）
+
             if (logBytes > MAX_LOG_BYTES) {
                 closeQuietly();
                 try { new FileOutputStream(logFile, false).close(); } catch (Throwable ignore) {}
@@ -156,15 +145,10 @@ public final class ModuleLog {
         }
     }
 
-    // 发热优化②：不再每行 flush。sdcard 是 FUSE 文件系统，逐行 flush 等同于
-    // 每次日志都做一次用户态↔FUSE↔内核往返（高频日志时是主要 IO 抖动来源）。
-    // 改为「累计 FLUSH_BYTES 字节 或 距上次 flush 超过 FLUSH_INTERVAL_MS」才刷一次。
-    // 崩溃丢日志的风险由尾部「日志开关/退出前 flush」覆盖，常规排查足够。
     private static final long FLUSH_INTERVAL_MS = 500L;
     private static long lastFlushAt = 0L;
     private static long lastFlushBytes = 0L;
 
-    /** 走持久缓冲流写一行，不 close。 */
     private static void rawLine(String s) {
         try {
             if (logWriter == null) {
@@ -174,7 +158,7 @@ public final class ModuleLog {
             }
             logWriter.write(s);
             logBytes += s.length();
-            // 批量刷盘：字节数达标 或 距上次 flush 超时
+
             long now = SystemClock.uptimeMillis();
             if (logBytes - lastFlushBytes >= 4096L || (now - lastFlushAt) >= FLUSH_INTERVAL_MS) {
                 logWriter.flush();
@@ -187,7 +171,6 @@ public final class ModuleLog {
         }
     }
 
-    /** 立即刷盘（日志开关关闭 / 进程退出 / 关键节点调用）。 */
     public static synchronized void flushNow() {
         try {
             if (logWriter != null) logWriter.flush();

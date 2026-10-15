@@ -31,7 +31,7 @@ public final class QuickSearchBlur {
     }
     private static volatile boolean sViewHookInstalled = false;
     private static void installViewHook(BlurEnhanceModule module, ClassLoader loader) throws Throwable {
-        if (sViewHookInstalled) return;   // 幂等：避免重复 hook
+        if (sViewHookInstalled) return;
         Method m = View.class.getDeclaredMethod("setBackground", Drawable.class);
         m.setAccessible(true);
         module.hookPublic("qs.view.setBg", (Executable) m, new XposedInterface.Hooker() {

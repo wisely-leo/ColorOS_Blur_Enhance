@@ -4,8 +4,7 @@ public final class FeatureFlags {
 
     public static volatile boolean RECENTS_BLUR = false;
     public static volatile boolean WIDGET_BLUR = true;
-    /** 桌面卡片模糊（附属「时钟组件模糊」）：桌面 OPPO 卡片（耗电看板等）高斯模糊背景。
-     *  注意：区别于 CARD_BLUR_*（那套是「快捷菜单卡片」弹窗模糊）。 */
+
     public static volatile boolean LAUNCHER_CARD_BLUR = true;
     public static volatile boolean QUICKSEARCH_BLUR = true;
     public static volatile boolean GALLERY_LIGHT = true;
@@ -28,64 +27,37 @@ public final class FeatureFlags {
     public static volatile boolean IME_BLUR = false;
     public static volatile int IME_BLUR_RADIUS = 100;
 
-    // 键盘边缘「内发光」的强度（alpha，0x00~0xFF）。0 = 关闭发光。
-    // 内发光 = 贴边最亮、向内渐隐（不是暗色内阴影），所以基色始终是亮色；
-    // 深浅两种背景只调整强度：深色键盘上白线对比强 → alpha 取低一点避免"抢眼"；
-    // 浅色键盘本身偏亮 → 白线需要更高 alpha 才看得出"发光"。
     public static volatile int IME_GLOW_ALPHA_DARK = 0x44;
     public static volatile int IME_GLOW_ALPHA_LIGHT = 0x60;
-    /** 内发光基色（RGB，仅低 24 位有效）。默认纯白。 */
+
     public static volatile int IME_GLOW_COLOR_DARK = 0xFFFFFF;
     public static volatile int IME_GLOW_COLOR_LIGHT = 0xFFFFFF;
-    /** 内发光带宽度（dp）：从边缘向内衰减完的总宽度。 */
+
     public static volatile float IME_GLOW_FEATHER_DP = 3f;
-    /** 内发光跟随的圆角半径（dp）；< 0 表示与键盘自身的圆角保持一致。 */
+
     public static volatile float IME_GLOW_CORNER_DP = -1f;
 
-    // ---- 桌面应用名阴影（常驻柔和阴影）----
-    // 原生只在「暗壁纸 + 默认主题色」时给应用名挂 8px / 0x4d000000 的阴影，亮壁纸直接清空；
-    // 这里改成常驻：亮色文字配暗色阴影，暗色文字配亮色阴影（保证可读）。
     public static volatile boolean LAUNCHER_LABEL_SHADOW = true;
-    /** 阴影模糊半径（dp）。0 = 硬阴影。 */
-    /** 阴影半径（dp）。已固定，不再开放调节。 */
-    public static volatile float LAUNCHER_LABEL_SHADOW_RADIUS_DP = 4.0f;
-    /** 阴影垂直偏移（dp，正值向下）。比原生多这一点点下坠感。 */
-    /** 阴影向下偏移（dp）。已固定，不再开放调节。 */
-    public static volatile float LAUNCHER_LABEL_SHADOW_DY_DP = 1.0f;
-    /** 亮色文字时使用的阴影色（ARGB）。默认暗色。 */
-    public static volatile int LAUNCHER_LABEL_SHADOW_DARK = 0x70000000;
-    /** 暗色文字（亮壁纸）时使用的阴影色（ARGB）。 */
 
-    // 快捷菜单（ShortcutBlur）模糊半径：图标模糊动画的目标半径。0=不模糊，上限 200。
+    public static volatile float LAUNCHER_LABEL_SHADOW_RADIUS_DP = 4.0f;
+
+    public static volatile float LAUNCHER_LABEL_SHADOW_DY_DP = 1.0f;
+
+    public static volatile int LAUNCHER_LABEL_SHADOW_DARK = 0x70000000;
+
     public static volatile float SHORTCUT_BLUR_RADIUS = 64.0f;
 
-    // 快捷菜单弹窗本体（popup 背景视图）模糊：用 Oplus 私有模糊 API 对弹窗背景视图挂背景渲染效果。
-    // 隶属于「Shortcut 实时模糊」(SHORTCUT_BLUR)：无独立开关，开了总开关即启用。
-    // 半径 = SHORTCUT_WINDOW_BLUR_RADIUS。
     public static volatile float SHORTCUT_WINDOW_BLUR_RADIUS = 64.0f;
 
-    // 快捷菜单卡片（一/二级）统一 Oplus 背景模糊（com.oplus.view.ViewRootManager）的混色。
-    // 与输入法模糊同源，用同一套私有 API；一级与二级共用同组参数以保证观感一致。
     public static volatile int CARD_BLUR_COLOR_LIGHT = 0x66FFFFFF;
     public static volatile int CARD_BLUR_COLOR_DARK = 0x99000000;
-    /** 卡片模糊圆角（dp）。直接决定模糊层圆角；<=0 时退回读取卡片面板自身圆角（COUI RoundFrameLayout）。 */
+
     public static volatile float CARD_BLUR_CORNER_DP = 16f;
 
-    /**
-     * 二级菜单（"更多功能"子菜单）背景模糊半径。独立于一级，可单独调大/调小。
-     * <=0 时回退用 SHORTCUT_BLUR_RADIUS（一级半径）。
-     */
     public static volatile float CARD_SECONDARY_BLUR_RADIUS = 96.0f;
 
-    // 一级（长按图标）卡片面板背景的不透明度（0x00~0xFF）。
-    // 面板背景本身多为浅色/白色，数值越高越"实"、越显白；降低可让模糊更透出来。
     public static volatile int CARD_PANEL_ALPHA = 0x99;
 
-    // 键盘圆角固定 25dp，不再允许用户自定义。
-    // 原因：系统 BackgroundBlurDrawable.setCornerRadius 在半径超过绘制区域
-    // 短边一半时会触发 native 路径构建越界崩溃（本机实测阈值 ≈25dp@560dpi），
-    // 且崩溃后必须 pm clear 输入法数据才能恢复（代价高）。
-    // 固定为 25dp 以远离临界值。
     public static final float IME_BLUR_CORNER_DP = 25f;
 
     public static volatile int IME_BLUR_COLOR_LIGHT = 0xC0DCDCDC;
@@ -277,7 +249,7 @@ public final class FeatureFlags {
                 } catch (Throwable ignored) {}
                 break;
             case "card_panel_alpha":
-                // 一级快捷菜单面板背景不透明度（0x00~0xFF）。数值越高越"实"、越显白。
+
                 try {
                     String s = v.trim();
                     int a = (s.startsWith("0x") || s.startsWith("0X"))
@@ -287,7 +259,7 @@ public final class FeatureFlags {
                 } catch (Throwable ignored) {}
                 break;
             case "card_secondary_blur_radius":
-                // 二级（"更多功能"）菜单模糊半径；<=0 时回退一级半径。
+
                 try {
                     float f = Float.parseFloat(v.trim());
                     CARD_SECONDARY_BLUR_RADIUS = f;
@@ -302,8 +274,7 @@ public final class FeatureFlags {
                 break;
             case "ime_blur_corner":
             case "ime_blur_corner_dp":
-                // 圆角已固定为 25dp（IME_BLUR_CORNER_DP 为 final 常量），
-                // 忽略外部传入值，防止越界崩溃。
+
                 break;
             case "ime_blur_color_light":
                 try { IME_BLUR_COLOR_LIGHT = (int) Long.parseLong(v.trim(), 16); } catch (Throwable ignored) {}
@@ -367,7 +338,7 @@ public final class FeatureFlags {
             case "launcher_label_shadow_radius_dp":
             case "launcher_label_shadow_dy":
             case "launcher_label_shadow_dy_dp":
-                // 半径与向下偏移已固定为 4dp / 1dp，热更 key 保留但不再生效。
+
                 ModuleLog.d(TAG, "launcher_label_shadow radius/dy is fixed, ignore: " + k + "=" + v);
                 break;
             case "launcher_label_shadow_dark":
@@ -436,7 +407,7 @@ public final class FeatureFlags {
             if (v != null) { float old = IME_GLOW_CORNER_DP; applyKey("ime_glow_corner_dp", v); changed |= (old != IME_GLOW_CORNER_DP); }
             v = i.getStringExtra("launcher_label_shadow");
             if (v != null) { boolean old = LAUNCHER_LABEL_SHADOW; applyKey("launcher_label_shadow", v); changed |= (old != LAUNCHER_LABEL_SHADOW); }
-            // launcher_label_shadow_radius_dp / _dy_dp 已固定为 4dp / 1dp，不再从广播接收。
+
             v = i.getStringExtra("launcher_label_shadow_dark");
             if (v != null) { int old = LAUNCHER_LABEL_SHADOW_DARK; applyKey("launcher_label_shadow_dark", v); changed |= (old != LAUNCHER_LABEL_SHADOW_DARK); }
             v = i.getStringExtra("shortcut_blur_radius");

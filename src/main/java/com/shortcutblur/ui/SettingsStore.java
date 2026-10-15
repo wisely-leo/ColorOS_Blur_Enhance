@@ -31,7 +31,7 @@ public final class SettingsStore {
     private static final String KEY_CLOCK_GLASS      = "clock_glass";
     private static final String KEY_CLOCK_GLASS_BLEND= "clock_glass_blend";
     private static final String KEY_CLOCK_GLASS_MIX  = "clock_glass_mix";
-    /** 卡片模糊（附属「时钟组件模糊」）：给桌面 OPPO 卡片（耗电看板等）加高斯模糊背景。 */
+
     private static final String KEY_CARD_BLUR        = "card_blur";
     private static final String KEY_THEME_MODE  = "theme_mode";
 
@@ -96,7 +96,7 @@ public final class SettingsStore {
     public static final float   DEF_CLOCK_TEXT_ALPHA = 0.30f;
     public static final float   DEF_CLOCK_BRIGHTEN   = 1.25f;
     public static final boolean DEF_CLOCK_GLASS      = false;
-    /** 卡片模糊默认开（附属「时钟组件模糊」）。 */
+
     public static final boolean DEF_CARD_BLUR        = true;
     private static final String[] HOST_PKGS_FALLBACK = {
             "com.coloros.alarmclock",
@@ -262,18 +262,18 @@ public final class SettingsStore {
     public boolean isShortcut()    { return sp.getBoolean(KEY_SHORTCUT, DEF_SHORTCUT); }
     public boolean isRecents()     { return sp.getBoolean(KEY_RECENTS, DEF_RECENTS); }
     public boolean isWidget()      { return sp.getBoolean(KEY_WIDGET, DEF_WIDGET); }
-    /** 卡片模糊（附属「时钟组件模糊」）。 */
+
     public boolean isCardBlur()    { return sp.getBoolean(KEY_CARD_BLUR, DEF_CARD_BLUR); }
     public boolean isPostEffect()  { return sp.getBoolean(KEY_POSTEFFECT, DEF_POSTEFFECT); }
     public float   getSampleScale(){ return sp.getFloat(KEY_SAMPLE_SCALE, DEF_SAMPLE_SCALE); }
     public boolean isLog()         { return sp.getBoolean(KEY_LOG, DEF_LOG); }
     public boolean isQsProbe()     { return sp.getBoolean(KEY_QS_PROBE, DEF_QS_PROBE); }
     public boolean isGalleryLight(){ return sp.getBoolean(KEY_GALLERY_LIGHT, DEF_GALLERY_LIGHT); }
-    /** 桌面应用名阴影。 */
+
     public boolean isLabelShadow() { return sp.getBoolean(KEY_LABEL_SHADOW, DEF_LABEL_SHADOW); }
-    /** 半径已固定为 DEF_LS_RADIUS（4dp），忽略历史偏好。 */
+
     public float   getLabelShadowRadius() { return DEF_LS_RADIUS; }
-    /** 向下偏移已固定为 DEF_LS_DY（1dp），忽略历史偏好。 */
+
     public float   getLabelShadowDy()     { return DEF_LS_DY; }
     public int     getLabelShadowDark()   { return sp.getInt(KEY_LS_DARK, DEF_LS_DARK); }
     public float   getClockIconAlpha(){ return sp.getFloat(KEY_CLOCK_ICON_ALPHA, DEF_CLOCK_ICON_ALPHA); }
@@ -295,14 +295,13 @@ public final class SettingsStore {
 
     public boolean isImeBlur()        { return sp.getBoolean(KEY_IME_BLUR, DEF_IME_BLUR); }
     public float   getImeBlurRadius() { return sp.getFloat(KEY_IME_BLUR_RADIUS, DEF_IME_BLUR_RADIUS); }
-    // 键盘圆角固定 25dp，不再由用户设置（见 FeatureFlags.IME_BLUR_CORNER_DP）。
+
     public float   getImeBlurCornerDp(){ return 25f; }
     public SettingsStore setImeBlur(boolean v)    { sp.edit().putBoolean(KEY_IME_BLUR, v).apply(); syncToHost(); return this; }
     public SettingsStore setImeBlurRadius(float v){ sp.edit().putFloat(KEY_IME_BLUR_RADIUS, v).apply(); syncToHost(); return this; }
     public float   getImeBlurMask()   { return sp.getFloat(KEY_IME_BLUR_MASK, DEF_IME_BLUR_MASK); }
     public SettingsStore setImeBlurMask(float v){ sp.edit().putFloat(KEY_IME_BLUR_MASK, v).apply(); syncToHost(); return this; }
-    // 模糊半径：接口保留，但当前不开放用户自定义（不读 sp 用户值，固定默认 64）。
-    // 如需重新开放，把下列 return 改回 sp.getFloat(KEY_..., DEF_...) 并在设置页加回滑块即可。
+
     public float   getShortcutBlurRadius(){ return DEF_SHORTCUT_BLUR_RADIUS; }
     public SettingsStore setShortcutBlurRadius(float v){ sp.edit().putFloat(KEY_SHORTCUT_BLUR_RADIUS, v).apply(); syncToHost(); return this; }
     public float   getRecentsBlurRadius(){ return DEF_RECENTS_BLUR_RADIUS; }
