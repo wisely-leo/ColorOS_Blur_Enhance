@@ -60,7 +60,7 @@ public class BlurEnhanceModule extends XposedModule {
     private static final int F_ICON_ANIM = 1 << 3;
 
     private static final String ACTION_SETCONF = "com.wiselyleo.blurenhance.SETCONF";
-    private static final String BUILD_TAG = "v46.3";
+    private static final String BUILD_TAG = "v46.4";
 
     private volatile ClassLoader cl;
     private volatile boolean installed = false;

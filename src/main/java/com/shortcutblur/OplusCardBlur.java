@@ -12,7 +12,6 @@ import java.util.WeakHashMap;
 final class OplusCardBlur {
 
     private static final String TAG = "CARDBLUR";
-    private static final String CLS_VRM = "com.oplus.view.ViewRootManager";
 
     private static volatile Constructor<?> sCtor;
     private static volatile Method sGetDrawable;
@@ -40,8 +39,8 @@ final class OplusCardBlur {
             if (sTried && !sReady) return false;
             sTried = true;
             try {
-                Class<?> cls = Reflect.loadClass(CLS_VRM, null);
-                if (cls == null) cls = Class.forName(CLS_VRM);
+                Class<?> cls = Reflect.loadClass(Symbols.CLS_VRM, null);
+                if (cls == null) cls = Class.forName(Symbols.CLS_VRM);
                 sCtor = cls.getConstructor(View.class);
                 sGetDrawable = cls.getMethod("getBackgroundBlurDrawable");
                 sSetRadius = cls.getMethod("setBlurRadius", int.class);

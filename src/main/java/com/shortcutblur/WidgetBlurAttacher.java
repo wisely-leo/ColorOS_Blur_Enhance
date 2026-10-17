@@ -41,6 +41,14 @@ public class WidgetBlurAttacher {
         } catch (Throwable ignored) {}
     }
 
+    private static void retryLater(final String tag, final View root,
+                                   final ClassLoader cl, final int attempt) {
+        if (attempt < ATTACH_MAX_RETRY && root != null) {
+            root.postDelayed(new Runnable() {
+                @Override public void run() { attach(tag, root, cl, attempt + 1); }
+            }, ATTACH_RETRY_MS);
+        }
+    }
     private static void attach(final String tag, final View root, final ClassLoader cl, final int attempt) {
         if (root == null) return;
         try {
@@ -102,11 +110,7 @@ public class WidgetBlurAttacher {
                 }
             }
             if (container == null) {
-                if (attempt < ATTACH_MAX_RETRY && root != null) {
-                    root.postDelayed(new Runnable() {
-                        @Override public void run() { attach(tag, root, cl, attempt + 1); }
-                    }, ATTACH_RETRY_MS);
-                }
+                retryLater(tag, root, cl, attempt);
                 return;
             }
             if (container == host) {
@@ -114,11 +118,7 @@ public class WidgetBlurAttacher {
                 return;
             }
             if (container.getWidth() <= 0 || container.getHeight() <= 0) {
-                if (attempt < ATTACH_MAX_RETRY && root != null) {
-                    root.postDelayed(new Runnable() {
-                        @Override public void run() { attach(tag, root, cl, attempt + 1); }
-                    }, ATTACH_RETRY_MS);
-                }
+                retryLater(tag, root, cl, attempt);
                 return;
             }
             View promoted = promoteContainerIfNeeded(container, host);

@@ -41,6 +41,17 @@ public final class Symbols {
     public static final String CLS_BLUR_PARAM = "com.oplus.posteffect.BlurParam";
     public static final String CLS_BLUR_PATH_PROVIDER = "com.oplus.posteffect.path.BlurDrawablePathProvider";
 
+    public static final String PKG_CARD = "com.android.launcher3.card.";
+
+    public static final String CLS_CARD_BASE = PKG_CARD + "LauncherCardView";
+
+    public static final String CLS_TITLE_CARD = PKG_CARD + "TitleCardView";
+    public static final String CLS_GROUP_CARD = PKG_CARD + "groupcard.GroupCardView";
+
+    public static final String[] CARD_BLUR_SUFFIXES = {
+            "TitleCardView", "LauncherCardView", "EngineCardView", "CommonCardView",
+    };
+
     public static final String CLS_VRM = "com.oplus.view.ViewRootManager";
 
 public static final String CLS_RUN_TIME_CONFIG = "com.heytap.quicksearchbox.core.constant.RunTimeConfig";

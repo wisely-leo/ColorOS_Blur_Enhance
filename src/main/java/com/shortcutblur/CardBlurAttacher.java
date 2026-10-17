@@ -42,6 +42,61 @@ public final class CardBlurAttacher {
         synchronized (sPending) { sPending.remove(card); }
     }
 
+    private static boolean applyBlurToTarget(View card, Object launcher, View target) {
+
+        float density = densityOf(target);
+        float radiusPx = DEFAULT_RADIUS_DP * density;
+        try { target.setTag(ID_KEY_BLUR_VIEW_RADIUS, Float.valueOf(radiusPx)); }
+        catch (Throwable t) { ModuleLog.swallow("cardblur.radius", t); }
+
+        int cleared = 0;
+
+        if (isBlurBackground(target.getBackground())) {
+            if (ModuleLog.enabled()) {
+                ModuleLog.d(TAG, "skip already blurred: " + target.getClass().getSimpleName()
+                        + " " + target.getWidth() + "x" + target.getHeight());
+            }
+            synchronized (sSettled) { sSettled.put(card, Boolean.TRUE); }
+            return true;
+        }
+
+        Drawable originalBg = target.getBackground();
+
+        boolean ok = createBlurViaManager(launcher, target);
+        if (!ok) return false;
+
+        boolean bgReplaced = isBlurBackground(target.getBackground());
+        if (!bgReplaced) {
+
+            try {
+                if (originalBg != null && target.getBackground() != originalBg) {
+                    target.setBackground(originalBg);
+                    cleared = 2;
+                }
+            } catch (Throwable t) { ModuleLog.swallow("cardblur.restoreBg", t); }
+            try { target.invalidate(); } catch (Throwable ignored) {}
+
+            if (ModuleLog.enabled()) {
+                ModuleLog.d(TAG, "L40/GUARD createBlurForView not replaced, bg restored (rollback=" + cleared
+                        + ", target=" + target.getClass().getSimpleName()
+                        + " " + target.getWidth() + "x" + target.getHeight() + ")");
+            }
+            return false;
+        }
+
+        try { target.invalidate(); } catch (Throwable ignored) {}
+
+        synchronized (sSettled) { sSettled.put(card, Boolean.TRUE); }
+        if (ModuleLog.enabled()) {
+            ModuleLog.d(TAG, "card blur attached: outer=" + card.getClass().getSimpleName()
+                    + " " + card.getWidth() + "x" + card.getHeight()
+                    + " | target=" + target.getClass().getSimpleName()
+                    + " " + target.getWidth() + "x" + target.getHeight()
+                    + " radius=" + radiusPx
+                    + " clearedBg=" + cleared + " bgReplaced=" + bgReplaced);
+        }
+        return true;
+    }
     private static void attach(final View card, final ClassLoader cl, final int attempt) {
         if (card == null) return;
 
@@ -92,37 +147,9 @@ public final class CardBlurAttacher {
                 return;
             }
 
-            float density = densityOf(target);
-            float radiusPx = DEFAULT_RADIUS_DP * density;
-            try { target.setTag(ID_KEY_BLUR_VIEW_RADIUS, Float.valueOf(radiusPx)); }
-            catch (Throwable t) { ModuleLog.swallow("cardblur.radius", t); }
-
-            int cleared = 0;
-
-            boolean ok = createBlurViaManager(launcher, target);
-            if (!ok) {
-                keepPending = retry(card, cl, attempt, "createBlurForView false");
+            if (!applyBlurToTarget(card, launcher, target)) {
+                keepPending = retry(card, cl, attempt, "blur apply failed");
                 return;
-            }
-
-            boolean bgReplaced = isBlurBackground(target.getBackground());
-            if (!bgReplaced && bgLooksOpaque(target.getBackground())) {
-
-                try { target.setBackground(null); cleared = 1; }
-                catch (Throwable t) { ModuleLog.swallow("cardblur.clearRepl", t); }
-            }
-
-            try { target.invalidate(); } catch (Throwable ignored) {}
-
-            synchronized (sSettled) { sSettled.put(card, Boolean.TRUE); }
-
-            if (ModuleLog.enabled()) {
-                ModuleLog.d(TAG, "card blur attached: outer=" + card.getClass().getSimpleName()
-                        + " " + card.getWidth() + "x" + card.getHeight()
-                        + " | target=" + target.getClass().getSimpleName()
-                        + " " + target.getWidth() + "x" + target.getHeight()
-                        + " radius=" + radiusPx
-                        + " clearedBg=" + cleared + " bgReplaced=" + bgReplaced);
             }
         } catch (Throwable t) {
             ModuleLog.e(TAG, "attach fail", t);
@@ -209,8 +236,13 @@ public final class CardBlurAttacher {
                     if (bg instanceof ColorDrawable) {
                         opaque = ((ColorDrawable) bg).getAlpha() >= 250;
                     } else {
-                        try { opaque = (bg.getOpacity() == android.graphics.PixelFormat.OPAQUE); }
-                        catch (Throwable ignored) {}
+                        try {
+                            int op = bg.getOpacity();
+
+                            opaque = (op == android.graphics.PixelFormat.OPAQUE)
+                                    || (css && (op == android.graphics.PixelFormat.TRANSPARENT
+                                             || op == android.graphics.PixelFormat.TRANSLUCENT));
+                        } catch (Throwable ignored) {}
                     }
                 }
                 if (opaque && v.getWidth() > 0 && v.getHeight() > 0) {
@@ -263,18 +295,9 @@ public final class CardBlurAttacher {
     private static boolean isBlurBackground(Drawable d) {
         if (d == null) return false;
         try {
-            String cn = d.getClass().getName().toLowerCase();
-            return cn.contains("blur");
-        } catch (Throwable t) {
-            return false;
-        }
-    }
 
-    private static boolean bgLooksOpaque(Drawable d) {
-        if (d == null) return false;
-        try {
-            if (d instanceof ColorDrawable) return ((ColorDrawable) d).getAlpha() >= 250;
-            return d.getOpacity() == android.graphics.PixelFormat.OPAQUE;
+            String cn = d.getClass().getName();
+            return cn.contains("Blur") || cn.contains("blur");
         } catch (Throwable t) {
             return false;
         }
@@ -321,9 +344,11 @@ public final class CardBlurAttacher {
         try {
             String cn = v.getClass().getName();
 
-            boolean isLauncherCard = cn.startsWith("com.android.launcher3.card.")
-                    && (cn.endsWith("TitleCardView") || cn.endsWith("LauncherCardView")
-                        || cn.endsWith("EngineCardView") || cn.endsWith("CommonCardView"));
+            if (!cn.startsWith(Symbols.PKG_CARD)) return false;
+            boolean isLauncherCard = false;
+            for (String suffix : Symbols.CARD_BLUR_SUFFIXES) {
+                if (cn.endsWith(suffix)) { isLauncherCard = true; break; }
+            }
             if (isLauncherCard) {
 
                 return hasValidSpan(v);

@@ -30,7 +30,7 @@ public class SettingsActivity extends Activity {
     private static final int MAX_BG_MB = 15;
     private static final long MAX_BG_BYTES = MAX_BG_MB * 1024L * 1024L;
 
-    private static final String LOG_TAG_VER = "v46.3";
+    private static final String LOG_TAG_VER = "v46.4";
     static void lg(String s) {
         if (s == null) return;
         if (!App.logEnabled()) return;
@@ -379,18 +379,23 @@ private SettingsStore store;
             recreate();
         }
     }
-    private static long tagToCode(String tag) {
-        if (tag == null) return -1L;
+
+    private static String extractVersionDigits(String tag) {
         StringBuilder d = new StringBuilder();
         for (int i = 0; i < tag.length(); i++) {
             char c = tag.charAt(i);
             if ((c >= '0' && c <= '9') || c == '.') d.append(c);
         }
         String num = d.toString();
-        if (num.length() == 0) return -1L;
+        if (num.length() == 0) return null;
         while (num.startsWith(".")) num = num.substring(1);
         while (num.endsWith(".")) num = num.substring(0, num.length() - 1);
-        if (num.length() == 0) return -1L;
+        return num.length() == 0 ? null : num;
+    }
+    private static long tagToCode(String tag) {
+        if (tag == null) return -1L;
+        String num = extractVersionDigits(tag);
+        if (num == null) return -1L;
         String[] parts = num.split("\\.");
         try {
             long major = Long.parseLong(parts[0]);
@@ -406,7 +411,23 @@ private SettingsStore store;
     }
 
     private static final String CHANGELOG =
-            "v46.3\n"
+            "v46.4\n"
+            + "· 修复桌面卡片黑屏（调整卡片大小后整个桌面变黑）\n"
+            + "  · 卡片重建时若目标已是模糊背景则直接跳过，避免模糊节点重复挂载导致合成器出错\n"
+            + "  · 原生接口未真正替换背景时，改为「原样回滚」原背景，不再把背景清空（清空后无人补色是黑屏的直接成因）\n"
+            + "· 修正卡片底色层的透明度判据\n"
+            + "  · 快应用 CSS 底色层实测返回 -2 / -3 而非 -1，旧判据只认 -1，导致部分卡片（L40 / K40）选不中、不生效\n"
+            + "  · 改为直接比较 PixelFormat 常量，两类卡片统一按 CSS 背景放行\n"
+            + "· 可维护性重构（纯提取，零行为变化）\n"
+            + "  · 快捷菜单动画入口、卡片模糊、组件重试的长方法与深层嵌套拆为独立方法\n"
+            + "  · 卡片包名 / 类名等常量集中到 Symbols 单点定义，消除多处硬编码\n"
+            + "· 性能与整洁\n"
+            + "  · 失败回滚路径的日志补上开关守卫，关闭日志时不再产生字符串分配\n"
+            + "  · 模糊背景判定去掉 toLowerCase，改为零分配匹配，且不再受系统语言影响\n"
+            + "  · 移除已无调用方的死代码\n"
+            + "· 内部版本号同步至 v46.4\n"
+            + "\n"
+            + "v46.3\n"
             + "· 新增「桌面卡片模糊」（耗电看板等）\n"
             + "  · 卡片出现在桌面即自动挂上高斯模糊，无需手动触发\n"
             + "  · 只处理已知卡片类并校验网格跨度，非卡片视图不受影响\n"
@@ -713,6 +734,51 @@ private SettingsStore store;
             lg("snapshotView 失败: " + t);
             return null;
         }
+    }
+
+    private SoftUi.Card[] buildAboutCards() {
+        final String GITHUB = "https://github.com/wisely-leo/ColorOS_Blur_Enhance";
+        final String COOLAPK = "https://www.coolapk.com/u/26072346";
+        SoftUi.Card cardPerm = SoftUi.card(this,
+                SoftUi.infoBlock(this, "网络访问 (INTERNET)",
+                        "检查更新时请求 GitHub Releases API；安装即授予，无需手动开启"),
+                SoftUi.infoBlock(this, "ADB 授权 (Shizuku)",
+                        "重启作用域（force-stop）；需安装 Shizuku 并在本页授权"),
+                SoftUi.infoBlock(this, "LSPosed 作用域",
+                        "hook 模糊逻辑；需在 LSPosed 管理器中启用模块并勾选作用域应用"),
+                SoftUi.infoBlock(this, "图片选择（无需权限）",
+                        "背景图使用系统文档选择器，仅读取你主动选中的那张图，不读取相册"));
+        SoftUi.Card cardAbout = SoftUi.card(this,
+                SoftUi.info(this, "模块", store.appName()),
+                SoftUi.info(this, "版本", store.versionName()),
+                SoftUi.actionArrow(this, "作者",
+                        SoftUi.statusText(this, store.authorName()),
+                        () -> openUrl(COOLAPK)),
+                SoftUi.link(this, "GitHub 项目主页", () -> openUrl(GITHUB)));
+        SoftUi.Card cardFiles = SoftUi.card(this,
+                SoftUi.infoBlock(this, "配置文件",
+                        "/data/local/tmp/ColorOSBlurEnhance/blur.conf"),
+                SoftUi.infoBlock(this, "背景图",
+                        "应用私有目录 files/bg.jpg"),
+                SoftUi.infoBlock(this, "模块日志",
+                        "/storage/emulated/0/Download/ColorOSBlurEnhance.log"),
+                SoftUi.infoBlock(this, "界面日志",
+                        "/storage/emulated/0/Download/UiStartup.log"));
+        SoftUi.Card cardNote = SoftUi.card(this,
+                SoftUi.info(this, "说明", "基于 libxposed API 的 ColorOS 模糊增强模块。"
+                        + "\n为快捷菜单、最近任务、小组件与后置特效提供可调动态模糊。"
+                        + "\n\n功能开关可在本界面实时调整，保存后由宿主模块读取生效。"
+                        + "\n\n重启作用域后立即生效，无需重启手机。"));
+        SoftUi.Card cardOss = SoftUi.card(this,
+                SoftUi.infoBlock(this, "SoftUI",
+                        "本项目自研  ·  基于系统 API 绘制实现"),
+                SoftUi.infoBlock(this, "libxposed API (102)",
+                        "libxposed / LSPosed  ·  遵循其自身许可",
+                        () -> openUrl("https://github.com/libxposed")),
+                SoftUi.infoBlock(this, "Shizuku API",
+                        "RikkaApps  ·  Apache-2.0",
+                        () -> openUrl("https://github.com/RikkaApps/Shizuku-API")));
+        return new SoftUi.Card[] { cardPerm, cardAbout, cardFiles, cardNote, cardOss };
     }
     private void buildUi(android.view.ViewGroup root,
                          final android.view.View oldShell,
@@ -1058,45 +1124,12 @@ private SettingsStore store;
                         checkUpdate(updStatus);
                     }),
                     SoftUi.link(this, "更新日志", () -> showChangelog()));
-            SoftUi.Card cardPerm = SoftUi.card(this,
-                    SoftUi.infoBlock(this, "网络访问 (INTERNET)",
-                            "检查更新时请求 GitHub Releases API；安装即授予，无需手动开启"),
-                    SoftUi.infoBlock(this, "ADB 授权 (Shizuku)",
-                            "重启作用域（force-stop）；需安装 Shizuku 并在本页授权"),
-                    SoftUi.infoBlock(this, "LSPosed 作用域",
-                            "hook 模糊逻辑；需在 LSPosed 管理器中启用模块并勾选作用域应用"),
-                    SoftUi.infoBlock(this, "图片选择（无需权限）",
-                            "背景图使用系统文档选择器，仅读取你主动选中的那张图，不读取相册"));
-            SoftUi.Card cardAbout = SoftUi.card(this,
-                    SoftUi.info(this, "模块", store.appName()),
-                    SoftUi.info(this, "版本", store.versionName()),
-                    SoftUi.actionArrow(this, "作者",
-                            SoftUi.statusText(this, store.authorName()),
-                            () -> openUrl(COOLAPK)),
-                    SoftUi.link(this, "GitHub 项目主页", () -> openUrl(GITHUB)));
-            SoftUi.Card cardFiles = SoftUi.card(this,
-                    SoftUi.infoBlock(this, "配置文件",
-                            "/data/local/tmp/ColorOSBlurEnhance/blur.conf"),
-                    SoftUi.infoBlock(this, "背景图",
-                            "应用私有目录 files/bg.jpg"),
-                    SoftUi.infoBlock(this, "模块日志",
-                            "/storage/emulated/0/Download/ColorOSBlurEnhance.log"),
-                    SoftUi.infoBlock(this, "界面日志",
-                            "/storage/emulated/0/Download/UiStartup.log"));
-            SoftUi.Card cardNote = SoftUi.card(this,
-                    SoftUi.info(this, "说明", "基于 libxposed API 的 ColorOS 模糊增强模块。"
-                            + "\n为快捷菜单、最近任务、小组件与后置特效提供可调动态模糊。"
-                            + "\n\n功能开关可在本界面实时调整，保存后由宿主模块读取生效。"
-                            + "\n\n重启作用域后立即生效，无需重启手机。"));
-            SoftUi.Card cardOss = SoftUi.card(this,
-                    SoftUi.infoBlock(this, "SoftUI",
-                            "本项目自研  ·  基于系统 API 绘制实现"),
-                    SoftUi.infoBlock(this, "libxposed API (102)",
-                            "libxposed / LSPosed  ·  遵循其自身许可",
-                            () -> openUrl("https://github.com/libxposed")),
-                    SoftUi.infoBlock(this, "Shizuku API",
-                            "RikkaApps  ·  Apache-2.0",
-                            () -> openUrl("https://github.com/RikkaApps/Shizuku-API")));
+            SoftUi.Card[] about = buildAboutCards();
+            SoftUi.Card cardPerm = about[0];
+            SoftUi.Card cardAbout = about[1];
+            SoftUi.Card cardFiles = about[2];
+            SoftUi.Card cardNote = about[3];
+            SoftUi.Card cardOss = about[4];
             SoftUi.Card[] cards = { cardFunc, cardImeBlur, cardClock, cardPost, cardOther,
                                     cardAdb, cardScope, cardUpdate, cardPerm, cardAbout, cardFiles, cardNote, cardOss };
             SoftUi.stack(pageSettings,

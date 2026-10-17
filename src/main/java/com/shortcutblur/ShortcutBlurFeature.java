@@ -137,6 +137,111 @@ public final class ShortcutBlurFeature {
         return n;
     }
 
+    private static void closeRepressPanel(Object self) {
+        try {
+            View host = null;
+            if (self instanceof View) host = (View) self;
+            if (host == null && self != null) {
+                Object pbv = Reflect.readField(self, "mPopBlurView");
+                if (pbv instanceof View) host = (View) pbv;
+            }
+            if (host != null) {
+                final View fhost = host;
+
+                if (sRepressListener == null || sRepressHost != fhost) {
+
+                    try {
+                        final android.view.ViewTreeObserver vto = fhost.getViewTreeObserver();
+                        final android.view.ViewTreeObserver.OnPreDrawListener l =
+                                new android.view.ViewTreeObserver.OnPreDrawListener() {
+                            private int frames = 0;
+                            @Override public boolean onPreDraw() {
+                                try {
+                                    repressPanelAlpha(fhost);
+                                } catch (Throwable ignored) {}
+                                if (++frames >= 24) {
+                                    try {
+                                        android.view.ViewTreeObserver v = fhost.getViewTreeObserver();
+                                        if (v.isAlive()) v.removeOnPreDrawListener(this);
+                                    } catch (Throwable ignored) {}
+                                    if (sRepressListener == this) {
+                                        sRepressListener = null;
+                                        sRepressHost = null;
+                                    }
+                                }
+                                return true;
+                            }
+                        };
+                        vto.addOnPreDrawListener(l);
+                        sRepressListener = l;
+                        sRepressHost = fhost;
+                    } catch (Throwable t) {
+                        ModuleLog.e("CARDBLUR", "add OnPreDraw failed", t);
+                    }
+                }
+
+                final long repressNow = android.os.SystemClock.uptimeMillis();
+                if (repressNow - sRepressFallbackAt > 300L) {
+                    sRepressFallbackAt = repressNow;
+                    for (final long d : new long[]{32L, 96L, 160L}) {
+                        fhost.postDelayed(new Runnable() {
+                            @Override public void run() {
+                                try {
+                                    repressPanelAlpha(fhost);
+                                } catch (Throwable ignored) {}
+                            }
+                        }, d);
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            ModuleLog.e("CARDBLUR", "close repress failed", t);
+        }
+    }
+
+    private static void applyPopupOpenCloseAnim(Object self, Object set,
+                                                String methodName, boolean opening) {
+        try {
+            View anchor = null;
+            if (self != null) {
+                Object pbv = Reflect.readField(self, "mPopBlurView");
+                if (pbv instanceof View) anchor = (View) pbv;
+                if (anchor == null && self instanceof View) anchor = (View) self;
+            }
+            if (anchor != null && set != null) {
+                int flags = resolveBlurFlags(anchor);
+                ModuleLog.dv("ANIM", methodName + " flags=" + flags);
+                if ((flags & F_WALL) != 0) {
+                    float from = opening ? 0.0f : 1.0f;
+                    float to = opening ? 1.0f : 0.0f;
+                    Object anim = createDepthBlurAnimation(anchor, from, to, BLUR_DURATION);
+                    if (anim != null) {
+                        playIntoAnimatorSet(set, anim);
+                    }
+                }
+                if (opening && (flags & (F_ICON | F_ICON_ANIM)) != 0) {
+                    final View lt = sIconBlurLayer;
+                    if (lt != null) {
+
+                        sIconBlurRelight = true;
+                        Object iconAnim = createIconBlurAnimator(lt, 0.0f, blurRadius(), BLUR_DURATION);
+                        if (iconAnim instanceof ValueAnimator) {
+                            ((ValueAnimator) iconAnim).start();
+                            ModuleLog.dv("ICONANIM", "open anim -> started icon blur fade-in (sync)");
+                        }
+                    }
+                }
+                if (!opening) {
+                    clearBlurFlagsCache(anchor);
+                    fadeOutAndRemoveIconBlur();
+                    scheduleSwallowReset(anchor);
+                }
+            }
+        } catch (Throwable t) {
+            ModuleLog.e("ANIM", "hook body failed (" + methodName + ")", t);
+        }
+    }
+
     private static int hookPopupOpenCloseAnimation(ClassLoader loader, String clsName,
                                                    final String methodName, final boolean opening) {
         int n = 0;
@@ -163,105 +268,9 @@ public final class ShortcutBlurFeature {
                             Object result = chain.proceed();
 
                             if (!opening) {
-                                try {
-                                    View host = null;
-                                    if (self instanceof View) host = (View) self;
-                                    if (host == null && self != null) {
-                                        Object pbv = Reflect.readField(self, "mPopBlurView");
-                                        if (pbv instanceof View) host = (View) pbv;
-                                    }
-                                    if (host != null) {
-                                        final View fhost = host;
-
-                                        if (sRepressListener == null || sRepressHost != fhost) {
-
-                                            try {
-                                                final android.view.ViewTreeObserver vto = fhost.getViewTreeObserver();
-                                                final android.view.ViewTreeObserver.OnPreDrawListener l =
-                                                        new android.view.ViewTreeObserver.OnPreDrawListener() {
-                                                    private int frames = 0;
-                                                    @Override public boolean onPreDraw() {
-                                                        try {
-                                                            repressPanelAlpha(fhost);
-                                                        } catch (Throwable ignored) {}
-                                                        if (++frames >= 24) {
-                                                            try {
-                                                                android.view.ViewTreeObserver v = fhost.getViewTreeObserver();
-                                                                if (v.isAlive()) v.removeOnPreDrawListener(this);
-                                                            } catch (Throwable ignored) {}
-                                                            if (sRepressListener == this) {
-                                                                sRepressListener = null;
-                                                                sRepressHost = null;
-                                                            }
-                                                        }
-                                                        return true;
-                                                    }
-                                                };
-                                                vto.addOnPreDrawListener(l);
-                                                sRepressListener = l;
-                                                sRepressHost = fhost;
-                                            } catch (Throwable t) {
-                                                ModuleLog.e("CARDBLUR", "add OnPreDraw failed", t);
-                                            }
-                                        }
-
-                                        final long repressNow = android.os.SystemClock.uptimeMillis();
-                                        if (repressNow - sRepressFallbackAt > 300L) {
-                                            sRepressFallbackAt = repressNow;
-                                            for (final long d : new long[]{32L, 96L, 160L}) {
-                                                fhost.postDelayed(new Runnable() {
-                                                    @Override public void run() {
-                                                        try {
-                                                            repressPanelAlpha(fhost);
-                                                        } catch (Throwable ignored) {}
-                                                    }
-                                                }, d);
-                                            }
-                                        }
-                                    }
-                                } catch (Throwable t) {
-                                    ModuleLog.e("CARDBLUR", "close repress failed", t);
-                                }
+                                closeRepressPanel(self);
                             }
-                            try {
-                                View anchor = null;
-                                if (self != null) {
-                                    Object pbv = Reflect.readField(self, "mPopBlurView");
-                                    if (pbv instanceof View) anchor = (View) pbv;
-                                    if (anchor == null && self instanceof View) anchor = (View) self;
-                                }
-                                if (anchor != null && set != null) {
-                                    int flags = resolveBlurFlags(anchor);
-                                    ModuleLog.dv("ANIM", methodName + " flags=" + flags);
-                                    if ((flags & F_WALL) != 0) {
-                                        float from = opening ? 0.0f : 1.0f;
-                                        float to = opening ? 1.0f : 0.0f;
-                                        Object anim = createDepthBlurAnimation(anchor, from, to, BLUR_DURATION);
-                                        if (anim != null) {
-                                            playIntoAnimatorSet(set, anim);
-                                        }
-                                    }
-                                    if (opening && (flags & (F_ICON | F_ICON_ANIM)) != 0) {
-                                        final View lt = sIconBlurLayer;
-                                        if (lt != null) {
-
-                                            sIconBlurRelight = true;
-                                            Object iconAnim = createIconBlurAnimator(lt, 0.0f, blurRadius(), BLUR_DURATION);
-                                            if (iconAnim instanceof ValueAnimator) {
-                                                ((ValueAnimator) iconAnim).start();
-                                                ModuleLog.dv("ICONANIM", "open anim -> started icon blur fade-in (sync)");
-                                            }
-                                        }
-                                    }
-                                    if (!opening) {
-                                        clearBlurFlagsCache(anchor);
-                                        fadeOutAndRemoveIconBlur();
-                                        scheduleSwallowReset(anchor);
-                                    }
-                                }
-                            } catch (Throwable t) {
-                                ModuleLog.e("ANIM", "hook body failed (" + methodName + ")", t);
-                            }
+                            applyPopupOpenCloseAnim(self, set, methodName, opening);
                             return result;
                         }
                     });

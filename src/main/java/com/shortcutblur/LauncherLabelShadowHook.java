@@ -99,7 +99,7 @@ final class LauncherLabelShadowHook {
             sDoubleShadowCls = Reflect.loadClass(CLS_DOUBLE_SHADOW_BTV, cl);
             sWorkspaceCls = Reflect.loadClass("com.android.launcher3.Workspace", cl);
             sLabelLoader = cl;
-            sLauncherCardViewCls = Reflect.loadClass("com.android.launcher3.card.LauncherCardView", cl);
+            sLauncherCardViewCls = Reflect.loadClass(Symbols.CLS_CARD_BASE, cl);
             sInfoField = Reflect.field(label, FLD_MINFO);
         } catch (Throwable t) {
             ModuleLog.e(TAG, "resolve label class failed", t);
@@ -560,21 +560,21 @@ final class LauncherLabelShadowHook {
         Class<?> c = sLauncherCardViewCls;
         if (c != null) return c;
         try {
-            c = Reflect.loadClass("com.android.launcher3.card.LauncherCardView", sLabelLoader);
+            c = Reflect.loadClass(Symbols.CLS_CARD_BASE, sLabelLoader);
             if (c != null) sLauncherCardViewCls = c;
         } catch (Throwable ignored) {
         }
         return c;
     }
 
-    private static boolean isNotDesktopLabel(View v) {
-        if (v == null) return true;
-        if (!isLabel(v)) return true;
+    private static final class HostFlags {
+        boolean inShortcut;
+        boolean inWorkspace;
+        boolean widgetHost;
+        boolean inCard;
+    }
 
-        boolean inShortcut = false;
-        boolean inWorkspace = false;
-        boolean widgetHost = false;
-        boolean inCard = false;
+    private static void scanHostChain(View v, HostFlags out) {
         Class<?> ds = sDeepShortcutCls;
         Class<?> ws = sWorkspaceCls;
         Class<?> wh = sWidgetHostCls;
@@ -583,27 +583,38 @@ final class LauncherLabelShadowHook {
         for (int i = 0; i < MAX_PARENT_WALK && p != null; i++) {
             Class<?> c = p.getClass();
             if (c == ds) {
-                inShortcut = true;
+                out.inShortcut = true;
             } else if (c == ws) {
-                inWorkspace = true;
+                out.inWorkspace = true;
             } else if (wh != null && wh.isInstance(p)) {
-                widgetHost = true;
+                out.widgetHost = true;
             } else if (lc != null && lc.isInstance(p)) {
 
-                inCard = true;
+                out.inCard = true;
             } else {
                 String cn = c.getName();
                 if (cn.startsWith("com.android.launcher3.folder.")) {
-                    inWorkspace = true;
+                    out.inWorkspace = true;
                 } else if (cn.startsWith("com.android.launcher3.widget.")
                         && cn.endsWith("AppWidgetHostView")) {
-                    widgetHost = true;
+                    out.widgetHost = true;
                 }
             }
-            if (inShortcut && inWorkspace) break;
-            if (inCard) break;
+            if (out.inShortcut && out.inWorkspace) break;
+            if (out.inCard) break;
             p = parentOf(p);
         }
+    }
+    private static boolean isNotDesktopLabel(View v) {
+        if (v == null) return true;
+        if (!isLabel(v)) return true;
+
+        HostFlags hf = new HostFlags();
+        scanHostChain(v, hf);
+        final boolean inShortcut = hf.inShortcut;
+        final boolean inWorkspace = hf.inWorkspace;
+        final boolean widgetHost = hf.widgetHost;
+        final boolean inCard = hf.inCard;
 
         if (inShortcut) return true;
 
