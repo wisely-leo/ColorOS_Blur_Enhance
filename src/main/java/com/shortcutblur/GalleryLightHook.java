@@ -21,7 +21,6 @@ public final class GalleryLightHook {
         FORCE_TRUE.add("is_product_light_high");
     }
     private static volatile boolean installed = false;
-
     private static volatile boolean sTargetHooked = false;
     private GalleryLightHook() {}
 
@@ -66,7 +65,7 @@ public final class GalleryLightHook {
                                             return forced;
                                         }
                                     }
-                                } catch (Throwable ignored) {}
+                                } catch (Throwable ignored) { ModuleLog.swallow("GalleryLightHook", ignored); }
                                 return r;
                             });
                     n++;

@@ -6,10 +6,8 @@ import static com.shortcutblur.Symbols.*;
 public class WidgetBlurAttacher {
     private static final int TYPE_WIDGET = 7;
     private static final long ATTACH_RETRY_MS = 200L;
-
     private static final int ATTACH_MAX_RETRY = 8;
     private static final java.util.WeakHashMap<View, Boolean> sDone = new java.util.WeakHashMap<View, Boolean>();
-
     private static final java.util.WeakHashMap<View, java.lang.ref.WeakReference<View>> sDoneHost =
             new java.util.WeakHashMap<View, java.lang.ref.WeakReference<View>>();
     private static final java.util.WeakHashMap<View, Boolean> sGaveUp = new java.util.WeakHashMap<View, Boolean>();
@@ -38,7 +36,7 @@ public class WidgetBlurAttacher {
             if (host != null) {
                 synchronized (sGaveUp) { sGaveUp.remove(host); }
             }
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) { ModuleLog.swallow("WidgetBlurAttacher", ignored); }
     }
 
     private static void retryLater(final String tag, final View root,
@@ -54,11 +52,9 @@ public class WidgetBlurAttacher {
         try {
             View host = ViewUtils.ancestorOfType(root, "AppWidgetHostView");
             if (host == null) { ModuleLog.e("BW", tag + " host not found", null); return; }
-
             if (attempt > 0) {
                 try { if (!root.isAttachedToWindow()) return; } catch (Throwable ignore) {}
             }
-
             View bound = doneHostOf(host);
             if (bound != null) {
                 boolean already;
@@ -66,10 +62,8 @@ public class WidgetBlurAttacher {
                 if (already) return;
             }
             View containerEarly = ViewUtils.findByViewId(root, ClockIds.TARGET_ROOT);
-
             View rmContainer = ViewUtils.findByViewId(root, ClockIds.RM_CONTAINER);
             if (rmContainer == null) {
-
                 rmContainer = ViewUtils.findByViewId(root, ClockIds.RM_W_LAYOUT);
                 if (rmContainer != null) {
                     ModuleLog.d("BW", tag + " realme weather_widget_layout found");
@@ -128,7 +122,6 @@ public class WidgetBlurAttacher {
                         + " -> " + promoted.getClass().getSimpleName() + " " + promoted.getWidth() + "x" + promoted.getHeight());
                 container = promoted;
             }
-
             View boundNow = doneHostOf(host);
             synchronized (sDone) {
                 if (boundNow == container || Boolean.TRUE.equals(sDone.get(container))) {
@@ -151,7 +144,7 @@ public class WidgetBlurAttacher {
         if (v == null) return 0;
         int n = 0;
         for (int id : ClockIds.TEXT_IDS) {
-            try { if (v.findViewById(id) != null) n++; } catch (Throwable ignored) {}
+            try { if (v.findViewById(id) != null) n++; } catch (Throwable ignored) { ModuleLog.swallow("WidgetBlurAttacher", ignored); }
         }
         return n;
     }

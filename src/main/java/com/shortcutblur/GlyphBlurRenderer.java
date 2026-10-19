@@ -38,7 +38,6 @@ public class GlyphBlurRenderer {
     }
     private static final java.util.WeakHashMap<View, GlyphSnapshot[]> sSnapsMap = new java.util.WeakHashMap<View, GlyphSnapshot[]>();
     private static volatile boolean sScreenOn = true;
-
     private static final java.util.WeakHashMap<View, java.lang.ref.WeakReference<ClockBlurStateMachine>> sRunners =
             new java.util.WeakHashMap<View, java.lang.ref.WeakReference<ClockBlurStateMachine>>();
 
@@ -95,14 +94,12 @@ public class GlyphBlurRenderer {
     public static void setScreenOn(boolean on) {
         boolean changed = (sScreenOn != on);
         sScreenOn = on;
-
         if (!changed && !on) return;
         try {
             for (ClockBlurStateMachine pr : runnersSnapshot()) pr.onScreenStateChanged();
         } catch (Throwable t) { ModuleLog.e("GB", "screenStateChanged fail", t); }
     }
     public static void notifyContentMaybeChangedAll() {
-
         try {
             for (ClockBlurStateMachine pr : runnersSnapshot()) pr.onContentChanged();
         } catch (Throwable t) { ModuleLog.e("GB", "kickAll fail", t); }
@@ -247,7 +244,7 @@ public class GlyphBlurRenderer {
                             == android.content.res.Configuration.UI_MODE_NIGHT_YES;
                 }
             }
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) { ModuleLog.swallow("GlyphBlurRenderer", ignored); }
         return false;
     }
 
@@ -266,7 +263,6 @@ public class GlyphBlurRenderer {
     }
     private static void retry(final View container, final ClassLoader cl, final int attempt, final String why) {
         if (attempt >= MAX_RETRY) { ModuleLog.e("GB", "give up: " + why, null); return; }
-
         try { if (!container.isAttachedToWindow()) return; } catch (Throwable ignore) {}
         if (attempt == 0 || attempt == MAX_RETRY - 1) ModuleLog.d("GB", "retry(" + attempt + "): " + why);
         container.postDelayed(new Runnable() {
@@ -302,7 +298,6 @@ public class GlyphBlurRenderer {
             }
             if (w <= 0) w = 1;
             if (h <= 0) h = 1;
-
             final int MAX_DIM = 192;
             int cw = w, ch = h;
             if (w > MAX_DIM || h > MAX_DIM) {
@@ -312,7 +307,6 @@ public class GlyphBlurRenderer {
             android.graphics.Bitmap out = android.graphics.Bitmap.createBitmap(
                     cw, ch, android.graphics.Bitmap.Config.ARGB_8888);
             android.graphics.Canvas c = new android.graphics.Canvas(out);
-
             android.graphics.Rect oldBounds = d.copyBounds();
             try {
                 d.setBounds(0, 0, cw, ch);
@@ -328,7 +322,6 @@ public class GlyphBlurRenderer {
     }
     private static void appendWeatherIconSnapshots(View container, View base, java.util.ArrayList<GlyphSnapshot> list) {
         int[] iconIds = ClockIds.ICON_IDS;
-
         final android.graphics.Rect reuseRect = new android.graphics.Rect();
         for (int id : iconIds) {
             try {
@@ -359,7 +352,6 @@ public class GlyphBlurRenderer {
                 try {
                     small.getPixels(px, 0, bw, 0, 0, bw, bh);
                 } finally {
-
                     try { small.recycle(); } catch (Throwable ignore) {}
                 }
                 android.graphics.Region region = new android.graphics.Region();
@@ -464,11 +456,9 @@ public class GlyphBlurRenderer {
                 if (!(v instanceof TextView)) continue;
                 TextView tv = (TextView) v;
                 if (ClockIds.isRealmeLockId(id)) {
-
                     float fa = a / 255f;
                     if (Math.abs(tv.getAlpha() - fa) > 0.01f) {
                         tv.setAlpha(fa);
-
                         ModuleLog.dv("TALPHA", "id=0x" + Integer.toHexString(id)
                                 + " cls=" + tv.getClass().getSimpleName()
                                 + " viewAlpha=" + fa);
@@ -526,7 +516,6 @@ public class GlyphBlurRenderer {
                 list.add(new GlyphSnapshot(localPath, dx, dy));
             }
             appendWeatherIconSnapshots(container, base, list);
-
             sSnapsMap.put(container, list.isEmpty() ? null : list.toArray(new GlyphSnapshot[0]));
             applyIconAlpha(container);
             applyTextAlpha(container);
@@ -575,7 +564,6 @@ public class GlyphBlurRenderer {
     }
     private static final long FALLBACK_CHECK_MS = 2000L;
     private static final long FALLBACK_SCREENOFF_MS = 8000L;
-
     private static final long FALLBACK_HIDDEN_PROBE_MS = 800L;
     private static final long REBUILD_SETTLE_MS = 50L;
     private static final class ClockBlurStateMachine {
@@ -585,7 +573,6 @@ public class GlyphBlurRenderer {
         private static final int PAUSED = 3;
         private final View container;
         private final Object blurDrawable;
-
         private int state = IDLE;
         private String lastStateSig = null;
         private String lastFingerprint = null;
@@ -597,7 +584,6 @@ public class GlyphBlurRenderer {
         private final Runnable fallbackTask = new Runnable() {
             @Override public void run() { fallbackCheck(); }
         };
-
         private android.view.ViewTreeObserver.OnPreDrawListener pendingPreDrawListener = null;
         ClockBlurStateMachine(View container, Object blurDrawable) {
             this.container = container;
@@ -607,35 +593,29 @@ public class GlyphBlurRenderer {
             transitionToDirty();
         }
         synchronized void onContentChanged() {
-
             if (!sScreenOn) return;
             transitionToDirty();
         }
         synchronized void onScreenStateChanged() {
             if (sScreenOn) {
-
                 if (state == DIRTY || state == REBUILDING) {
-
                     state = IDLE;
                 }
                 transitionToDirty();
             } else {
                 state = PAUSED;
                 container.removeCallbacks(rebuildTask);
-
                 sHandler.removeCallbacks(fallbackTask);
                 sHandler.postDelayed(fallbackTask, FALLBACK_SCREENOFF_MS);
             }
         }
         private long lastRebuildAt = 0L;
-
         private volatile boolean pendingRebuild = false;
         private static final long MIN_REBUILD_INTERVAL_MS = 100L;
         private synchronized void transitionToDirty() {
             if (state == PAUSED && !sScreenOn) return;
             if (state == DIRTY || state == REBUILDING) return;
             state = DIRTY;
-
             container.removeCallbacks(rebuildTask);
             sHandler.removeCallbacks(fallbackTask);
             long now = android.os.SystemClock.uptimeMillis();
@@ -651,13 +631,11 @@ public class GlyphBlurRenderer {
             container.removeCallbacks(rebuildTask);
             if (state == PAUSED && !sScreenOn) return;
             if (!sScreenOn) {
-
                 state = PAUSED;
                 scheduleScreenOffProbe();
                 return;
             }
             if (!ViewUtils.isReallyVisible(container)) {
-
                 pendingRebuild = true;
                 state = IDLE;
                 scheduleFallbackSoon();
@@ -673,7 +651,6 @@ public class GlyphBlurRenderer {
                         if (cur != null && cur.isAlive()) cur.removeOnPreDrawListener(this);
                         pendingPreDrawListener = null;
                         synchronized (ClockBlurStateMachine.this) {
-
                             if (state != REBUILDING) return true;
                             try {
                                 doRebuild();
@@ -729,33 +706,28 @@ public class GlyphBlurRenderer {
             sHandler.postDelayed(fallbackTask, FALLBACK_SCREENOFF_MS);
         }
         private synchronized void fallbackCheck() {
-
             if (!container.isAttachedToWindow()) {
                 state = IDLE;
                 container.removeCallbacks(rebuildTask);
                 sHandler.removeCallbacks(fallbackTask);
-
                 if (pendingPreDrawListener != null) {
                     try {
                         android.view.ViewTreeObserver vo = container.getViewTreeObserver();
                         if (vo != null && vo.isAlive()) vo.removeOnPreDrawListener(pendingPreDrawListener);
-                    } catch (Throwable ignored) {}
+                    } catch (Throwable ignored) { ModuleLog.swallow("GlyphBlurRenderer", ignored); }
                     pendingPreDrawListener = null;
                 }
                 synchronized (sRunners) { sRunners.remove(container); }
-
-                try { sSnapsMap.remove(container); } catch (Throwable ignored) {}
-                try { sIconCache.remove(container); } catch (Throwable ignored) {}
+                try { sSnapsMap.remove(container); } catch (Throwable ignored) { ModuleLog.swallow("GlyphBlurRenderer", ignored); }
+                try { sIconCache.remove(container); } catch (Throwable ignored) { ModuleLog.swallow("GlyphBlurRenderer", ignored); }
                 return;
             }
             if (!sScreenOn) {
-
                 state = PAUSED;
                 scheduleScreenOffProbe();
                 return;
             }
             if (!ViewUtils.isReallyVisible(container)) { scheduleFallbackSoon(); return; }
-
             if (pendingRebuild) {
                 pendingRebuild = false;
                 transitionToDirty();
@@ -825,7 +797,6 @@ public class GlyphBlurRenderer {
             }
             return sb.toString();
         }
-
         private void computeBoth(StringBuilder sigOut, StringBuilder fpOut) {
             sigOut.setLength(0);
             fpOut.setLength(0);
@@ -856,15 +827,13 @@ public class GlyphBlurRenderer {
         }
         private void doRebuild() {
             rebuildSnapshots(container);
-
             pendingRebuild = false;
-            try { applyGlassColor(blurDrawable, container.getContext().getClassLoader()); } catch (Throwable ignored) {}
-
+            try { applyGlassColor(blurDrawable, container.getContext().getClassLoader()); } catch (Throwable ignored) { ModuleLog.swallow("GlyphBlurRenderer", ignored); }
             computeBoth(sb, sb2);
             lastStateSig = sb.toString();
             lastFingerprint = sb2.toString();
             Method inv = Reflect.method(blurDrawable.getClass(), "invalidatePath", 0);
-            if (inv != null) { try { inv.setAccessible(true); inv.invoke(blurDrawable); } catch (Throwable ignored) {} }
+            if (inv != null) { try { inv.setAccessible(true); inv.invoke(blurDrawable); } catch (Throwable ignored) { ModuleLog.swallow("GlyphBlurRenderer", ignored); } }
             container.invalidate();
         }
     }

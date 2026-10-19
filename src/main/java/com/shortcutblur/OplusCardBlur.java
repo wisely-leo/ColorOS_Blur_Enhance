@@ -34,7 +34,6 @@ final class OplusCardBlur {
         if (sReady) return true;
         if (sTried && !sReady) return false;
         synchronized (OplusCardBlur.class) {
-
             if (sReady) return true;
             if (sTried && !sReady) return false;
             sTried = true;
@@ -44,8 +43,8 @@ final class OplusCardBlur {
                 sCtor = cls.getConstructor(View.class);
                 sGetDrawable = cls.getMethod("getBackgroundBlurDrawable");
                 sSetRadius = cls.getMethod("setBlurRadius", int.class);
-                try { sSetColor = cls.getMethod("setColor", int.class); } catch (Throwable ignored) {}
-                try { sSetCorner = cls.getMethod("setCornerRadius", float.class); } catch (Throwable ignored) {}
+                try { sSetColor = cls.getMethod("setColor", int.class); } catch (Throwable ignored) { ModuleLog.swallow("OplusCardBlur", ignored); }
+                try { sSetCorner = cls.getMethod("setCornerRadius", float.class); } catch (Throwable ignored) { ModuleLog.swallow("OplusCardBlur", ignored); }
                 sReady = (sCtor != null && sGetDrawable != null && sSetRadius != null);
                 ModuleLog.d(TAG, "OplusCardBlur reflection ready=" + sReady
                         + " setColor=" + (sSetColor != null)
@@ -81,7 +80,6 @@ final class OplusCardBlur {
             Object mgr = null;
             WeakReference<Object> wr = sMgrOf.get(v);
             if (wr != null) mgr = wr.get();
-
             final boolean cachedMgr = (mgr != null);
             Drawable d;
             if (mgr == null) {
@@ -128,11 +126,11 @@ final class OplusCardBlur {
             sSetRadius.invoke(mgr, ri);
 
             if (sSetColor != null) {
-                try { sSetColor.invoke(mgr, color); } catch (Throwable ignored) {}
+                try { sSetColor.invoke(mgr, color); } catch (Throwable ignored) { ModuleLog.swallow("OplusCardBlur", ignored); }
             }
 
             if (sSetCorner != null) {
-                try { sSetCorner.invoke(mgr, cornerPx); } catch (Throwable ignored) {}
+                try { sSetCorner.invoke(mgr, cornerPx); } catch (Throwable ignored) { ModuleLog.swallow("OplusCardBlur", ignored); }
             }
 
             v.setBackground(d);
@@ -157,15 +155,13 @@ final class OplusCardBlur {
     }
 
     private static float resolveCornerPx(View v) {
-
         try {
             float dp = FeatureFlags.CARD_BLUR_CORNER_DP;
             if (dp > 0f) {
                 float px = dp * v.getResources().getDisplayMetrics().density;
                 return clampCorner(v, px);
             }
-        } catch (Throwable ignored) {}
-
+        } catch (Throwable ignored) { ModuleLog.swallow("OplusCardBlur", ignored); }
         try {
             Class<?> c = v.getClass();
             while (c != null && c != View.class) {
@@ -177,7 +173,7 @@ final class OplusCardBlur {
                 }
                 c = c.getSuperclass();
             }
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) { ModuleLog.swallow("OplusCardBlur", ignored); }
         return 0f;
     }
 

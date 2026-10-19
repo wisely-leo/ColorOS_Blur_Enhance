@@ -21,11 +21,9 @@ public final class CardBlurAttacher {
     private static final String CLS_CARD_DELEGATOR = "org.hapjs.card.sdk.CardDelegator";
 
     private static final long ATTACH_RETRY_MS = 200L;
-
     private static final int ATTACH_MAX_RETRY = 20;
 
     private static final WeakHashMap<View, Boolean> sSettled = new WeakHashMap<View, Boolean>();
-
     private static final WeakHashMap<View, Boolean> sPending = new WeakHashMap<View, Boolean>();
 
     private static final ThreadLocal<String> sLastRejectedTarget = new ThreadLocal<String>();
@@ -43,7 +41,6 @@ public final class CardBlurAttacher {
     }
 
     private static boolean applyBlurToTarget(View card, Object launcher, View target) {
-
         float density = densityOf(target);
         float radiusPx = DEFAULT_RADIUS_DP * density;
         try { target.setTag(ID_KEY_BLUR_VIEW_RADIUS, Float.valueOf(radiusPx)); }
@@ -67,15 +64,13 @@ public final class CardBlurAttacher {
 
         boolean bgReplaced = isBlurBackground(target.getBackground());
         if (!bgReplaced) {
-
             try {
                 if (originalBg != null && target.getBackground() != originalBg) {
                     target.setBackground(originalBg);
                     cleared = 2;
                 }
             } catch (Throwable t) { ModuleLog.swallow("cardblur.restoreBg", t); }
-            try { target.invalidate(); } catch (Throwable ignored) {}
-
+            try { target.invalidate(); } catch (Throwable ignored) { ModuleLog.swallow("CardBlurAttacher", ignored); }
             if (ModuleLog.enabled()) {
                 ModuleLog.d(TAG, "L40/GUARD createBlurForView not replaced, bg restored (rollback=" + cleared
                         + ", target=" + target.getClass().getSimpleName()
@@ -84,7 +79,7 @@ public final class CardBlurAttacher {
             return false;
         }
 
-        try { target.invalidate(); } catch (Throwable ignored) {}
+        try { target.invalidate(); } catch (Throwable ignored) { ModuleLog.swallow("CardBlurAttacher", ignored); }
 
         synchronized (sSettled) { sSettled.put(card, Boolean.TRUE); }
         if (ModuleLog.enabled()) {
@@ -99,18 +94,13 @@ public final class CardBlurAttacher {
     }
     private static void attach(final View card, final ClassLoader cl, final int attempt) {
         if (card == null) return;
-
         if (!FeatureFlags.LAUNCHER_CARD_BLUR) return;
-
         synchronized (sSettled) {
             if (Boolean.TRUE.equals(sSettled.get(card))) return;
         }
-
         if (attempt == 0 && !isCard(card)) return;
-
         boolean keepPending = false;
         try {
-
             if (attempt == 0) {
                 synchronized (sPending) {
                     if (Boolean.TRUE.equals(sPending.get(card))) { keepPending = true; return; }
@@ -134,14 +124,12 @@ public final class CardBlurAttacher {
 
             View target = findOpaqueBgLayer(card);
             if (target == null) {
-
                 String rej = sLastRejectedTarget.get();
                 sLastRejectedTarget.remove();
                 keepPending = retry(card, cl, attempt,
                         "await opaque css layer" + (rej != null ? " [" + rej + "]" : ""));
                 return;
             }
-
             if (isPlaceholderView(target)) {
                 keepPending = retry(card, cl, attempt, "target is placeholder");
                 return;
@@ -153,9 +141,7 @@ public final class CardBlurAttacher {
             }
         } catch (Throwable t) {
             ModuleLog.e(TAG, "attach fail", t);
-
         } finally {
-
             if (!keepPending) {
                 synchronized (sPending) { sPending.remove(card); }
             }
@@ -163,26 +149,22 @@ public final class CardBlurAttacher {
     }
 
     private static View findOpaqueBgLayer(View card) {
+        sLastRejectedTarget.remove();
         try {
             View root = findFirstByClass(card, CLS_CARD_DELEGATOR);
-
             if (root instanceof ViewGroup && ((ViewGroup) root).getChildCount() == 0) {
                 return null;
             }
             OpaquePick pick = new OpaquePick();
             pick.maxArea = -1;
             collectOpaqueLayers(root, 0, pick);
-
             if (pick.view != null) {
                 if (isPlausibleTarget(card, pick.view)) return pick.view;
-
                 if (ModuleLog.enabled()) {
                     sLastRejectedTarget.set("too small: " + pick.view.getWidth() + "x"
                             + pick.view.getHeight() + " (card " + card.getWidth()
                             + "x" + card.getHeight() + ")");
                 }
-            } else {
-                sLastRejectedTarget.remove();
             }
         } catch (Throwable t) {
             ModuleLog.swallow("cardblur.findOpaque", t);
@@ -190,10 +172,9 @@ public final class CardBlurAttacher {
         return null;
     }
 
-    private static final class OpaquePick { View view; long maxArea; boolean cssPreferred; int depth = -1; }
+    private static final class OpaquePick { View view; long maxArea; boolean cssPreferred; }
 
     private static final float TARGET_MIN_AREA_RATIO = 0.5f;
-
     private static final int TARGET_MIN_SIDE_PX = 64;
 
     private static boolean isPlausibleTarget(View card, View target) {
@@ -223,9 +204,7 @@ public final class CardBlurAttacher {
     private static void collectOpaqueLayers(View v, int depth, OpaquePick pick) {
         if (v == null || depth > 20) return;
         try {
-
             if (isPlaceholderView(v)) {
-
             } else {
                 Drawable bg = v.getBackground();
                 boolean opaque = false;
@@ -238,16 +217,14 @@ public final class CardBlurAttacher {
                     } else {
                         try {
                             int op = bg.getOpacity();
-
                             opaque = (op == android.graphics.PixelFormat.OPAQUE)
                                     || (css && (op == android.graphics.PixelFormat.TRANSPARENT
                                              || op == android.graphics.PixelFormat.TRANSLUCENT));
-                        } catch (Throwable ignored) {}
+                        } catch (Throwable ignored) { ModuleLog.swallow("CardBlurAttacher", ignored); }
                     }
                 }
                 if (opaque && v.getWidth() > 0 && v.getHeight() > 0) {
                     long area = (long) v.getWidth() * (long) v.getHeight();
-
                     boolean better = (css && !pick.cssPreferred)
                             || ((css == pick.cssPreferred) && (area > pick.maxArea));
                     if (better) {
@@ -288,14 +265,13 @@ public final class CardBlurAttacher {
                     if (r != null) return r;
                 }
             }
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) { ModuleLog.swallow("CardBlurAttacher", ignored); }
         return null;
     }
 
     private static boolean isBlurBackground(Drawable d) {
         if (d == null) return false;
         try {
-
             String cn = d.getClass().getName();
             return cn.contains("Blur") || cn.contains("blur");
         } catch (Throwable t) {
@@ -305,7 +281,6 @@ public final class CardBlurAttacher {
 
     private static boolean retry(final View card, final ClassLoader cl, final int attempt, final String why) {
         if (attempt >= ATTACH_MAX_RETRY) {
-
             synchronized (sSettled) { sSettled.put(card, Boolean.TRUE); }
             ModuleLog.d(TAG, "give up after " + attempt + " retries: " + why);
             return false;
@@ -327,7 +302,7 @@ public final class CardBlurAttacher {
             if (m == null) { ModuleLog.e(TAG, "createBlurForView/3 not found", null); return false; }
             m.setAccessible(true);
             Object r = m.invoke(mgr, target, null, TYPE_CARD);
-            ModuleLog.d(TAG, "createBlurForView => " + r);
+            if (ModuleLog.enabled()) ModuleLog.d(TAG, "createBlurForView => " + r);
             return Boolean.TRUE.equals(r);
         } catch (Throwable t) {
             ModuleLog.e(TAG, "createBlurViaManager fail", t);
@@ -343,14 +318,12 @@ public final class CardBlurAttacher {
         if (v == null) return false;
         try {
             String cn = v.getClass().getName();
-
             if (!cn.startsWith(Symbols.PKG_CARD)) return false;
             boolean isLauncherCard = false;
             for (String suffix : Symbols.CARD_BLUR_SUFFIXES) {
                 if (cn.endsWith(suffix)) { isLauncherCard = true; break; }
             }
             if (isLauncherCard) {
-
                 return hasValidSpan(v);
             }
             return false;
@@ -358,7 +331,6 @@ public final class CardBlurAttacher {
             return false;
         }
     }
-
     private static final int MIN_SPAN_X = 2;
     private static final int MIN_SPAN_Y = 1;
 

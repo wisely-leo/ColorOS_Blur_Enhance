@@ -33,11 +33,9 @@ public final class BlurLib {
     public static boolean isOverviewState(Object state) {
         if (state == null) return false;
         try {
-
             Object overview = readStaticState("OVERVIEW");
             if (overview != null) return state == overview;
         } catch (Throwable ignore) {}
-
         try {
             String cn = state.getClass().getSimpleName();
             return cn.contains("Overview") && !cn.contains("Background");
@@ -68,7 +66,6 @@ public final class BlurLib {
         return v == null ? ""
                 : (v.getClass().getName() + "@" + Integer.toHexString(System.identityHashCode(v)));
     }
-
     private static volatile android.content.Context sAppCtx = null;
     private static volatile long sAppCtxAt = 0L;
     private static final long APP_CTX_TTL_MS = 30_000L;

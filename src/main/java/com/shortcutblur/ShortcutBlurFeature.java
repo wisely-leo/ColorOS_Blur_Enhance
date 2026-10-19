@@ -31,7 +31,6 @@ public final class ShortcutBlurFeature {
     private static volatile Host host;
 
     private static final long BLUR_DURATION = 330L;
-
     private static float blurRadius() {
         try {
             float r = FeatureFlags.SHORTCUT_BLUR_RADIUS;
@@ -52,7 +51,6 @@ public final class ShortcutBlurFeature {
     private static volatile View sIconBlurLayer = null;
     private static volatile long sPopupSeq = 0L;
     private static volatile long sIconAnimStartedSeq = -1L;
-
     private static volatile boolean sIconBlurRelight = false;
 
     private static volatile android.view.ViewTreeObserver.OnPreDrawListener sRepressListener = null;
@@ -63,7 +61,6 @@ public final class ShortcutBlurFeature {
 
     private static final Map<View, Boolean> armed = new WeakHashMap<>();
     private static final Map<View, Integer> flagsCache = new WeakHashMap<>();
-
     private static final Map<View, ValueAnimator> iconAnims =
             new java.util.WeakHashMap<>();
 
@@ -147,9 +144,7 @@ public final class ShortcutBlurFeature {
             }
             if (host != null) {
                 final View fhost = host;
-
                 if (sRepressListener == null || sRepressHost != fhost) {
-
                     try {
                         final android.view.ViewTreeObserver vto = fhost.getViewTreeObserver();
                         final android.view.ViewTreeObserver.OnPreDrawListener l =
@@ -158,12 +153,12 @@ public final class ShortcutBlurFeature {
                             @Override public boolean onPreDraw() {
                                 try {
                                     repressPanelAlpha(fhost);
-                                } catch (Throwable ignored) {}
+                                } catch (Throwable ignored) { ModuleLog.swallow("ShortcutBlurFeature", ignored); }
                                 if (++frames >= 24) {
                                     try {
                                         android.view.ViewTreeObserver v = fhost.getViewTreeObserver();
                                         if (v.isAlive()) v.removeOnPreDrawListener(this);
-                                    } catch (Throwable ignored) {}
+                                    } catch (Throwable ignored) { ModuleLog.swallow("ShortcutBlurFeature", ignored); }
                                     if (sRepressListener == this) {
                                         sRepressListener = null;
                                         sRepressHost = null;
@@ -179,7 +174,6 @@ public final class ShortcutBlurFeature {
                         ModuleLog.e("CARDBLUR", "add OnPreDraw failed", t);
                     }
                 }
-
                 final long repressNow = android.os.SystemClock.uptimeMillis();
                 if (repressNow - sRepressFallbackAt > 300L) {
                     sRepressFallbackAt = repressNow;
@@ -188,7 +182,7 @@ public final class ShortcutBlurFeature {
                             @Override public void run() {
                                 try {
                                     repressPanelAlpha(fhost);
-                                } catch (Throwable ignored) {}
+                                } catch (Throwable ignored) { ModuleLog.swallow("ShortcutBlurFeature", ignored); }
                             }
                         }, d);
                     }
@@ -198,7 +192,6 @@ public final class ShortcutBlurFeature {
             ModuleLog.e("CARDBLUR", "close repress failed", t);
         }
     }
-
     private static void applyPopupOpenCloseAnim(Object self, Object set,
                                                 String methodName, boolean opening) {
         try {
@@ -222,7 +215,6 @@ public final class ShortcutBlurFeature {
                 if (opening && (flags & (F_ICON | F_ICON_ANIM)) != 0) {
                     final View lt = sIconBlurLayer;
                     if (lt != null) {
-
                         sIconBlurRelight = true;
                         Object iconAnim = createIconBlurAnimator(lt, 0.0f, blurRadius(), BLUR_DURATION);
                         if (iconAnim instanceof ValueAnimator) {
@@ -266,7 +258,6 @@ public final class ShortcutBlurFeature {
                             Object self = chain.getThisObject();
                             Object set = chain.getArg(0);
                             Object result = chain.proceed();
-
                             if (!opening) {
                                 closeRepressPanel(self);
                             }
@@ -402,7 +393,6 @@ public final class ShortcutBlurFeature {
     private static void repressPanelAlpha(View v) {
         try {
             if (v == null) return;
-
             java.lang.ref.WeakReference<View> rootRef = sPanelCacheRoot;
             java.lang.ref.WeakReference<View> ref = sPanelCache;
             if (rootRef != null && rootRef.get() == v && ref != null) {
@@ -433,14 +423,13 @@ public final class ShortcutBlurFeature {
                     sPanelCacheRoot = new java.lang.ref.WeakReference<>(v);
                 }
             }
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) { ModuleLog.swallow("ShortcutBlurFeature", ignored); }
     }
     private static void forceAlphaOnBg(View c) {
         try {
             android.graphics.drawable.Drawable bg = c.getBackground();
             if (bg == null) return;
             int want = (FeatureFlags.CARD_PANEL_ALPHA & 0xFF) << 24;
-
             if (bg.getAlpha() == (FeatureFlags.CARD_PANEL_ALPHA & 0xFF)) {
                 if (bg instanceof android.graphics.drawable.GradientDrawable) {
                     android.content.res.ColorStateList csl =
@@ -456,12 +445,11 @@ public final class ShortcutBlurFeature {
                 }
                 return;
             }
-
             bg.mutate().setAlpha(FeatureFlags.CARD_PANEL_ALPHA);
             ModuleLog.dv("CARDBLUR", "  repress alpha -> 0x"
                     + Integer.toHexString(FeatureFlags.CARD_PANEL_ALPHA)
                     + " cls=" + c.getClass().getSimpleName());
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) { ModuleLog.swallow("ShortcutBlurFeature", ignored); }
     }
 
     private static boolean isPanelAlphaOk(View c) {
@@ -503,10 +491,8 @@ public final class ShortcutBlurFeature {
         try {
             android.graphics.drawable.Drawable bg = v.getBackground();
             boolean hasBg = bg != null;
-
             boolean bigEnough = v.getWidth() >= 200 && v.getHeight() >= 200;
             if (hasBg && bigEnough) {
-
                 if (!isPanelAlphaOk(v)) {
                     try {
                         android.graphics.drawable.Drawable mut = bg.mutate();
@@ -516,7 +502,6 @@ public final class ShortcutBlurFeature {
                         ModuleLog.dv("CARDBLUR", "  alpha failed: " + t);
                     }
                 }
-
                 int radiusKey = Float.floatToIntBits(r);
                 Integer prev;
                 synchronized (sCardBlurDone) { prev = sCardBlurDone.get(v); }
@@ -530,7 +515,6 @@ public final class ShortcutBlurFeature {
                         + " alpha=0x" + Integer.toHexString(FeatureFlags.CARD_PANEL_ALPHA)
                         + " bg=" + bg.getClass().getSimpleName());
                 n++;
-
                 return n;
             }
             if (v instanceof ViewGroup) {
@@ -685,10 +669,8 @@ try {
         } catch (Throwable t) {
             ModuleLog.e("INSTALL", "hookArrowRoundedBg failed", t);
         }
-
         return n;
     }
-
     private static void recolorRounded(Object popup, String field) {
         try {
             if (popup == null) return;
@@ -708,7 +690,6 @@ try {
             ModuleLog.e("CARDBLUR", "recolorRounded(" + field + ") failed", t);
         }
     }
-
     private static final int ATTR_POPUP_COLOR_PRIMARY = 0x7f04085a;
     private static int hookPopupColorPrimaryAttr(ClassLoader loader) {
         try {
@@ -726,7 +707,6 @@ try {
                 Reflect.setAccessible(m);
                 hookTarget((Executable) m, "cardblur.getAttrColor", new XposedInterface.Hooker() {
                     @Override public Object intercept(XposedInterface.Chain chain) throws Throwable {
-
                         Object attr = chain.getArg(1);
                         boolean isTarget = (attr instanceof Integer)
                                 && ((Integer) attr).intValue() == ATTR_POPUP_COLOR_PRIMARY;
@@ -755,7 +735,6 @@ try {
             return 0;
         }
     }
-
     private static int hookMoreFunctionsCtor(ClassLoader loader) {
         int n = 0;
         try {
@@ -774,13 +753,11 @@ try {
                         Object r = chain.proceed();
                         try {
                             final Object self = chain.getThisObject();
-
                             ModuleLog.dv("CARDBLUR", "mfCtor ret self="
                                     + (self == null ? "null" : self.getClass().getName()));
                             if (self != null) {
                                 View anchor = resolvePopupRoot(self);
                                 if (anchor != null) {
-
                                     final long[] delays = {0L, 80L};
                                     for (final long d : delays) {
                                         anchor.postDelayed(new Runnable() {
@@ -812,7 +789,6 @@ try {
     }
 
     private static View resolvePopupRoot(Object self) {
-
         try {
             Method gcv = Reflect.method(self.getClass(), "getContentView", 0);
             if (gcv == null) {
@@ -822,29 +798,26 @@ try {
                 Object c = gcv.invoke(self);
                 if (c instanceof View) return (View) c;
             }
-        } catch (Throwable ignored) {}
-
+        } catch (Throwable ignored) { ModuleLog.swallow("ShortcutBlurFeature", ignored); }
         for (String fn : new String[]{"mMainMenuWrapper", "mSubMenuWrapper"}) {
             try {
                 Field f = Reflect.field(self.getClass(), fn);
                 if (f == null) continue;
                 Object v = f.get(self);
                 if (v instanceof View) return (View) v;
-            } catch (Throwable ignored) {}
+            } catch (Throwable ignored) { ModuleLog.swallow("ShortcutBlurFeature", ignored); }
         }
         return null;
     }
 
     private static void applySecondaryBlur(Object window) {
         if (!FeatureFlags.SHORTCUT_BLUR) return;
-
         float radius = FeatureFlags.CARD_SECONDARY_BLUR_RADIUS;
         if (radius <= 0.01f) radius = cardBlurRadius();
         if (radius > 200f) radius = 200f;
         int hit = 0;
         for (String fn : new String[]{"mMainMenuWrapper", "mSubMenuWrapper"}) {
             try {
-
                 Field f = Reflect.field(window.getClass(), fn);
                 if (f == null) continue;
                 Object v = f.get(window);
@@ -853,7 +826,6 @@ try {
                 ModuleLog.dv("CARDBLUR", "secondary " + fn + " cls=" + vv.getClass().getName()
                         + " " + vv.getWidth() + "x" + vv.getHeight()
                         + " bg=" + (vv.getBackground() == null ? "null" : vv.getBackground().getClass().getName()));
-
                 OplusCardBlur.apply(vv, radius);
                 hit++;
             } catch (Throwable t) {
@@ -881,7 +853,6 @@ try {
             layer.setClickable(false);
             layer.setFocusable(false);
             layer.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-
             layer.bindTarget(pbv);
             int pvIndex = vg.indexOfChild(pbv);
             int w = pbv.getWidth() > 0 ? pbv.getWidth() : ViewGroup.LayoutParams.WRAP_CONTENT;
@@ -908,7 +879,6 @@ try {
         sFadingOut = true;
         sPopupSeq++;
         sIconAnimStartedSeq = -1L;
-
         sIconBlurRelight = false;
         if (layer == null) { sFadingOut = false; return; }
         try {
@@ -919,7 +889,6 @@ try {
             final ValueAnimator va = ValueAnimator.ofFloat(blurRadius(), 0.0f);
             va.setDuration(BLUR_DURATION);
             va.setInterpolator(new DecelerateInterpolator());
-
             va.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
                 private float last = Float.NaN;
                 @Override
@@ -947,7 +916,6 @@ try {
                             sFadingOut = false;
                             return;
                         }
-
                         if (sIconBlurRelight) {
                             ModuleLog.dv("ICONANIM", "fade-out done but relit (next popup opened), skip remove");
                             sFadingOut = false;
@@ -1026,7 +994,6 @@ try {
     private static void armBlurForView(View view, String mid) {
         if (view == null) return;
         try {
-
             ModuleLog.dv("LIVE", "armBlurForView id=" + mid);
             if (sFadingOut) {
                 sFadingOut = false;

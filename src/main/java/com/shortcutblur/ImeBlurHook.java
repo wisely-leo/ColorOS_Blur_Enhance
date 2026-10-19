@@ -68,10 +68,10 @@ public final class ImeBlurHook {
             sSetBlurRadius = mgrCls.getMethod("setBlurRadius", int.class);
             try {
                 sSetColor = mgrCls.getMethod("setColor", int.class);
-            } catch (Throwable ignored) {}
+            } catch (Throwable ignored) { ModuleLog.swallow("ImeBlurHook", ignored); }
             try {
                 sSetCornerRadius = mgrCls.getMethod("setCornerRadius", float.class);
-            } catch (Throwable ignored) {}
+            } catch (Throwable ignored) { ModuleLog.swallow("ImeBlurHook", ignored); }
             sReflReady = (sCtorViewRootManager != null && sGetBlurDrawable != null
                     && sSetBlurRadius != null);
             ModuleLog.d(TAG, "reflection cache ready=" + sReflReady
@@ -116,7 +116,6 @@ public final class ImeBlurHook {
             new java.util.WeakHashMap<>();
     private static volatile long sLayoutReapplyAt = 0L;
     private static final long LAYOUT_REAPPLY_MIN_MS = 150L;
-
     private static volatile boolean sLastAppliedFloating = false;
     private static volatile boolean sHasAppliedFloating = false;
 
@@ -140,13 +139,12 @@ public final class ImeBlurHook {
                         View skb = tryGetSkbRoot(vv);
                         if (skb != null) target = skb;
                         boolean floating = probeFloatKeyboard(target);
-
                         if (sHasAppliedFloating && floating == sLastAppliedFloating) return;
                         ModuleLog.dv(TAG, "ime size changed " + (r - l) + "x" + (b - t)
                                 + " -> re-apply blur (floating " + sLastAppliedFloating
                                 + " -> " + floating + ")");
                         applyBlur(vv);
-                    } catch (Throwable ignored) {}
+                    } catch (Throwable ignored) { ModuleLog.swallow("ImeBlurHook", ignored); }
                 }
             });
         } catch (Throwable t) {
@@ -241,7 +239,6 @@ public final class ImeBlurHook {
                                XposedModuleInterface.PackageReadyParam param) {
         final ClassLoader cl = param.getClassLoader();
         if (cl == null) return;
-
         if (sInstalled) return;
         synchronized (ImeBlurHook.class) {
             if (sInstalled) return;
@@ -443,7 +440,6 @@ public final class ImeBlurHook {
                         public Object intercept(XposedInterface.Chain chain) throws Throwable {
                             Object r = chain.proceed();
                             try {
-
                                 sLastUiMode = -1;
                                 reapply();
                                 View v = sLastView == null ? null : sLastView.get();
@@ -521,7 +517,7 @@ public final class ImeBlurHook {
                                 }
                             });
                     hooked++;
-                } catch (Throwable ignored) {}
+                } catch (Throwable ignored) { ModuleLog.swallow("ImeBlurHook", ignored); }
             }
         }
         ModuleLog.d(TAG, "key color override installed, hooked=" + hooked
@@ -538,7 +534,7 @@ public final class ImeBlurHook {
             android.content.Context ctx = v.getContext();
             if (ctx != null) sImeContext = ctx.getApplicationContext() != null
                     ? ctx.getApplicationContext() : ctx;
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) { ModuleLog.swallow("ImeBlurHook", ignored); }
 
         synchronized (sPendingLock) {
             if (sPendingView.get() == v) {
@@ -582,7 +578,7 @@ public final class ImeBlurHook {
                 java.lang.ref.WeakReference<Drawable> dr = sBlurOf.get(v);
                 Drawable d = (dr == null) ? null : dr.get();
                 if (d != null) d.setVisible(false, false);
-            } catch (Throwable ignored) {}
+            } catch (Throwable ignored) { ModuleLog.swallow("ImeBlurHook", ignored); }
         }
 
         try {
@@ -602,7 +598,7 @@ public final class ImeBlurHook {
             sMgrOf.clear();
             sLastView = new java.lang.ref.WeakReference<>(null);
             sPendingView = new java.lang.ref.WeakReference<>(null);
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) { ModuleLog.swallow("ImeBlurHook", ignored); }
         ModuleLog.d(TAG, "clearBlur: detached background + invalidated cached drawables");
     }
 
@@ -629,7 +625,7 @@ public final class ImeBlurHook {
             }
             Object r = m.invoke(v);
             if (r instanceof View) return (View) r;
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) { ModuleLog.swallow("ImeBlurHook", ignored); }
         return null;
     }
 
@@ -659,7 +655,6 @@ public final class ImeBlurHook {
                 mgr = sCtorViewRootManager.newInstance(v);
                 d = (Drawable) sGetBlurDrawable.invoke(mgr);
                 if (d == null) {
-
                     if (retry < 3) {
                         ModuleLog.dv(TAG, "doBlur: drawable null, retry#" + (retry + 1));
                         v.postDelayed(new Runnable() {
@@ -688,7 +683,7 @@ public final class ImeBlurHook {
             if (sSetColor != null) {
                 try {
                     sSetColor.invoke(mgr, color);
-                } catch (Throwable ignored) {}
+                } catch (Throwable ignored) { ModuleLog.swallow("ImeBlurHook", ignored); }
             }
 
             float cornerDp = FeatureFlags.IME_BLUR_CORNER_DP;
@@ -717,11 +712,10 @@ public final class ImeBlurHook {
                 }
                 try {
                     sSetCornerRadius.invoke(mgr, cornerPx);
-                } catch (Throwable ignored) {}
+                } catch (Throwable ignored) { ModuleLog.swallow("ImeBlurHook", ignored); }
             }
 
             float density = v.getResources().getDisplayMetrics().density;
-
             int glowRgb = dark ? FeatureFlags.IME_GLOW_COLOR_DARK
                                : FeatureFlags.IME_GLOW_COLOR_LIGHT;
             int glowAlpha = dark ? FeatureFlags.IME_GLOW_ALPHA_DARK
@@ -740,7 +734,6 @@ public final class ImeBlurHook {
 
             v.setBackground(layer);
             v.invalidate();
-
             sLastAppliedFloating = floating;
             sHasAppliedFloating = true;
             watchImeLayout(v);

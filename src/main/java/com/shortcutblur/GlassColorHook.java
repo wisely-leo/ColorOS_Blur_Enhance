@@ -62,7 +62,7 @@ public final class GlassColorHook {
                             == android.content.res.Configuration.UI_MODE_NIGHT_YES;
                 }
             }
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) { ModuleLog.swallow("GlassColorHook", ignored); }
         return false;
     }
 

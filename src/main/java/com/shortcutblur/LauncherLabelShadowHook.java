@@ -11,51 +11,32 @@ final class LauncherLabelShadowHook {
     private static final String CLS_BUBBLE_TV = "com.android.launcher3.BubbleTextView";
     private static final String CLS_OPLUS_BTV = "com.android.launcher3.OplusBubbleTextView";
     private static final String CLS_TEXTVIEW = "android.widget.TextView";
-
     private static final String CLS_DEEP_SHORTCUT_VIEW = "com.android.launcher3.shortcuts.DeepShortcutView";
-
     private static final String CLS_DOUBLE_SHADOW_BTV = "com.android.launcher3.views.DoubleShadowBubbleTextView";
-
     private static final String CLS_IBTV_EXT = "com.android.launcher3.IBubbleTextViewExt";
-
     private static final String FLD_MINFO = "mInfo";
-
     private static final String FLD_WIDGET_NAME = "widgetName";
-
     private static final String FLD_TEXT_CLIP_PATH = "mTextClipPath";
-
     private static final String FLD_SHADOW_RADIUS = "mShadowRadius";
-
     private static final String CLS_WORKSPACE_ITEM_INFO = "com.android.launcher3.model.data.WorkspaceItemInfo";
-
     private static final String CLS_FOLDER_INFO = "com.android.launcher3.model.data.FolderInfo";
-
     private static final String CLS_APPWIDGET_INFO = "com.android.launcher3.model.data.LauncherAppWidgetInfo";
-
     private static final String CLS_WIDGET_HOST_VIEW = "com.android.launcher3.widget.BaseLauncherAppWidgetHostView";
-
     private static final int MAX_PARENT_WALK = 10;
-
     private static final float PAD_EXTRA_PX = 2f;
-
     private static final int[] REAPPLY_DELAYS = {120, 300, 600};
 
     private static final int SHADOW_RGB_BLACK = 0x000000;
 
     private static volatile boolean sInstalled = false;
     private static volatile Class<?> sDeepShortcutCls = null;
-
     private static volatile Class<?> sLauncherCardViewCls = null;
-
     private static volatile ClassLoader sLabelLoader = null;
     private static volatile java.lang.reflect.Field sInfoField = null;
     private static volatile java.lang.reflect.Field sWidgetNameField = null;
-
     private static volatile java.lang.reflect.Field sTextClipField = null;
-
     private static volatile java.lang.reflect.Field sShadowRadiusField = null;
     private static volatile boolean sShadowRadiusTried = false;
-
     private static volatile TextView sDrawingOwner = null;
     private static volatile android.graphics.Path sDrawingPath = null;
 
@@ -67,11 +48,8 @@ final class LauncherLabelShadowHook {
     private static volatile Class<?> sFolderInfoCls = null;
     private static volatile Class<?> sAppWidgetInfoCls = null;
     private static volatile Class<?> sWidgetHostCls = null;
-
     private static volatile Class<?> sDoubleShadowCls = null;
-
     private static volatile Class<?> sWorkspaceCls = null;
-
     private static final int SHADOW_OVERFLOW_TAG = 0x7f0e0462;
     private static volatile Class<?> sLabelCls = null;
 
@@ -133,7 +111,6 @@ final class LauncherLabelShadowHook {
                         @Override
                         public Object intercept(XposedInterface.Chain chain) throws Throwable {
                             Object self = chain.getThisObject();
-
                             if (!FeatureFlags.LAUNCHER_LABEL_SHADOW || !isLabel(self)
                                     || isNotDesktopLabel((View) self)) {
                                 return chain.proceed();
@@ -142,7 +119,6 @@ final class LauncherLabelShadowHook {
                             if (args.length < 4) return chain.proceed(args);
                             TextView tv = (TextView) self;
                             float density = densityOf(tv);
-
                             enableShadowOverflow(tv);
                             args[0] = clampRadius(tv, FeatureFlags.LAUNCHER_LABEL_SHADOW_RADIUS_DP * density);
                             args[1] = 0f;
@@ -216,7 +192,6 @@ final class LauncherLabelShadowHook {
                                         && !isNotDesktopLabel((View) self)) {
                                     final TextView tv = (TextView) self;
                                     applyTo(tv);
-
                                     scheduleReapply(tv);
                                 }
                             } catch (Throwable t) {
@@ -238,7 +213,6 @@ final class LauncherLabelShadowHook {
             @Override
             public void run() {
                 try {
-
                     if (!tv.isAttachedToWindow()) return;
                     if (!FeatureFlags.LAUNCHER_LABEL_SHADOW) return;
                     if (isNotDesktopLabel(tv)) return;
@@ -267,16 +241,13 @@ final class LauncherLabelShadowHook {
                     .intercept(new XposedInterface.Hooker() {
                         @Override
                         public Object intercept(XposedInterface.Chain chain) throws Throwable {
-
                             android.graphics.Path target = sDrawingPath;
                             if (target == null) return chain.proceed();
                             TextView owner = sDrawingOwner;
                             if (owner == null) return chain.proceed();
-
                             sDrawingPath = null;
                             sDrawingOwner = null;
                             try {
-
                                 float pad = FeatureFlags.LAUNCHER_LABEL_SHADOW_RADIUS_DP
                                         * densityOf(owner) + PAD_EXTRA_PX;
                                 int w = owner.getWidth();
@@ -285,10 +256,8 @@ final class LauncherLabelShadowHook {
                                 target.addRect(-pad, -pad, w + pad, h + pad,
                                         android.graphics.Path.Direction.CW);
                             } catch (Throwable t) {
-
                                 ModuleLog.swallow("launcher.label.clippath", t);
                             }
-
                             return chain.proceed();
                         }
                     });
@@ -332,7 +301,6 @@ final class LauncherLabelShadowHook {
                                 }
                                 return chain.proceed();
                             } finally {
-
                                 if (marked) {
                                     sDrawingOwner = prevOwner;
                                     sDrawingPath = prevPath;
@@ -352,7 +320,7 @@ final class LauncherLabelShadowHook {
         if (f == null && !sShadowRadiusTried) {
             f = Reflect.field(TextView.class, FLD_SHADOW_RADIUS);
             if (f != null) {
-                try { f.setAccessible(true); } catch (Throwable ignored) {}
+                try { f.setAccessible(true); } catch (Throwable ignored) { ModuleLog.swallow("LauncherLabelShadowHook", ignored); }
             }
             sShadowRadiusField = f;
             sShadowRadiusTried = true;
@@ -364,10 +332,9 @@ final class LauncherLabelShadowHook {
         try {
             java.lang.reflect.Field f = shadowRadiusField();
             if (f != null) return f.getFloat(tv) > 0f;
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) { ModuleLog.swallow("LauncherLabelShadowHook", ignored); }
         return false;
     }
-
     private static android.graphics.Path textClipPathOf(TextView tv) {
         try {
             java.lang.reflect.Field f = sTextClipField;
@@ -502,7 +469,6 @@ final class LauncherLabelShadowHook {
             if (v instanceof TextView && isLabel(v) && !isNotDesktopLabel(v)) {
                 final TextView tv = (TextView) v;
                 applyTo(tv);
-
                 scheduleReapply(tv);
             }
             if (v instanceof android.view.ViewGroup) {
@@ -523,7 +489,6 @@ final class LauncherLabelShadowHook {
             if (Boolean.TRUE.equals(getTagCompat(tv, SHADOW_OVERFLOW_TAG))) return;
             setTagCompat(tv, SHADOW_OVERFLOW_TAG, Boolean.TRUE);
             setClipToPaddingCompat(tv, false);
-
             Class<?> ws = sWorkspaceCls;
             View cur = parentOf(tv);
             for (int i = 0; i < 6 && cur != null; i++) {
@@ -541,7 +506,6 @@ final class LauncherLabelShadowHook {
     }
 
     private static float clampRadius(TextView tv, float radiusPx) {
-
         try {
             int fh = tv.getLineHeight();
             if (fh < 12) return radiusPx;
@@ -573,7 +537,6 @@ final class LauncherLabelShadowHook {
         boolean widgetHost;
         boolean inCard;
     }
-
     private static void scanHostChain(View v, HostFlags out) {
         Class<?> ds = sDeepShortcutCls;
         Class<?> ws = sWorkspaceCls;
@@ -589,7 +552,6 @@ final class LauncherLabelShadowHook {
             } else if (wh != null && wh.isInstance(p)) {
                 out.widgetHost = true;
             } else if (lc != null && lc.isInstance(p)) {
-
                 out.inCard = true;
             } else {
                 String cn = c.getName();
@@ -617,10 +579,8 @@ final class LauncherLabelShadowHook {
         final boolean inCard = hf.inCard;
 
         if (inShortcut) return true;
-
         Class<?> dsc = sDoubleShadowCls;
         if (dsc != null && dsc.isInstance(v)) return true;
-
         if (inCard) return false;
 
         Object info = null;
@@ -628,16 +588,14 @@ final class LauncherLabelShadowHook {
         if (f != null) {
             try {
                 info = f.get(v);
-            } catch (Throwable ignored) {}
+            } catch (Throwable ignored) { ModuleLog.swallow("LauncherLabelShadowHook", ignored); }
         }
         if (info != null) {
             if (sWorkspaceItemCls != null && sWorkspaceItemCls.isInstance(info)) return false;
             if (sFolderInfoCls != null && sFolderInfoCls.isInstance(info)) return false;
             if (sAppWidgetInfoCls != null && sAppWidgetInfoCls.isInstance(info)) return false;
-
             return !widgetHost;
         }
-
         return !(inWorkspace || widgetHost);
     }
 
@@ -655,7 +613,7 @@ final class LauncherLabelShadowHook {
                 sSetClipToPaddingM = m;
             }
             m.invoke(v, clip);
-        } catch (Throwable ignored) {}
+        } catch (Throwable ignored) { ModuleLog.swallow("LauncherLabelShadowHook", ignored); }
     }
 
     private static Object getTagCompat(View v, int key) {
@@ -682,7 +640,7 @@ final class LauncherLabelShadowHook {
             }
             m.invoke(v, key, value);
         } catch (Throwable t) {
-            try { v.setTag(value); } catch (Throwable ignored) {}
+            try { v.setTag(value); } catch (Throwable ignored) { ModuleLog.swallow("LauncherLabelShadowHook", ignored); }
         }
     }
 

@@ -20,7 +20,6 @@ final class RecentsBlur {
     private static HookApi API;
     private static volatile boolean sStateInOverview = false;
     private static volatile float RECENTS_BLUR_MAX = 64.0f;
-
     private static volatile float sScaleClampMin = 0.96f;
     private static volatile long sConfLastRead = 0L;
     private static final String CONF_PATH = "/sdcard/Download/ColorOSBlurEnhance.conf";
@@ -43,14 +42,10 @@ final class RecentsBlur {
             new android.os.Handler(android.os.Looper.getMainLooper());
     private static Runnable sPendingClear = null;
     private static volatile Runnable sPendingEnter = null;
-
     private static volatile long sWzLastLogMs = 0L;
-
     private static volatile boolean sWallpaperJudgeEnabled = true;
-
     private static volatile long sLastWallpaperHandledMs = 0L;
     private static final long WALLPAPER_MAIN_WINDOW_MS = 400L;
-
     private static final long STATE_FALLBACK_DELAY_MS = 250L;
     private static volatile boolean sTintEnabled = false;
     private static volatile java.lang.ref.WeakReference<View> sLastAnchor = null;
@@ -229,7 +224,6 @@ final class RecentsBlur {
     }
     private static int installEarlySignalProbes(ClassLoader loader) {
         int n = 0;
-
         try {
             Class<?> odc = Reflect.loadClass(
                     "com.android.launcher3.uioverrides.states.OplusDepthController", loader);
@@ -249,7 +243,6 @@ final class RecentsBlur {
                                         Object[] a = chain.getArgs().toArray();
                                         String type = (a.length > 1 && a[1] != null)
                                                 ? String.valueOf(a[1]) : "?";
-
                                         if (sWallpaperJudgeEnabled) {
                                             boolean enter = "app_recent_enter".equals(type);
                                             boolean exit = !enter && "app_recent_exit".equals(type);
@@ -320,7 +313,6 @@ final class RecentsBlur {
             sPendingExit = null;
         }
     }
-
     private static void stateFallbackEnter(Object lrvSelf) {
         if (sStateInOverview) return;
         final java.lang.ref.WeakReference<Object> ref = new java.lang.ref.WeakReference<>(lrvSelf);
@@ -486,6 +478,7 @@ final class RecentsBlur {
     }
     private static void blurOne(View v, float r) {
         if (v == null) return;
+        if (r > 0.01f && !FeatureFlags.RECENTS_BLUR) return;
         sRecentsBlurView = new java.lang.ref.WeakReference<>(v);
         sRecentsTargetRadius = r;
         if (sAnchorUseWorkspace && r > 0.5f) {
@@ -510,7 +503,6 @@ final class RecentsBlur {
             ModuleLog.e("BLURAPPLY", "setRenderEffect failed r=" + rApplied, t);
         }
     }
-
     private static volatile boolean sProbesInstalled = false;
     private static int installRecentsIconBlurProbe(ClassLoader loader) {
         if (sProbesInstalled) return 0;
@@ -567,7 +559,6 @@ final class RecentsBlur {
                                             View v = (View) self;
                                             sCachedDragLayer = new java.lang.ref.WeakReference<>(v);
                                             if (a < 0.999f) {
-
                                                 if (ModuleLog.VERBOSE) {
                                                     ModuleLog.dv("DRAGALPHA", "setAlpha a=" + a
                                                             + " cur=" + v.getAlpha()
@@ -611,7 +602,6 @@ final class RecentsBlur {
                                             reloadConfigIfStale();
                                             float clamped = sClampEnabled ? Math.max(f, sScaleClampMin) : f;
                                             if (clamped != f) {
-
                                                 if (ModuleLog.VERBOSE) {
                                                     ModuleLog.dv("SCALECLAMP", tag + " " + f + " -> " + clamped);
                                                 }
@@ -635,7 +625,6 @@ final class RecentsBlur {
         }
         return n;
     }
-
     private static volatile boolean sStateHooksInstalled = false;
     private static int installRecentsStateBlurHooks(ClassLoader loader) {
         if (sStateHooksInstalled) return 0;
@@ -665,7 +654,6 @@ final class RecentsBlur {
                                 ModuleLog.d("STATEBLUR", "onStateTransitionStart toState="
                                         + stateName(toState) + " toOverview=" + toOverview
                                         + " toNormal=" + toNormal);
-
                                 if (toOverview) {
                                     stateFallbackEnter(self);
                                 } else if (toNormal) {
@@ -692,7 +680,6 @@ final class RecentsBlur {
                                 ModuleLog.d("STATEBLUR", "onStateTransitionComplete finalState="
                                         + stateName(finalState) + " toNormal=" + toNormal
                                         + " inOverview=" + sStateInOverview);
-
                                 if (toNormal && sStateInOverview) {
                                     stateFallbackExit(self, "stateComplete:NORMAL");
                                 }
@@ -712,7 +699,6 @@ final class RecentsBlur {
                             public Object intercept(XposedInterface.Chain chain) throws Throwable {
                                 Object self = chain.getThisObject();
                                 ModuleLog.d("STATEBLUR", "onStateTransitionCancel inOverview=" + sStateInOverview);
-
                                 if (sStateInOverview) {
                                     stateFallbackExit(self, "stateCancel");
                                 }
@@ -804,7 +790,6 @@ final class RecentsBlur {
             if (tn != null) sTintEnabled = !tn.trim().equalsIgnoreCase("off");
             String dg = i.getStringExtra("diag");
             if (dg != null) sDiagEnabled = !dg.trim().equalsIgnoreCase("off");
-
             String wj = i.getStringExtra("walljudge");
             if (wj != null) sWallpaperJudgeEnabled = !wj.trim().equalsIgnoreCase("off");
             if (anchorChanged) {
@@ -828,7 +813,6 @@ final class RecentsBlur {
     }
     private static void reloadConfigIfStale() {
         long now = android.os.SystemClock.uptimeMillis();
-
         if (now - sConfLastRead < 5000L) return;
         sConfLastRead = now;
         try {
@@ -872,8 +856,7 @@ final class RecentsBlur {
                 }
                 sConfErrorLogged = false;
             } finally {
-
-                if (br != null) { try { br.close(); } catch (Throwable ignored) {} }
+                if (br != null) { try { br.close(); } catch (Throwable ignored) { ModuleLog.swallow("RecentsBlur", ignored); } }
             }
         } catch (Throwable t) {
             if (!sConfErrorLogged) {

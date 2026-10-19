@@ -36,7 +36,6 @@ public final class SoftUi {
     public static float RADIUS      = 22f;
     public static float ROW_H       = 48f;
     public static float PAD         = 16f;
-
     public static final int ROW_TITLE_ID = View.generateViewId();
     public static float GAP         = 10f;
     public static float SIDE        = 16f;
@@ -207,7 +206,6 @@ public final class SoftUi {
     public static void markRowGroup(View v) {
         if (v == null) return;
         try { v.setTag(TAG_GROUP, Boolean.TRUE); } catch (Throwable ignored) {}
-
         if (v instanceof ViewGroup) {
             try { ((ViewGroup) v).setClipChildren(false); ((ViewGroup) v).setClipToPadding(false); }
             catch (Throwable ignored) {}
@@ -221,7 +219,6 @@ public final class SoftUi {
     }
 
     static final int TAG_GROUP = "softui_row_group".hashCode();
-
     static final int TAG_PRESS_FEEDBACK = 0x7F00B1F0;
 
     static void applyPressFeedback(View v, boolean roundTop, boolean roundBottom) {
@@ -237,10 +234,8 @@ public final class SoftUi {
         final int botEx = roundBottom ? dp(c, PAD / 2f) : 0;
         final float rt = roundTop ? PRESS_RADIUS : 0f;
         final float rb = roundBottom ? PRESS_RADIUS : 0f;
-
         Integer rowFill = getPressFill(v);
         final int fill = rowFill != null ? rowFill : (groupFill != null ? groupFill : defaultPressFill());
-
         final int cacheKey = fill * 31 * 31 + (int) (rt * 7) * 31 + (int) (rb * 7);
         Object last = v.getTag(TAG_PRESS_FEEDBACK);
         if (last instanceof Integer && ((Integer) last) == cacheKey
@@ -277,7 +272,6 @@ public final class SoftUi {
     private static void schedulePressGroupRefresh(final View v) {
         schedulePressGroupRefresh(v, 0);
     }
-
     private static final int PRESS_REFRESH_MAX_RETRY = 3;
     private static void schedulePressGroupRefresh(final View v, final int attempt) {
         if (v == null) return;
@@ -285,7 +279,6 @@ public final class SoftUi {
             final android.view.ViewParent p = v.getParent();
             if (p == null) {
                 if (attempt >= PRESS_REFRESH_MAX_RETRY) {
-
                     if (isPressable(v) && v.getBackground() == null) {
                         applyPressFeedback(v, true, true, null);
                     }
@@ -296,7 +289,6 @@ public final class SoftUi {
                 });
                 return;
             }
-
             android.view.ViewParent cur = p;
             while (cur instanceof View) {
                 if (cur instanceof Card) {
@@ -561,12 +553,10 @@ public final class SoftUi {
             setClickable(true);
             touchSlop = android.view.ViewConfiguration.get(c).getScaledTouchSlop();
         }
-
         public void setValue(float v) {
             value = snapValue(v);
             invalidate();
         }
-
         public Slider setStep(float step) {
             this.step = step > 0f ? step : 0f;
             snap();
@@ -576,7 +566,6 @@ public final class SoftUi {
         private float snapValue(float v) {
             float clamped = Math.max(min, Math.min(max, v));
             if (step <= 0f) return clamped;
-
             float k = Math.round((clamped - min) / step);
             float snapped = min + k * step;
             snapped = Math.max(min, Math.min(max, snapped));
@@ -682,9 +671,7 @@ public final class SoftUi {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint border = new Paint(Paint.ANTI_ALIAS_FLAG);
         private android.graphics.LinearGradient rainbow;
-
         private float rainbowLeft = Float.NaN, rainbowRight = Float.NaN;
-
         private final float[] hsv = new float[3];
         private float downX, downY;
         private boolean dragging = false;
@@ -732,7 +719,6 @@ public final class SoftUi {
             float cy = h / 2f;
             float left = maxTh, right = w - maxTh;
             track.set(left, cy - trackH / 2f, right, cy + trackH / 2f);
-
             if (rainbow == null
                     || Math.abs(rainbowLeft - left) > 0.5f
                     || Math.abs(rainbowRight - right) > 0.5f) {
@@ -759,7 +745,6 @@ public final class SoftUi {
 
             float cx = left + (right - left) * frac;
             if (enabledColor) {
-
                 hsv[0] = frac * 360f; hsv[1] = 0.72f; hsv[2] = 0.88f;
                 paint.setColor(android.graphics.Color.HSVToColor(hsv));
             } else {
@@ -873,7 +858,6 @@ public final class SoftUi {
     public interface ColorInputCb { void onColor(int rgb, boolean valid); }
 
     public interface OnInput { void onInput(String text); }
-
     public static Row input(Context c, String title, String hint, String value,
                             OnInput onInput) {
         return input(c, title, hint, value,
@@ -898,7 +882,6 @@ public final class SoftUi {
         Row row = new Row(c, title, et, false);
         return row;
     }
-
     static android.widget.EditText buildInput(Context ctx, float textSize) {
         android.widget.EditText et = new android.widget.EditText(ctx);
         et.setTextSize(textSize);
@@ -1093,7 +1076,6 @@ public final class SoftUi {
             final int m = rows.size();
             for (int k = 0; k < m; k++) {
                 View ch = rows.get(k);
-
                 boolean first = (k == 0), last = (k == m - 1);
                 if (SoftUi.isPressable(ch)) {
                     SoftUi.applyPressFeedback(ch, first, last, cardPressFill);
@@ -1115,7 +1097,6 @@ public final class SoftUi {
             postRefreshPressGroup();
             return this;
         }
-
         private static void collectRows(ViewGroup parent, java.util.List<View> out) {
             if (parent == null) return;
             final int n = parent.getChildCount();
@@ -1496,7 +1477,6 @@ public final class SoftUi {
             this.content = content;
         }
         @Override View scrollSource() { return content; }
-
         private long lastFingerprint = Long.MIN_VALUE;
 
         private long contentFingerprint(int w, int h) {
@@ -1535,7 +1515,6 @@ public final class SoftUi {
                         sw, sh, android.graphics.Bitmap.Config.ARGB_8888);
                 lastFingerprint = Long.MIN_VALUE;
             }
-
             long fp = contentFingerprint(w, h);
             if (fp != lastFingerprint) {
                 buf.eraseColor(CANVAS);
@@ -1647,7 +1626,6 @@ public final class SoftUi {
             for (int i = 0; i < VIEWS.size(); i++) {
                 GlassView v = VIEWS.get(i).get();
                 if (v == null || !v.isAttachedToWindow()) continue;
-
                 if (!v.isShown()) continue;
                 v.onTick();
                 alive++;
@@ -1713,7 +1691,6 @@ public final class SoftUi {
     static void diag(String s) {
         if (s == null) return;
         if (!App.logEnabled()) return;
-
         UiLog.write("[fx] " + s);
     }
 
@@ -1833,7 +1810,6 @@ public final class SoftUi {
                     lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
                     holder.setLayoutParams(lp);
                     holder.setVisibility(View.GONE);
-
                     Card.requestRefresh(holder);
                 }
             });
@@ -2454,7 +2430,6 @@ public final class SoftUi {
         t.setLayoutParams(lp);
         return t;
     }
-
     public static View group(Context c, String title, View action) {
         LinearLayout line = new LinearLayout(c);
         line.setOrientation(LinearLayout.HORIZONTAL);
@@ -2486,11 +2461,9 @@ public final class SoftUi {
     public static TextView statusText(Context c, String s) {
         return text(c, s == null ? "" : s, SUB_SIZE, TEXT_SECONDARY);
     }
-
     public static void toast(Context c, String msg) {
         toast(c, msg, false);
     }
-
     public static void toast(Context c, String msg, boolean longDuration) {
         if (c == null || msg == null || msg.length() == 0) return;
         try {
@@ -2610,7 +2583,6 @@ public final class SoftUi {
         col.setOnClickListener(v -> { if (cb != null) cb.onClick(); });
         return col;
     }
-
     public static View infoSub(Context c, String title, String subtitle, View right) {
         LinearLayout texts = new LinearLayout(c);
         texts.setOrientation(LinearLayout.VERTICAL);
@@ -2639,7 +2611,6 @@ public final class SoftUi {
                               Slider.OnChange cb) {
         return slider(c, title, value, min, max, unit, 0f, cb);
     }
-
     public static View slider(Context c, String title, float value,
                               float min, float max, final String unit,
                               final float step, Slider.OnChange cb) {

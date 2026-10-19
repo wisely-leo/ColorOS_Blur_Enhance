@@ -55,18 +55,15 @@ public final class ModuleLog {
     private static final java.util.concurrent.ConcurrentHashMap<String,
             java.util.concurrent.atomic.AtomicInteger> SWALLOWED =
             new java.util.concurrent.ConcurrentHashMap<>();
-
     public static void swallow(String tag, Throwable t) {
         if (!enabled()) return;
         try {
             java.util.concurrent.atomic.AtomicInteger c = SWALLOWED.get(tag);
             if (c == null) {
-
                 if (SWALLOWED.size() >= MAX_SWALLOW_TAGS) return;
                 c = new java.util.concurrent.atomic.AtomicInteger();
                 java.util.concurrent.atomic.AtomicInteger prev = SWALLOWED.putIfAbsent(tag, c);
                 if (prev != null) c = prev;
-
                 if (prev == null) {
                     String detail = "swallow[" + tag + "] first";
                     if (t != null) {
@@ -115,7 +112,6 @@ public final class ModuleLog {
 
     private static synchronized void write(String s) {
         if (!enabled()) return;
-
         if (VERBOSE) {
             try {
                 android.util.Log.i(TAG, s.trim());
@@ -127,7 +123,6 @@ public final class ModuleLog {
                 if (logFile == null) { broken = true; return; }
                 logBytes = logFile.length();
             }
-
             if (logBytes > MAX_LOG_BYTES) {
                 closeQuietly();
                 try { new FileOutputStream(logFile, false).close(); } catch (Throwable ignore) {}
@@ -158,7 +153,6 @@ public final class ModuleLog {
             }
             logWriter.write(s);
             logBytes += s.length();
-
             long now = SystemClock.uptimeMillis();
             if (logBytes - lastFlushBytes >= 4096L || (now - lastFlushAt) >= FLUSH_INTERVAL_MS) {
                 logWriter.flush();

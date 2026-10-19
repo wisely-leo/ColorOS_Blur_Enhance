@@ -40,17 +40,15 @@ public final class ClockTextAlphaHook {
         }
     }
     private static final class HookColor implements io.github.libxposed.api.XposedInterface.Hooker {
-
         private final java.util.Set<String> logged =
                 java.util.concurrent.ConcurrentHashMap.newKeySet();
-
         private static final long NOTIFY_MIN_INTERVAL_MS = 200L;
         private long lastNotifyAt = 0L;
         private void notifyThrottled() {
             long now = android.os.SystemClock.uptimeMillis();
             if (now - lastNotifyAt < NOTIFY_MIN_INTERVAL_MS) return;
             lastNotifyAt = now;
-            try { GlyphBlurRenderer.notifyContentMaybeChangedAll(); } catch (Throwable ignored) {}
+            try { GlyphBlurRenderer.notifyContentMaybeChangedAll(); } catch (Throwable ignored) { ModuleLog.swallow("ClockTextAlphaHook", ignored); }
         }
         @Override
         public Object intercept(Chain chain) throws Throwable {
@@ -64,13 +62,11 @@ public final class ClockTextAlphaHook {
                         int color = (Integer) a1;
                         if (isClockTextId(id)) {
                             if (ClockIds.isRealmeLockId(id)) {
-
                                 notifyThrottled();
                                 return chain.proceed();
                             }
                             int newColor = (color & 0x00FFFFFF) | (targetAlpha() << 24);
                             notifyThrottled();
-
                             if (logged.add(Integer.toHexString(id) + ":" + Integer.toHexString(color)
                                     + ":" + Integer.toHexString(newColor))) {
                                 ModuleLog.d("CTCH", "setTextColor id=0x" + Integer.toHexString(id)

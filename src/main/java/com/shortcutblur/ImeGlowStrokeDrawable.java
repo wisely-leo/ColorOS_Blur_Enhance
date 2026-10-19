@@ -12,9 +12,7 @@ import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
 
 final class ImeGlowStrokeDrawable extends Drawable {
-
     static final int MODE_ALL = 0;
-
     static final int MODE_TOP_ONLY = 1;
 
     private static final float[] RAMP_POS = { 0f, 0.35f, 0.70f, 1f };
@@ -160,7 +158,6 @@ final class ImeGlowStrokeDrawable extends Drawable {
             mFill.setShader(mGradCorner);
             final float cx0 = left + r, cy0 = top + r;
             final float cx1 = right - r, cy1 = bottom - r;
-
             final float topCornersBottom = topOnly ? top + band : cy0;
             drawCorner(canvas, cx0, cy0, r, left, top, cx0, topCornersBottom);
             drawCorner(canvas, cx1, cy0, r, cx1, top, right, topCornersBottom);

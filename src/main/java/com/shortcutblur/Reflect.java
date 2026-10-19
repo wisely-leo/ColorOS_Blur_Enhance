@@ -17,7 +17,6 @@ public final class Reflect {
     private static final Map<FKey, Field> FIELD_CACHE = new ConcurrentHashMap<>();
     private static final Map<Class<?>, Constructor<?>> CTOR_CACHE = new ConcurrentHashMap<>();
     private static final Map<String, Class<?>> CLASS_CACHE = new ConcurrentHashMap<>();
-
     private static final Map<String, Method> TYPED_CACHE = new ConcurrentHashMap<>();
 
     private static final Set<MKey> MISS_METHOD = ConcurrentHashMap.newKeySet();
@@ -73,7 +72,6 @@ public final class Reflect {
     }
 
     private static <K, V> void put(Map<K, V> cache, K key, V value) {
-
         if (cache.size() >= MAX_CACHE) cache.clear();
         cache.put(key, value);
     }
@@ -102,7 +100,6 @@ public final class Reflect {
                     }
                 }
             } catch (Throwable t) {
-
                 aborted = true;
             }
             k = k.getSuperclass();
@@ -148,7 +145,6 @@ public final class Reflect {
             } catch (NoSuchFieldException nsf) {
                 k = k.getSuperclass();
             } catch (Throwable t) {
-
                 return null;
             }
         }
@@ -205,7 +201,6 @@ public final class Reflect {
     public static Class<?> loadClass(String name, ClassLoader loader) {
         if (loader == null) return null;
         Class<?> cached = CLASS_CACHE.get(name);
-
         if (cached != null && cached.getClassLoader() == loader) return cached;
         String missKey = name + "@" + System.identityHashCode(loader);
         if (MISS_CLASS.contains(missKey)) return null;

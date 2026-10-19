@@ -104,7 +104,7 @@ public final class ViewUtils {
     }
     public static String dumpTreeIds(View root, int maxNodes) {
         StringBuilder sb = new StringBuilder();
-        try { dumpTreeIds(root, 0, sb, new int[]{0}, maxNodes); } catch (Throwable ignored) {}
+        try { dumpTreeIds(root, 0, sb, new int[]{0}, maxNodes); } catch (Throwable ignored) { ModuleLog.swallow("ViewUtils", ignored); }
         return sb.toString();
     }
     private static void dumpTreeIds(View v, int depth, StringBuilder sb, int[] count, int maxNodes) {

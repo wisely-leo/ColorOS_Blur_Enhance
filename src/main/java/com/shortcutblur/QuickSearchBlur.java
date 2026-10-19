@@ -38,6 +38,7 @@ public final class QuickSearchBlur {
             @Override
             public Object intercept(XposedInterface.Chain chain) throws Throwable {
                 try {
+                    if (!FeatureFlags.QUICKSEARCH_BLUR) return chain.proceed();
                     Object self = chain.getThisObject();
                     if (self instanceof View && isDecorView((View) self) && shouldTransparent()) {
                         Object[] args = chain.getArgs().toArray();

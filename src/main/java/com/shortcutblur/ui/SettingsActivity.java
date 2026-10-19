@@ -30,12 +30,11 @@ public class SettingsActivity extends Activity {
     private static final int MAX_BG_MB = 15;
     private static final long MAX_BG_BYTES = MAX_BG_MB * 1024L * 1024L;
 
-    private static final String LOG_TAG_VER = "v46.4";
+    private static final String LOG_TAG_VER = "v47";
     static void lg(String s) {
         if (s == null) return;
         if (!App.logEnabled()) return;
         try { android.util.Log.i("SoftUi", s); } catch (Throwable ignored) {}
-
         UiLog.write(s);
     }
 private SettingsStore store;
@@ -48,10 +47,8 @@ private SettingsStore store;
     @Override
     protected void onDestroy() {
         destroyed = true;
-
         try { SoftUi.clearBackdrop(); } catch (Throwable ignored) {}
         try { SoftUi.GlassSyncUnhook(); } catch (Throwable ignored) {}
-
         try { Adb.removePending(); } catch (Throwable ignored) {}
         adbGateShowing = false;
         shell = null;
@@ -108,7 +105,6 @@ private SettingsStore store;
                     + "若不获取权限，将退出设置界面。";
         }
         try {
-
             Runnable clearFlag = () -> adbGateShowing = false;
             SoftUi.confirm(uiRoot, title, msg,
                     connected ? "立即获取" : "重试",
@@ -117,7 +113,6 @@ private SettingsStore store;
                         clearFlag.run();
                         lg("[ADB门禁] 用户选择获取/重试");
                         if (!connected) {
-
                             safePost(() -> {
                                 if (Adb.status() == Adb.OK) {
                                     lg("[ADB门禁] 重试成功，放行");
@@ -128,7 +123,6 @@ private SettingsStore store;
                             });
                             return;
                         }
-
                         Adb.request(SettingsActivity.this, () -> safePost(() -> {
                             if (Adb.status() == Adb.OK) {
                                 lg("[ADB门禁] 授权成功，放行: " + Adb.label());
@@ -218,7 +212,6 @@ private SettingsStore store;
                 lg("shell inset ok: shellTop=" + shell.getTop() + " shellH=" + shell.getHeight());
             } catch (Throwable t) { lg("shell inset 失败: " + t); }
             lg("setContentView OK —— onCreate 完成");
-
             safePost(() -> checkAdbGate());
         } catch (Throwable t) {
             lg("!!! 异常: " + t);
@@ -379,7 +372,6 @@ private SettingsStore store;
             recreate();
         }
     }
-
     private static String extractVersionDigits(String tag) {
         StringBuilder d = new StringBuilder();
         for (int i = 0; i < tag.length(); i++) {
@@ -411,7 +403,44 @@ private SettingsStore store;
     }
 
     private static final String CHANGELOG =
-            "v46.4\n"
+            "v47\n"
+            + "· 新增「横屏应用过渡旋转」（默认开启）\n"
+            + "  · 横屏应用退出时保持横屏，过渡动画中逐帧逆时针转 90° 落回竖屏桌面；从桌面打开横屏应用时反向\n"
+            + "  · 窗口层与图标层同步旋转，两者不会分离；不裁切窗口，曲线线性直通，不起新动画\n"
+            + "  · 设置界面新增开关，开 / 关下一帧即生效，无需重启桌面\n"
+            + "· 修复横屏旋转整体不生效\n"
+            + "  · 目标类名解析路径写错（实际位于 systemui.shared.system 下），安装期直接失败\n"
+            + "  · 安装过程独立隔离，本功能出问题不再牵连其它任何功能\n"
+            + "· 修复末尾渐变破坏过渡动画拖尾\n"
+            + "  · 淡出改为与系统自身的透明度曲线相乘，不再覆盖，拖尾与渐变都保留\n"
+            + "· 修复动画幅度大时末尾被提前淡出「打断」\n"
+            + "  · 判据不再看进度，改为逐帧测图标实际位移与尺寸变化，确定停住才动手\n"
+            + "  · 收尾阶段以固定角速度顺时针回正（约 17 帧走完 90°），淡出结束时角度归零，与真实图标完全重合\n"
+            + "· 开关即时生效\n"
+            + "  · 设置页关掉任意功能后宿主进程立即停止处理，不必重启桌面 / 输入法等\n"
+            + "  · 「桌面卡片模糊」「桌面应用名阴影」开 / 关都立刻生效\n"
+            + "· 修复部分开关在设置页改了不生效\n"
+            + "  · 配置写盘与实时广播统一为同一份键值表，不再出现两处不一致\n"
+            + "  · 广播热更改为统一解析，之前只有部分参数能实时生效\n"
+            + "· 性能\n"
+            + "  · 进度读取改为直接访问字段，每帧不再产生临时对象\n"
+            + "  · 场景 / 横竖 / 目标信息按动画缓存，窗口通道每帧反射次数由 6~7 次降到 3 次\n"
+            + "  · 两条通道共享变换矩阵，120Hz 下每秒减少上百次原生对象分配\n"
+            + "  · 收尾阶段不再重复写调试日志，避免同步文件写入落在桌面线程上\n"
+            + "· 修复内存滞留\n"
+            + "  · 逐帧缓存里的强引用（含一块 SurfaceControl）从不释放，动画结束与功能关闭时改为主动清空\n"
+            + "· 代码结构整理（行为不变）\n"
+            + "  · 配置读写与词表解析独立为 FlagStore\n"
+            + "  · 屏幕亮灭 / 配置广播独立为 BroadcastBridge\n"
+            + "  · 入口类只保留包名路由与 hook 安装\n"
+            + "· 可诊断性\n"
+            + "  · 78 处静默吞掉的异常改为可记录（日志开关关闭时零开销）\n"
+            + "· 版本号编码规则调整\n"
+            + "  · 版本号与内部版本码一一对应：v47 对应 470，v47.1 对应 471\n"
+            + "  · 末位到 9 后继续发布自动进位到下一个功能位（479 之后为 480）\n"
+            + "· 内部版本号同步至 v47\n"
+            + "\n"
+            + "v46.4\n"
             + "· 修复桌面卡片黑屏（调整卡片大小后整个桌面变黑）\n"
             + "  · 卡片重建时若目标已是模糊背景则直接跳过，避免模糊节点重复挂载导致合成器出错\n"
             + "  · 原生接口未真正替换背景时，改为「原样回滚」原背景，不再把背景清空（清空后无人补色是黑屏的直接成因）\n"
@@ -568,6 +597,30 @@ private SettingsStore store;
             lg("showChangelog fail: " + t);
         }
     }
+    private static final String ORIGIN =
+            "部分功能最早在作者的另一仓库独立迭代，之后整体合入本仓库，并在此继续维护。\n"
+            + "两个仓库同属同一作者（wisely-leo），该早期仓库不构成独立的第三方来源。\n"
+            + "\n"
+            + "早期迭代仓库\n"
+            + "  Color-OS-16-RotFall\n"
+            + "  github.com/wisely-leo/Color-OS-16-RotFall\n"
+            + "\n"
+            + "已合入并在此维护的功能\n"
+            + "  横屏应用过渡旋转（v47 合入）\n"
+            + "    合入时已重写为适配本模块的分层结构（安装隔离、开关热更、日志体系）；\n"
+            + "    合入后继续修复：类名解析路径、末尾淡出破坏拖尾、大幅度动画被提前淡出打断、\n"
+            + "    回正角速度、逐帧开销与内存滞留等\n"
+            + "\n"
+            + "同步状态\n"
+            + "  早期仓库中的代码为当时版本，其后所有修复均只在本仓库进行，两者不再同步。\n"
+            + "  需要最新实现请以本仓库为准。";
+    private void showOrigin() {
+        try {
+            SoftUi.infoDialog(shell, "来源说明", ORIGIN, "关闭");
+        } catch (Throwable t) {
+            lg("showOrigin fail: " + t);
+        }
+    }
     private void checkUpdate(final android.widget.TextView status) {
         final SettingsStore st = store;
         new Thread(() -> {
@@ -595,7 +648,6 @@ private SettingsStore store;
                         while ((line = br.readLine()) != null) sb.append(line);
                         body = sb.toString();
                     } finally {
-
                         if (br != null) { try { br.close(); } catch (Throwable ignored) {} }
                     }
                     String tag = jsonStr(body, "tag_name");
@@ -621,7 +673,6 @@ private SettingsStore store;
                 lg("checkUpdate fail: " + t);
                 msg = "!网络错误";
             } finally {
-
                 if (conn != null) { try { conn.disconnect(); } catch (Throwable ignored) {} }
             }
             final String m = msg;
@@ -735,7 +786,6 @@ private SettingsStore store;
             return null;
         }
     }
-
     private SoftUi.Card[] buildAboutCards() {
         final String GITHUB = "https://github.com/wisely-leo/ColorOS_Blur_Enhance";
         final String COOLAPK = "https://www.coolapk.com/u/26072346";
@@ -754,7 +804,8 @@ private SettingsStore store;
                 SoftUi.actionArrow(this, "作者",
                         SoftUi.statusText(this, store.authorName()),
                         () -> openUrl(COOLAPK)),
-                SoftUi.link(this, "GitHub 项目主页", () -> openUrl(GITHUB)));
+                SoftUi.link(this, "GitHub 项目主页", () -> openUrl(GITHUB)),
+                SoftUi.link(this, "来源说明", () -> showOrigin()));
         SoftUi.Card cardFiles = SoftUi.card(this,
                 SoftUi.infoBlock(this, "配置文件",
                         "/data/local/tmp/ColorOSBlurEnhance/blur.conf"),
@@ -808,7 +859,6 @@ private SettingsStore store;
 
             View imeRadiusRow = SoftUi.slider(this, "模糊程度", store.getImeBlurRadius(), 0f, 350f, "",
                     v -> store.setImeBlurRadius(v));
-
             View imeMaskRow = SoftUi.slider(this, "白灰蒙版强度", store.getImeBlurMask() * 100f, 0f, 100f, "%",
                     v -> store.setImeBlurMask(v / 100f));
 
@@ -875,7 +925,6 @@ private SettingsStore store;
                     recentsRow);
 
             final int[] lsDarkRef = { store.getLabelShadowDark() };
-
             final float[] lsDarkPctRef = { (lsDarkRef[0] >>> 24) / 255f * 100f };
             View lsDarkRow = SoftUi.slider(this, "阴影浓度",
                     lsDarkPctRef[0], 0, 100, "%",
@@ -895,6 +944,10 @@ private SettingsStore store;
                 SoftUi.applyFold(lsFoldHolder, v, true);
             });
             SoftUi.Card cardLabelShadow = SoftUi.card(this, lsToggleRow, lsFoldHolder);
+            final SoftUi.Row hrToggleRow = (SoftUi.Row) SoftUi.toggleWithDependents(this,
+                    "横屏应用过渡旋转", store.isHomeRotate(), null)[0];
+            hrToggleRow.setOnToggle(v -> store.setHomeRotate(v));
+            SoftUi.Card cardHomeRotate = SoftUi.card(this, hrToggleRow);
 
             View clockAlphaRow = SoftUi.slider(this, "时钟透明度",
                     store.getClockIconAlpha() * 100f, 0, 100, "%",
@@ -1016,7 +1069,6 @@ private SettingsStore store;
                         syncCardEnable.run();
                     },
                     clockAlphaRow, clockBrightRow, glassRows[0]);
-
             SoftUi.Card cardClock = SoftUi.card(this, clockRows[0], clockRows[1], glassRows[1], cardBlurRow);
 
             syncGlassEnable.run();
@@ -1130,7 +1182,7 @@ private SettingsStore store;
             SoftUi.Card cardFiles = about[2];
             SoftUi.Card cardNote = about[3];
             SoftUi.Card cardOss = about[4];
-            SoftUi.Card[] cards = { cardFunc, cardImeBlur, cardClock, cardPost, cardOther,
+            SoftUi.Card[] cards = { cardFunc, cardImeBlur, cardClock, cardHomeRotate, cardPost, cardOther,
                                     cardAdb, cardScope, cardUpdate, cardPerm, cardAbout, cardFiles, cardNote, cardOss };
             SoftUi.stack(pageSettings,
                 SoftUi.group(this, "功能"),
@@ -1141,6 +1193,8 @@ private SettingsStore store;
                 cardClock,
                 SoftUi.group(this, "桌面应用名阴影"),
                 cardLabelShadow,
+                SoftUi.group(this, "横屏过渡旋转"),
+                cardHomeRotate,
                 SoftUi.group(this, "posteffect 模糊采样率"),
                 cardPost,
                 SoftUi.group(this, "其他"),

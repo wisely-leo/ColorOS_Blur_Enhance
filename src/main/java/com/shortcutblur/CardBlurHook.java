@@ -22,7 +22,7 @@ final class CardBlurHook {
         for (String cn : TARGET_CLASSES) {
             n += hookClass(mod, cl, cn);
         }
-        ModuleLog.d(TAG, "BUILD=v46.4-l40-r2 op(-2)=pass l40=guard idem=1");
+        ModuleLog.d(TAG, "BUILD=v47 op(-2)=pass l40=guard idem=1");
         ModuleLog.d(TAG, "card auto-blur hooks installed n=" + n);
         return n;
     }
@@ -56,13 +56,10 @@ final class CardBlurHook {
                                 Object self = chain.getThisObject();
                                 if (self instanceof View) {
                                     final View card = (View) self;
-
                                     if ("initCardAfterInflate".equals(methodName)) {
                                         CardBlurAttacher.forget(card);
-
                                         LauncherLabelShadowHook.applyToLabelTree(card);
                                     }
-
                                     if (card.isAttachedToWindow()) {
                                         CardBlurAttacher.attach(card, card.getClass().getClassLoader());
                                         if (ModuleLog.enabled()) {
@@ -70,7 +67,6 @@ final class CardBlurHook {
                                                     + " " + c.getSimpleName());
                                         }
                                     } else {
-
                                         card.post(new Runnable() {
                                             @Override public void run() {
                                                 try {

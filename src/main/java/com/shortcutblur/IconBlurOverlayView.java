@@ -11,7 +11,6 @@ final class IconBlurOverlayView extends View {
     private static final int PAD = 32;
 
     private View mTarget;
-
     private OnLayoutChangeListener mTargetListener;
     private final Rect mTmp = new Rect();
 
@@ -21,11 +20,9 @@ final class IconBlurOverlayView extends View {
     }
 
     void bindTarget(final View target) {
-
         detachTargetListener();
         mTarget = target;
         if (target == null) return;
-
         final java.lang.ref.WeakReference<IconBlurOverlayView> self =
                 new java.lang.ref.WeakReference<IconBlurOverlayView>(this);
         mTargetListener = new OnLayoutChangeListener() {
@@ -50,7 +47,7 @@ final class IconBlurOverlayView extends View {
         final View t = mTarget;
         final OnLayoutChangeListener l = mTargetListener;
         if (t != null && l != null) {
-            try { t.removeOnLayoutChangeListener(l); } catch (Throwable ignored) {}
+            try { t.removeOnLayoutChangeListener(l); } catch (Throwable ignored) { ModuleLog.swallow("IconBlurOverlayView", ignored); }
         }
         mTargetListener = null;
     }
@@ -58,7 +55,6 @@ final class IconBlurOverlayView extends View {
     @Override
     protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
-
         detachTargetListener();
         mTarget = null;
     }
@@ -85,7 +81,6 @@ final class IconBlurOverlayView extends View {
         lp.width = w;
         lp.height = h;
         setLayoutParams(lp);
-
         setTranslationX(left - getLeft());
         setTranslationY(top - getTop());
         invalidate();
@@ -96,7 +91,6 @@ final class IconBlurOverlayView extends View {
         super.onDraw(canvas);
         final View t = mTarget;
         if (t == null) return;
-
         mTmp.set(PAD, PAD, getWidth() - PAD, getHeight() - PAD);
         int save = canvas.save();
         canvas.clipRect(mTmp);

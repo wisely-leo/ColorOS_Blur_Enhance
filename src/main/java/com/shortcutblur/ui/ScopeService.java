@@ -28,7 +28,6 @@ public class ScopeService extends Service {
                     es = p.getErrorStream();
                     while ((n = es.read(buf)) > 0) bo.write(buf, 0, n);
                 } finally {
-
                     if (is != null) { try { is.close(); } catch (Throwable ignored) {} }
                     if (es != null) { try { es.close(); } catch (Throwable ignored) {} }
                 }

@@ -21,6 +21,8 @@ public final class SettingsStore {
     private static final String KEY_QS_PROBE    = "quicksearch_blur";
     private static final String KEY_GALLERY_LIGHT = "gallery_light";
     private static final String KEY_LABEL_SHADOW  = "launcher_label_shadow";
+    private static final String KEY_HOME_ROTATE      = "home_rotate";
+    private static final String KEY_HOME_ROTATE_ICON = "home_rotate_icon";
     private static final String KEY_LS_RADIUS = "launcher_label_shadow_radius_dp";
     private static final String KEY_LS_DY     = "launcher_label_shadow_dy_dp";
     private static final String KEY_LS_DARK   = "launcher_label_shadow_dark";
@@ -31,7 +33,6 @@ public final class SettingsStore {
     private static final String KEY_CLOCK_GLASS      = "clock_glass";
     private static final String KEY_CLOCK_GLASS_BLEND= "clock_glass_blend";
     private static final String KEY_CLOCK_GLASS_MIX  = "clock_glass_mix";
-
     private static final String KEY_CARD_BLUR        = "card_blur";
     private static final String KEY_THEME_MODE  = "theme_mode";
 
@@ -89,6 +90,8 @@ public final class SettingsStore {
     public static final boolean DEF_QS_PROBE   = true;
     public static final boolean DEF_GALLERY_LIGHT = true;
     public static final boolean DEF_LABEL_SHADOW  = true;
+    public static final boolean DEF_HOME_ROTATE      = true;
+    public static final boolean DEF_HOME_ROTATE_ICON = true;
     public static final float   DEF_LS_RADIUS = 4.0f;
     public static final float   DEF_LS_DY     = 1.0f;
     public static final int     DEF_LS_DARK   = 0x70000000;
@@ -96,7 +99,6 @@ public final class SettingsStore {
     public static final float   DEF_CLOCK_TEXT_ALPHA = 0.30f;
     public static final float   DEF_CLOCK_BRIGHTEN   = 1.25f;
     public static final boolean DEF_CLOCK_GLASS      = false;
-
     public static final boolean DEF_CARD_BLUR        = true;
     private static final String[] HOST_PKGS_FALLBACK = {
             "com.coloros.alarmclock",
@@ -193,64 +195,55 @@ public final class SettingsStore {
             }
         }, "blur-shizuku-write").start();
     }
+    private java.util.LinkedHashMap<String, String> dump() {
+        java.util.LinkedHashMap<String, String> m = new java.util.LinkedHashMap<String, String>();
+        m.put("shortcut_blur",            isShortcut() ? "1" : "0");
+        m.put("recents_blur",             isRecents() ? "1" : "0");
+        m.put("widget_blur",              isWidget() ? "1" : "0");
+        m.put("launcher_card_blur",       isCardBlur() ? "1" : "0");
+        m.put("posteffect",               isPostEffect() ? "1" : "0");
+        m.put("sample_scale",             String.valueOf(getSampleScale()));
+        m.put("log_enabled",              isLog() ? "1" : "0");
+        m.put("quicksearch_blur",         isQsProbe() ? "1" : "0");
+        m.put("gallery_light",            isGalleryLight() ? "1" : "0");
+        m.put("launcher_label_shadow",    isLabelShadow() ? "1" : "0");
+        m.put("home_rotate",              isHomeRotate() ? "1" : "0");
+        m.put("home_rotate_icon",         isHomeRotateIcon() ? "1" : "0");
+        m.put("launcher_label_shadow_radius_dp", String.valueOf(getLabelShadowRadius()));
+        m.put("launcher_label_shadow_dy_dp",     String.valueOf(getLabelShadowDy()));
+        m.put("launcher_label_shadow_dark",      Integer.toHexString(getLabelShadowDark()));
+        m.put("clock_icon_alpha",         String.valueOf(getClockIconAlpha()));
+        m.put("clock_text_alpha",         String.valueOf(getClockTextAlpha()));
+        m.put("clock_brighten",           String.valueOf(getClockBrighten()));
+        m.put("clock_glass",              isClockGlass() ? "1" : "0");
+        m.put("clock_glass_blend",        Integer.toHexString(getClockGlassBlend()));
+        m.put("clock_glass_mix",          Integer.toHexString(getClockGlassMix()));
+        m.put("ime_blur",                 isImeBlur() ? "1" : "0");
+        m.put("ime_blur_radius",          String.valueOf((int) getImeBlurRadius()));
+        m.put("ime_blur_corner",          String.valueOf(getImeBlurCornerDp()));
+        m.put("ime_blur_mask",            String.valueOf(getImeBlurMask()));
+        return m;
+    }
+
     public String snapshot() {
-        StringBuilder sb = new StringBuilder(160);
+        StringBuilder sb = new StringBuilder(512);
         sb.append("# ColorOS Blur Enhance - runtime feature flags (written by GUI)\n");
-        sb.append("shortcut_blur=").append(isShortcut() ? 1 : 0).append("\n");
-        sb.append("recents_blur=").append(isRecents() ? 1 : 0).append("\n");
-        sb.append("widget_blur=").append(isWidget() ? 1 : 0).append("\n");
-        sb.append("launcher_card_blur=").append(isCardBlur() ? 1 : 0).append("\n");
-        sb.append("posteffect=").append(isPostEffect() ? 1 : 0).append("\n");
-        sb.append("sample_scale=").append(getSampleScale()).append("\n");
-        sb.append("log_enabled=").append(isLog() ? 1 : 0).append("\n");
-        sb.append("quicksearch_blur=").append(isQsProbe() ? 1 : 0).append("\n");
-        sb.append("gallery_light=").append(isGalleryLight() ? 1 : 0).append("\n");
-        sb.append("launcher_label_shadow=").append(isLabelShadow() ? 1 : 0).append("\n");
-        sb.append("launcher_label_shadow_radius_dp=").append(getLabelShadowRadius()).append("\n");
-        sb.append("launcher_label_shadow_dy_dp=").append(getLabelShadowDy()).append("\n");
-        sb.append("launcher_label_shadow_dark=").append(Integer.toHexString(getLabelShadowDark())).append("\n");
-        sb.append("clock_icon_alpha=").append(getClockIconAlpha()).append("\n");
-        sb.append("clock_text_alpha=").append(getClockTextAlpha()).append("\n");
-        sb.append("clock_brighten=").append(getClockBrighten()).append("\n");
-        sb.append("clock_glass=").append(isClockGlass() ? 1 : 0).append("\n");
-        sb.append("clock_glass_blend=").append(Integer.toHexString(getClockGlassBlend())).append("\n");
-        sb.append("clock_glass_mix=").append(Integer.toHexString(getClockGlassMix())).append("\n");
-        sb.append("ime_blur=").append(isImeBlur() ? 1 : 0).append("\n");
-        sb.append("ime_blur_radius=").append((int) getImeBlurRadius()).append("\n");
-        sb.append("ime_blur_corner=").append(getImeBlurCornerDp()).append("\n");
-        sb.append("ime_blur_mask=").append(getImeBlurMask()).append("\n");
+        for (java.util.Map.Entry<String, String> e : dump().entrySet()) {
+            sb.append(e.getKey()).append('=').append(e.getValue()).append('\n');
+        }
         return sb.toString();
     }
+
     public int sendConfBroadcast() {
+        java.util.LinkedHashMap<String, String> values = dump();
         int ok = 0;
         for (String pkg : hostPkgs()) {
             try {
                 Intent i = new Intent(ACTION_SETCONF);
                 i.setPackage(pkg);
-                i.putExtra("shortcut_blur", isShortcut()   ? "1" : "0");
-                i.putExtra("recents_blur",  isRecents()    ? "1" : "0");
-                i.putExtra("widget_blur",   isWidget()     ? "1" : "0");
-                i.putExtra("launcher_card_blur", isCardBlur() ? "1" : "0");
-                i.putExtra("posteffect",    isPostEffect() ? "1" : "0");
-                i.putExtra("sample_scale",  String.valueOf(getSampleScale()));
-                i.putExtra("log_enabled",   isLog() ? "1" : "0");
-                i.putExtra("quicksearch_blur", isQsProbe() ? "1" : "0");
-                i.putExtra("gallery_light", isGalleryLight() ? "1" : "0");
-                i.putExtra("launcher_label_shadow", isLabelShadow() ? "1" : "0");
-                i.putExtra("launcher_label_shadow_radius_dp", String.valueOf(getLabelShadowRadius()));
-                i.putExtra("launcher_label_shadow_dy_dp", String.valueOf(getLabelShadowDy()));
-                i.putExtra("launcher_label_shadow_dark", Integer.toHexString(getLabelShadowDark()));
-                i.putExtra("clock_icon_alpha", String.valueOf(getClockIconAlpha()));
-                i.putExtra("clock_text_alpha", String.valueOf(getClockTextAlpha()));
-                i.putExtra("clock_brighten", String.valueOf(getClockBrighten()));
-                i.putExtra("clock_glass", isClockGlass() ? "1" : "0");
-                i.putExtra("clock_glass_blend", Integer.toHexString(getClockGlassBlend()));
-                i.putExtra("clock_glass_mix", Integer.toHexString(getClockGlassMix()));
-
-                i.putExtra("ime_blur", isImeBlur() ? "1" : "0");
-                i.putExtra("ime_blur_radius", String.valueOf((int) getImeBlurRadius()));
-                i.putExtra("ime_blur_corner", String.valueOf(getImeBlurCornerDp()));
-                i.putExtra("ime_blur_mask", String.valueOf(getImeBlurMask()));
+                for (java.util.Map.Entry<String, String> e : values.entrySet()) {
+                    i.putExtra(e.getKey(), e.getValue());
+                }
                 ctx.sendBroadcast(i);
                 ok++;
             } catch (Throwable t) {
@@ -262,18 +255,16 @@ public final class SettingsStore {
     public boolean isShortcut()    { return sp.getBoolean(KEY_SHORTCUT, DEF_SHORTCUT); }
     public boolean isRecents()     { return sp.getBoolean(KEY_RECENTS, DEF_RECENTS); }
     public boolean isWidget()      { return sp.getBoolean(KEY_WIDGET, DEF_WIDGET); }
-
     public boolean isCardBlur()    { return sp.getBoolean(KEY_CARD_BLUR, DEF_CARD_BLUR); }
     public boolean isPostEffect()  { return sp.getBoolean(KEY_POSTEFFECT, DEF_POSTEFFECT); }
     public float   getSampleScale(){ return sp.getFloat(KEY_SAMPLE_SCALE, DEF_SAMPLE_SCALE); }
     public boolean isLog()         { return sp.getBoolean(KEY_LOG, DEF_LOG); }
     public boolean isQsProbe()     { return sp.getBoolean(KEY_QS_PROBE, DEF_QS_PROBE); }
     public boolean isGalleryLight(){ return sp.getBoolean(KEY_GALLERY_LIGHT, DEF_GALLERY_LIGHT); }
-
     public boolean isLabelShadow() { return sp.getBoolean(KEY_LABEL_SHADOW, DEF_LABEL_SHADOW); }
-
+    public boolean isHomeRotate()  { return sp.getBoolean(KEY_HOME_ROTATE, DEF_HOME_ROTATE); }
+    public boolean isHomeRotateIcon() { return sp.getBoolean(KEY_HOME_ROTATE_ICON, DEF_HOME_ROTATE_ICON); }
     public float   getLabelShadowRadius() { return DEF_LS_RADIUS; }
-
     public float   getLabelShadowDy()     { return DEF_LS_DY; }
     public int     getLabelShadowDark()   { return sp.getInt(KEY_LS_DARK, DEF_LS_DARK); }
     public float   getClockIconAlpha(){ return sp.getFloat(KEY_CLOCK_ICON_ALPHA, DEF_CLOCK_ICON_ALPHA); }
@@ -295,13 +286,11 @@ public final class SettingsStore {
 
     public boolean isImeBlur()        { return sp.getBoolean(KEY_IME_BLUR, DEF_IME_BLUR); }
     public float   getImeBlurRadius() { return sp.getFloat(KEY_IME_BLUR_RADIUS, DEF_IME_BLUR_RADIUS); }
-
     public float   getImeBlurCornerDp(){ return 25f; }
     public SettingsStore setImeBlur(boolean v)    { sp.edit().putBoolean(KEY_IME_BLUR, v).apply(); syncToHost(); return this; }
     public SettingsStore setImeBlurRadius(float v){ sp.edit().putFloat(KEY_IME_BLUR_RADIUS, v).apply(); syncToHost(); return this; }
     public float   getImeBlurMask()   { return sp.getFloat(KEY_IME_BLUR_MASK, DEF_IME_BLUR_MASK); }
     public SettingsStore setImeBlurMask(float v){ sp.edit().putFloat(KEY_IME_BLUR_MASK, v).apply(); syncToHost(); return this; }
-
     public float   getShortcutBlurRadius(){ return DEF_SHORTCUT_BLUR_RADIUS; }
     public SettingsStore setShortcutBlurRadius(float v){ sp.edit().putFloat(KEY_SHORTCUT_BLUR_RADIUS, v).apply(); syncToHost(); return this; }
     public float   getRecentsBlurRadius(){ return DEF_RECENTS_BLUR_RADIUS; }
@@ -310,6 +299,15 @@ public final class SettingsStore {
     public SettingsStore setQsProbe(boolean v)    { sp.edit().putBoolean(KEY_QS_PROBE, v).apply(); syncToHost(); return this; }
     public SettingsStore setGalleryLight(boolean v) { sp.edit().putBoolean(KEY_GALLERY_LIGHT, v).apply(); syncToHost(); return this; }
     public SettingsStore setLabelShadow(boolean v) { sp.edit().putBoolean(KEY_LABEL_SHADOW, v).apply(); syncToHost(); return this; }
+    public SettingsStore setHomeRotate(boolean v) {
+        sp.edit().putBoolean(KEY_HOME_ROTATE, v)
+                 .putBoolean(KEY_HOME_ROTATE_ICON, v)
+                 .apply();
+        syncToHost(); return this;
+    }
+    public SettingsStore setHomeRotateIcon(boolean v) {
+        sp.edit().putBoolean(KEY_HOME_ROTATE_ICON, v).apply(); syncToHost(); return this;
+    }
     public SettingsStore setLabelShadowRadius(float v) { sp.edit().putFloat(KEY_LS_RADIUS, v).apply(); syncToHost(); return this; }
     public SettingsStore setLabelShadowDy(float v)     { sp.edit().putFloat(KEY_LS_DY, v).apply(); syncToHost(); return this; }
     public SettingsStore setLabelShadowDark(int v)     { sp.edit().putInt(KEY_LS_DARK, v).apply(); syncToHost(); return this; }

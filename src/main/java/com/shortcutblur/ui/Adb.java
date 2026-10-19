@@ -38,7 +38,6 @@ public final class Adb {
         if (st == NO_PERM) return "未授权 · 点此申请";
         return "未连接（请先启动 Shizuku）";
     }
-
     private static volatile rikka.shizuku.Shizuku.OnRequestPermissionResultListener sPendingListener = null;
 
     public static void removePending() {
@@ -56,7 +55,6 @@ public final class Adb {
                 if (done != null) a.runOnUiThread(done);
                 return;
             }
-
             removePending();
             final rikka.shizuku.Shizuku.OnRequestPermissionResultListener l =
                     new rikka.shizuku.Shizuku.OnRequestPermissionResultListener() {
@@ -67,7 +65,6 @@ public final class Adb {
                             if (sPendingListener == this) sPendingListener = null;
                             SettingsActivity.lg("ADB 权限回调: requestCode=" + requestCode
                                     + " grantResult=" + grantResult);
-
                             if (done != null) {
                                 try {
                                     a.runOnUiThread(() -> {

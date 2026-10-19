@@ -7,7 +7,7 @@ public class App extends Application {
     public void onCreate() {
         super.onCreate();
         sApp = this;
-        lg("=== App.onCreate (v46.4-ui) pid=" + android.os.Process.myPid() + " ===");
+        lg("=== App.onCreate (v47-ui) pid=" + android.os.Process.myPid() + " ===");
         try {
             lg("环境: Android " + android.os.Build.VERSION.RELEASE
                     + " (SDK " + android.os.Build.VERSION.SDK_INT + ")"
@@ -26,10 +26,8 @@ public class App extends Application {
         } catch (Throwable t) { return false; }
     }
     public static void lg(String s) {
-
         if (!logEnabled()) return;
         try { android.util.Log.i("BlurUI", s); } catch (Throwable ignored) {}
-
         UiLog.write(s);
     }
 }

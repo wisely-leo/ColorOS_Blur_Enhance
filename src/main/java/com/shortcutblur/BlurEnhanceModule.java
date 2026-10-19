@@ -36,9 +36,14 @@ public class BlurEnhanceModule extends XposedModule {
     public void hookPublic(String id, Executable target, XposedInterface.Hooker hooker) {
         hookEx(id, target, hooker);
     }
-
     private final ShortcutBlurFeature.Host shortcutBlurHost = new ShortcutBlurFeature.Host() {
         @Override public ClassLoader classLoader() { return cl; }
+        @Override public void hookEx(String id, Executable target, XposedInterface.Hooker hooker) {
+            BlurEnhanceModule.this.hookEx(id, target, hooker);
+        }
+    };
+
+    private final HomeRotateFeature.Host homeRotateHost = new HomeRotateFeature.Host() {
         @Override public void hookEx(String id, Executable target, XposedInterface.Hooker hooker) {
             BlurEnhanceModule.this.hookEx(id, target, hooker);
         }
@@ -59,17 +64,13 @@ public class BlurEnhanceModule extends XposedModule {
     private static final int F_WALL = 1 << 2;
     private static final int F_ICON_ANIM = 1 << 3;
 
-    private static final String ACTION_SETCONF = "com.wiselyleo.blurenhance.SETCONF";
-    private static final String BUILD_TAG = "v46.4";
+    private static final String BUILD_TAG = "v47.0";
 
     private volatile ClassLoader cl;
     private volatile boolean installed = false;
     private volatile boolean postEffectInstalled = false;
-    private static volatile boolean sScreenReceiverInstalled = false;
-    private static volatile boolean sConfReceiverInstalled = false;
 
     private final Set<Method> peHooked = new HashSet<>();
-
     private final Set<String> peScaleLogged = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private static volatile boolean sOplusEffectResolved = false;
     private static volatile Class<?> sOplusEffectCls = null;
@@ -90,7 +91,7 @@ public class BlurEnhanceModule extends XposedModule {
             String pkg = param.getPackageName();
             FeatureFlags.load();
             ModuleLog.i("onPackageReady pkg=" + pkg);
-            installScreenReceiverViaApp(param);
+            BroadcastBridge.install(this, param, BUILD_TAG);
             if (PKG_POSTEFFECT.equals(pkg)) {
                 if (!FeatureFlags.POSTEFFECT) {
                     ModuleLog.d("READY", "posteffect disabled by flag, skip");
@@ -171,106 +172,6 @@ public class BlurEnhanceModule extends XposedModule {
             ModuleLog.e("READY", "onPackageReady failed", t);
         }
     }
-
-    private void installScreenReceiverViaApp(XposedModuleInterface.PackageReadyParam param) {
-        if (sScreenReceiverInstalled) return;
-        synchronized (BlurEnhanceModule.class) {
-            if (sScreenReceiverInstalled) return;
-            try {
-                ClassLoader cl = param.getClassLoader();
-                if (cl == null) { ModuleLog.d("SCREEN", "loader null"); return; }
-                ModuleLog.d("SCREEN", "try hook Application.attach via loader=" + cl.getClass().getName());
-                Class<?> appCls = Class.forName("android.app.Application", false, cl);
-                for (final Method m : appCls.getDeclaredMethods()) {
-                    if (!m.getName().equals("attach")) continue;
-                    Class<?>[] ps = m.getParameterTypes();
-                    if (ps.length != 1 || !ps[0].getName().equals("android.content.Context")) continue;
-                    m.setAccessible(true);
-                    this.hook(m).intercept(chain -> {
-                        Object r = chain.proceed();
-                        try {
-                            Object self = chain.getThisObject();
-                            if (self instanceof Context) {
-                                if (!sScreenReceiverInstalled) {
-                                    registerScreenReceiver((Context) self);
-                                    registerConfReceiver((Context) self);
-                                }
-                            }
-                        } catch (Throwable t) {
-                            ModuleLog.d("SCREEN", "attach hook err: " + t);
-                        }
-                        return r;
-                    });
-                    ModuleLog.d("SCREEN", "hooked Application.attach (waiting)");
-                    return;
-                }
-                ModuleLog.d("SCREEN", "Application.attach not found");
-            } catch (Throwable t) {
-                ModuleLog.d("SCREEN", "hook attach err: " + t);
-            }
-        }
-    }
-    private void registerScreenReceiver(Context ctx) {
-        synchronized (BlurEnhanceModule.class) {
-            if (sScreenReceiverInstalled) return;
-            try {
-                IntentFilter f = new IntentFilter();
-                f.addAction(Intent.ACTION_SCREEN_ON);
-                f.addAction(Intent.ACTION_SCREEN_OFF);
-                f.addAction(Intent.ACTION_USER_PRESENT);
-                ctx.registerReceiver(new BroadcastReceiver() {
-                    @Override public void onReceive(Context c, Intent i) {
-                        String a = i == null ? "?" : i.getAction();
-                        boolean on = !Intent.ACTION_SCREEN_OFF.equals(a);
-                        ModuleLog.d("SCREEN", "action=" + a + " screenOn=" + on);
-                        if (FeatureFlags.WIDGET_BLUR) {
-                            GlyphBlurRenderer.setScreenOn(on);
-                        }
-                    }
-                }, f);
-                sScreenReceiverInstalled = true;
-                ModuleLog.d("READY", "screen receiver installed ctx=" + ctx.getClass().getName());
-            } catch (Throwable t) {
-                ModuleLog.d("SCREEN", "registerReceiver err: " + t);
-            }
-        }
-    }
-    private void registerConfReceiver(Context ctx) {
-        synchronized (BlurEnhanceModule.class) {
-            if (sConfReceiverInstalled) return;
-            try {
-                IntentFilter f = new IntentFilter(ACTION_SETCONF);
-                BroadcastReceiver recv = new BroadcastReceiver() {
-                    @Override public void onReceive(Context c, Intent i) {
-                        if (i == null) return;
-                        try {
-                            RecentsBlur.applyConf(i);
-                            boolean clockChanged = FeatureFlags.applyFromIntent(i);
-                            if (clockChanged) {
-                                try { GlyphBlurRenderer.notifyContentMaybeChangedAll(); } catch (Throwable ignored) { ModuleLog.swallow("module.notify", ignored); }
-                            }
-                            String mk = i.getStringExtra("mark");
-                            if (mk != null) ModuleLog.d("MARK", "==== " + mk + " ====");
-                            String vb = i.getStringExtra("verbose");
-                            if (vb != null) ModuleLog.VERBOSE = !vb.trim().equalsIgnoreCase("off");
-                        } catch (Throwable t) {
-                            ModuleLog.e("CONF", "live set failed", t);
-                        }
-                    }
-                };
-                try {
-                    ctx.registerReceiver(recv, f);
-                } catch (Throwable t1) {
-                    ctx.registerReceiver(recv, f, android.content.Context.RECEIVER_EXPORTED);
-                }
-                sConfReceiverInstalled = true;
-                ModuleLog.d("CONF", "conf receiver installed action=" + ACTION_SETCONF);
-                            ModuleLog.d("VER", "build=" + BUILD_TAG + RecentsBlur.describe());
-            } catch (Throwable t) {
-                ModuleLog.e("CONF", "register conf receiver failed", t);
-            }
-        }
-    }
     private static boolean isTargetLauncher(String p) {
         return "com.android.launcher".equals(p)
                 || "com.oplus.launcher".equals(p)
@@ -286,7 +187,6 @@ public class BlurEnhanceModule extends XposedModule {
         try {
 
             GlassColorHook.install(this, loader);
-
             r.total += LauncherLabelShadowHook.install(this, loader);
             if (!FeatureFlags.LAUNCHER_LABEL_SHADOW) {
                 ModuleLog.d("INSTALL", "launcher label shadow currently OFF (hook installed, idle)");
@@ -302,15 +202,23 @@ public class BlurEnhanceModule extends XposedModule {
             } else {
                 ModuleLog.d("INSTALL", "recents blur disabled by flag, skip");
             }
-
             r.total += CardBlurHook.install(this, loader);
+
+            try {
+                r.total += HomeRotateFeature.install(homeRotateHost, loader);
+                if (!FeatureFlags.HOME_ROTATE) {
+                    ModuleLog.d("INSTALL", "home rotate currently OFF (hook installed, idle)");
+                }
+            } catch (Throwable t) {
+                ModuleLog.e("INSTALL", "home rotate install failed (isolated)", t);
+            }
+
             ModuleLog.d("INSTALL", "critical=" + r.critical + " total=" + r.total);
         } catch (Throwable t) {
             ModuleLog.e("INSTALL", "installHooks failed", t);
         }
         return r;
     }
-
     private boolean installPostEffectHooks(ClassLoader loader) {
         Class<?> cls;
         try {
@@ -377,12 +285,10 @@ public class BlurEnhanceModule extends XposedModule {
                             float peTarget = FeatureFlags.SAMPLE_SCALE;
                             if (old != peTarget) {
                                 args[pos] = peTarget;
-
                                 if (peScaleLogged.add(tag + ":" + old)) {
                                     ModuleLog.d("SCALE", tag + " " + old + " -> " + peTarget);
                                 }
                             } else if (ModuleLog.VERBOSE) {
-
                                 ModuleLog.dv("SCALE", tag + " keep " + old);
                             }
                         } else if (ModuleLog.VERBOSE) {
@@ -408,10 +314,8 @@ public class BlurEnhanceModule extends XposedModule {
         return idx;
     }
     private volatile boolean sRemoteViewsHooked = false;
-
     private void hookRemoteViewsApply(ClassLoader cl) {
         if (sRemoteViewsHooked) return;
-
         boolean ok = true;
         try {
             Method m = RemoteViews.class.getDeclaredMethod("apply", android.content.Context.class, ViewGroup.class);
@@ -429,7 +333,7 @@ public class BlurEnhanceModule extends XposedModule {
                     try {
                         ModuleLog.d("MERGE", "[reapply] called");
                         GlyphBlurRenderer.notifyContentMaybeChangedAll();
-                    } catch (Throwable ignored) {}
+                    } catch (Throwable ignored) { ModuleLog.swallow("BlurEnhanceModule", ignored); }
                     return r;
                 }
             });
@@ -488,11 +392,11 @@ public class BlurEnhanceModule extends XposedModule {
                                     }
                                 }
                             }
-                        } catch (Throwable ignored) {}
+                        } catch (Throwable ignored) { ModuleLog.swallow("BlurEnhanceModule", ignored); }
                         return r;
                     }
                 });
-            } catch (Throwable ignored) {}
+            } catch (Throwable ignored) { ModuleLog.swallow("BlurEnhanceModule", ignored); }
         }
         ModuleLog.i("[merge] hooked TextView.setText event-driven");
     }
