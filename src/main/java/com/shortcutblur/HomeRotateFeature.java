@@ -373,7 +373,7 @@ public final class HomeRotateFeature {
                 Rect judge = rectOf(F_SRC_RECT.get(helper));
                 land = judge != null && judge.width() > judge.height();
             } else if (scene == 2) {
-                land = openLandscape(target);
+                land = !RecentsBlur.inOverview() && openLandscape(target);
             }
             sCacheHelper = helper;
             sCacheType = type;

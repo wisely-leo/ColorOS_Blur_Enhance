@@ -64,7 +64,7 @@ public class BlurEnhanceModule extends XposedModule {
     private static final int F_WALL = 1 << 2;
     private static final int F_ICON_ANIM = 1 << 3;
 
-    private static final String BUILD_TAG = "v47.1";
+    private static final String BUILD_TAG = "v47.2";
 
     private volatile ClassLoader cl;
     private volatile boolean installed = false;

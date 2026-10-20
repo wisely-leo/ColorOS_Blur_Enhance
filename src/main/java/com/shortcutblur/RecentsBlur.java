@@ -275,6 +275,10 @@ final class RecentsBlur {
         }
         return n;
     }
+    static boolean inOverview() {
+        return sStateInOverview;
+    }
+
     private static void exitOverviewFrom(Object lrvSelf, String why) {
         if (!sStateInOverview) return;
         sStateInOverview = false;

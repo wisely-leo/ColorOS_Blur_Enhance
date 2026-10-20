@@ -30,7 +30,7 @@ public class SettingsActivity extends Activity {
     private static final int MAX_BG_MB = 15;
     private static final long MAX_BG_BYTES = MAX_BG_MB * 1024L * 1024L;
 
-    private static final String LOG_TAG_VER = "v47.1";
+    private static final String LOG_TAG_VER = "v47.2";
     static void lg(String s) {
         if (s == null) return;
         if (!App.logEnabled()) return;
@@ -403,11 +403,19 @@ private SettingsStore store;
     }
 
     private static final String CHANGELOG =
-            "v47.1\n"
+            "v47.2\n"
+            + "· 从后台任务（最近任务）切入横屏应用时，不再触发入场旋转\n"
+            + "  · 该场景下应用的真实方向已经出现过，再转一次显得多余且突兀\n"
+            + "  · 现在只在从桌面图标打开时旋转，退场动画不变\n"
+            + "  · 判断复用最近任务界面的已有状态，未新增探测，也未增加每帧开销\n"
+            + "v47.1\n"
             + "· 修复入场旋转的角度不正确（打开横屏应用时方向歪斜）\n"
             + "  · 入场改用「退场动画反向播放」：角度由 -90° 逐渐扶正到 0°，\n"
             + "    动画结束时严格归零，再由系统切换到真正的横屏窗口，衔接无错位\n"
             + "  · 之前单纯把角度取反号，转完停在 +90°，表现为「竖屏下的横屏」\n"
+            + "· 从后台任务切入横屏应用时，不再触发入场旋转\n"
+            + "  · 该场景下应用的真实方向已经出现过，再转一次显得多余且突兀；\n"
+            + "    现在只在从桌面图标打开时旋转\n"
             + "· 修复「桌面应用名阴影」卡片缺少毛玻璃背景\n"
             + "  · 该卡片一直没被纳入「需要启用毛玻璃的卡片」清单，因此始终是纯色背景；\n"
             + "    现在与输入法、时钟等卡片一致，设置背景图后自动变为高斯模糊\n"
