@@ -22,7 +22,7 @@ final class CardBlurHook {
         for (String cn : TARGET_CLASSES) {
             n += hookClass(mod, cl, cn);
         }
-        ModuleLog.d(TAG, "BUILD=v47 op(-2)=pass l40=guard idem=1");
+        ModuleLog.d(TAG, "BUILD=v47.1 op(-2)=pass l40=guard idem=1");
         ModuleLog.d(TAG, "card auto-blur hooks installed n=" + n);
         return n;
     }

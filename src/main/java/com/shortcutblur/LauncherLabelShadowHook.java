@@ -40,7 +40,6 @@ final class LauncherLabelShadowHook {
     private static volatile TextView sDrawingOwner = null;
     private static volatile android.graphics.Path sDrawingPath = null;
 
-    private static volatile java.lang.reflect.Method sSetClipToPaddingM = null;
     private static volatile java.lang.reflect.Method sGetTagM = null;
     private static volatile java.lang.reflect.Method sSetTagM = null;
 
@@ -488,7 +487,6 @@ final class LauncherLabelShadowHook {
         try {
             if (Boolean.TRUE.equals(getTagCompat(tv, SHADOW_OVERFLOW_TAG))) return;
             setTagCompat(tv, SHADOW_OVERFLOW_TAG, Boolean.TRUE);
-            setClipToPaddingCompat(tv, false);
             Class<?> ws = sWorkspaceCls;
             View cur = parentOf(tv);
             for (int i = 0; i < 6 && cur != null; i++) {
@@ -602,18 +600,6 @@ final class LauncherLabelShadowHook {
     private static View parentOf(View v) {
         android.view.ViewParent vp = v.getParent();
         return (vp instanceof View) ? (View) vp : null;
-    }
-
-    private static void setClipToPaddingCompat(View v, boolean clip) {
-        try {
-            java.lang.reflect.Method m = sSetClipToPaddingM;
-            if (m == null) {
-                m = View.class.getDeclaredMethod("setClipToPadding", boolean.class);
-                m.setAccessible(true);
-                sSetClipToPaddingM = m;
-            }
-            m.invoke(v, clip);
-        } catch (Throwable ignored) { ModuleLog.swallow("LauncherLabelShadowHook", ignored); }
     }
 
     private static Object getTagCompat(View v, int key) {

@@ -30,7 +30,7 @@ public class SettingsActivity extends Activity {
     private static final int MAX_BG_MB = 15;
     private static final long MAX_BG_BYTES = MAX_BG_MB * 1024L * 1024L;
 
-    private static final String LOG_TAG_VER = "v47";
+    private static final String LOG_TAG_VER = "v47.1";
     static void lg(String s) {
         if (s == null) return;
         if (!App.logEnabled()) return;
@@ -403,7 +403,27 @@ private SettingsStore store;
     }
 
     private static final String CHANGELOG =
-            "v47\n"
+            "v47.1\n"
+            + "· 修复入场旋转的角度不正确（打开横屏应用时方向歪斜）\n"
+            + "  · 入场改用「退场动画反向播放」：角度由 -90° 逐渐扶正到 0°，\n"
+            + "    动画结束时严格归零，再由系统切换到真正的横屏窗口，衔接无错位\n"
+            + "  · 之前单纯把角度取反号，转完停在 +90°，表现为「竖屏下的横屏」\n"
+            + "· 修复「桌面应用名阴影」卡片缺少毛玻璃背景\n"
+            + "  · 该卡片一直没被纳入「需要启用毛玻璃的卡片」清单，因此始终是纯色背景；\n"
+            + "    现在与输入法、时钟等卡片一致，设置背景图后自动变为高斯模糊\n"
+            + "· 修复「桌面应用名阴影」子项无法折叠\n"
+            + "  · 上一次改动在开关回调外层额外注册了一次处理，覆盖掉内部的折叠逻辑，\n"
+            + "    表现为开关能切换、参数能保存，但「阴影浓度」始终不展开 / 收起\n"
+            + "· 布局整理（行为不变）\n"
+            + "  · 「横屏应用过渡旋转」没有可调参数，并入「功能」卡片，\n"
+            + "    不再单独成卡并占用「横屏过渡旋转」分组标题\n"
+            + "· 已知限制\n"
+            + "  · 视频播放器（B站、各类播放器）的全屏旋转不参与本功能：\n"
+            + "    它的竖屏列表与横屏全屏共用同一个界面，系统上报的方向始终是竖屏，\n"
+            + "    无法在「从桌面打开的那一刻」区分后面会不会全屏\n"
+            + "  · 若强行按应用名单旋转，竖屏视频也会跟着转，观感更差，故不做\n"
+            + "\n"
+            + "v47\n"
             + "· 新增「横屏应用过渡旋转」（默认开启）\n"
             + "  · 横屏应用退出时保持横屏，过渡动画中逐帧逆时针转 90° 落回竖屏桌面；从桌面打开横屏应用时反向\n"
             + "  · 窗口层与图标层同步旋转，两者不会分离；不裁切窗口，曲线线性直通，不起新动画\n"
@@ -922,7 +942,9 @@ private SettingsStore store;
                             v -> store.setQsProbe(v)),
                     SoftUi.toggle(this, "相册强制白色主题", store.isGalleryLight(),
                             v -> store.setGalleryLight(v)),
-                    recentsRow);
+                    recentsRow,
+                    SoftUi.toggle(this, "横屏应用过渡旋转", store.isHomeRotate(),
+                            v -> store.setHomeRotate(v)));
 
             final int[] lsDarkRef = { store.getLabelShadowDark() };
             final float[] lsDarkPctRef = { (lsDarkRef[0] >>> 24) / 255f * 100f };
@@ -936,18 +958,10 @@ private SettingsStore store;
                         store.setLabelShadowDark(argb);
                     });
             View[] lsRows = SoftUi.toggleWithDependents(this, "桌面应用名阴影",
-                    store.isLabelShadow(), null, lsDarkRow);
+                    store.isLabelShadow(), v -> store.setLabelShadow(v), lsDarkRow);
             final SoftUi.Row lsToggleRow = (SoftUi.Row) lsRows[0];
             final View lsFoldHolder = lsRows[1];
-            lsToggleRow.setOnToggle(v -> {
-                store.setLabelShadow(v);
-                SoftUi.applyFold(lsFoldHolder, v, true);
-            });
             SoftUi.Card cardLabelShadow = SoftUi.card(this, lsToggleRow, lsFoldHolder);
-            final SoftUi.Row hrToggleRow = (SoftUi.Row) SoftUi.toggleWithDependents(this,
-                    "横屏应用过渡旋转", store.isHomeRotate(), null)[0];
-            hrToggleRow.setOnToggle(v -> store.setHomeRotate(v));
-            SoftUi.Card cardHomeRotate = SoftUi.card(this, hrToggleRow);
 
             View clockAlphaRow = SoftUi.slider(this, "时钟透明度",
                     store.getClockIconAlpha() * 100f, 0, 100, "%",
@@ -1182,7 +1196,7 @@ private SettingsStore store;
             SoftUi.Card cardFiles = about[2];
             SoftUi.Card cardNote = about[3];
             SoftUi.Card cardOss = about[4];
-            SoftUi.Card[] cards = { cardFunc, cardImeBlur, cardClock, cardHomeRotate, cardPost, cardOther,
+            SoftUi.Card[] cards = { cardFunc, cardImeBlur, cardClock, cardLabelShadow, cardPost, cardOther,
                                     cardAdb, cardScope, cardUpdate, cardPerm, cardAbout, cardFiles, cardNote, cardOss };
             SoftUi.stack(pageSettings,
                 SoftUi.group(this, "功能"),
@@ -1193,8 +1207,6 @@ private SettingsStore store;
                 cardClock,
                 SoftUi.group(this, "桌面应用名阴影"),
                 cardLabelShadow,
-                SoftUi.group(this, "横屏过渡旋转"),
-                cardHomeRotate,
                 SoftUi.group(this, "posteffect 模糊采样率"),
                 cardPost,
                 SoftUi.group(this, "其他"),

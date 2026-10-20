@@ -34,9 +34,9 @@ public final class HomeRotateFeature {
     static final float SETTLE_CENTER_EPS2 = SETTLE_CENTER_EPS * SETTLE_CENTER_EPS;
 
      static final int ICON_SETTLE_MAX_WAIT = 45;
- 
+
      static final float UNWIND_ENTER_EPS = 0.2f;
- 
+
      static final float UNWIND_STEP = 0.06f;
 
     static final String HANDOVER_METHOD = M_SHOW_ORIGINAL_ICON;
@@ -75,6 +75,8 @@ public final class HomeRotateFeature {
 
     private static volatile long sLastWindowRotateMs = 0L;
 
+    private static volatile int sLastWindowScene = 0;
+
     private static boolean sOriginalShown = false;
 
     private static int sHoldFrames = 0;
@@ -108,6 +110,42 @@ public final class HomeRotateFeature {
         sCacheAct = Integer.MIN_VALUE;
         sCacheScene = -1;
     }
+
+    private static boolean openLandscape(Object target) {
+        try {
+            Object taskInfo = getFieldByName(target, "taskInfo");
+            if (taskInfo == null) return false;
+            Object info = getFieldByName(taskInfo, "topActivityInfo");
+            if (info == null) return false;
+            Object so = getFieldByName(info, "screenOrientation");
+            if (!(so instanceof Integer)) return false;
+            switch ((Integer) so) {
+                case 6:   // SENSOR_LANDSCAPE
+                case 7:   // SENSOR_LANDSCAPE_REVERSE
+                case 9:   // REVERSE_LANDSCAPE
+                case 11:  // USER_LANDSCAPE
+                case 13:  // FULL_SENSOR_LANDSCAPE
+                    return true;
+                default:
+                    return false;
+            }
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+    private static Object getFieldByName(Object o, String name) {
+        if (o == null) return null;
+        for (Class<?> c = o.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+            try {
+                Field f = c.getDeclaredField(name);
+                f.setAccessible(true);
+                return f.get(o);
+            } catch (Throwable ignored) {
+            }
+        }
+        return null;
+    }
+
     private static final boolean PERF = true;
     private static long sPerfWinNs, sPerfIconNs;
     private static int sPerfWinCalls, sPerfIconCalls;
@@ -301,6 +339,10 @@ public final class HomeRotateFeature {
             perfLog();
         }
     }
+    private static float dirAngle(int scene, float progress) {
+        return scene == 2 ? ROT_DEG * (1f - progress) : ROT_DEG * progress;
+    }
+
     private static void perfLog() {
         int total = sPerfWinCalls + sPerfIconCalls;
         if (total == 0 || (total & 0x7f) != 0) return;
@@ -327,9 +369,11 @@ public final class HomeRotateFeature {
         } else {
             scene = sceneKind(typeName(type));
             boolean land = false;
-            if (scene != 0) {
-                Rect judge = rectOf(scene == 2 ? F_REAL_RECT.get(helper) : F_SRC_RECT.get(helper));
+            if (scene == 1) {
+                Rect judge = rectOf(F_SRC_RECT.get(helper));
                 land = judge != null && judge.width() > judge.height();
+            } else if (scene == 2) {
+                land = openLandscape(target);
             }
             sCacheHelper = helper;
             sCacheType = type;
@@ -341,6 +385,7 @@ public final class HomeRotateFeature {
             if (!sWhyLogged) why("scene=0 type=" + sLastTypeName);
             return;
         }
+
         if (!landscape) {
             if (!sWhyLogged) why("judge portrait scene=" + scene);
             return;
@@ -362,7 +407,7 @@ public final class HomeRotateFeature {
         Object mObj = F_TMP_MATRIX.get(helper);
         if (!(mObj instanceof Matrix)) return;
 
-        float angle = ROT_DEG * (scene == 2 ? -1f : 1f) * p;
+        float angle = dirAngle(scene, p);
 
         Matrix out = M_OUT;
         out.set((Matrix) mObj);
@@ -382,6 +427,7 @@ public final class HomeRotateFeature {
         if (!applyMatrix(sp, out)) return;
 
         sLastWindowRotateMs = android.os.SystemClock.elapsedRealtime();
+        sLastWindowScene = scene;
 
         if (FeatureFlags.LOG_ENABLED && ++sFrame <= LOG_FRAMES) {
             Rect judge = rectOf(scene == 2 ? F_REAL_RECT.get(helper) : F_SRC_RECT.get(helper));
@@ -486,7 +532,7 @@ public final class HomeRotateFeature {
             float s = fadeU * fadeU * (3f - 2f * fadeU);
             if (s > prog) prog = s;
         }
-        float ang = ROT_DEG * p * (1f - prog);
+        float ang = dirAngle(sLastWindowScene, p * (1f - prog));
         out.postRotate(ang, cx, cy);
 
         Object sp = forSurface(tx, iconSc);
